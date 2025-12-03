@@ -1,6 +1,12 @@
 package storage
 
-import "github.com/cockroachdb/pebble"
+import (
+	"errors"
+	"sync"
+
+	"github.com/cockroachdb/pebble"
+	"github.com/pavandhadge/vectron/worker/internal/idxhnsw"
+)
 
 // Storage is the interface for the PebbleDB storage engine.
 type Storage interface {
@@ -29,6 +35,7 @@ type Storage interface {
 	StoreVector(id string, vector []float32, metadata []byte) error
 	GetVector(id string) (vector []float32, metadata []byte, err error)
 	DeleteVector(id string) error
+	Search(query []float32, k int) ([]string, error) // Vector search
 
 	// Advanced Features
 	Compact() error                  // Manual compaction
@@ -46,9 +53,21 @@ type PebbleDB struct {
 	iterOpts  *pebble.IterOptions
 	db        *pebble.DB
 	writeOpts *pebble.WriteOptions
+	hnsw      *idxhnsw.HNSW
+	opts      *Options
+	stop      chan struct{}
+	wg        sync.WaitGroup
 }
 
 // NewPebbleDB creates a new instance of PebbleDB.
 func NewPebbleDB() *PebbleDB {
 	return &PebbleDB{}
+}
+
+// Search finds the k-nearest neighbors to a query vector.
+func (r *PebbleDB) Search(query []float32, k int) ([]string, error) {
+	if r.hnsw == nil {
+		return nil, errors.New("hnsw index not initialized")
+	}
+	return r.hnsw.Search(query, k), nil
 }

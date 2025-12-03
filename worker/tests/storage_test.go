@@ -1,207 +1,224 @@
-package storageTest
+package tests
 
 import (
-	"bytes"
 	"os"
 	"reflect"
 	"testing"
 
-	Storage "github.com/pavandhadge/vectron/worker/internal/storage"
+	"github.com/pavandhadge/vectron/worker/internal/storage"
 )
 
-func setupTestDB(t *testing.T) (Storage.Storage, string) {
+func setupTestDB(t *testing.T, walEnabled bool) (*storage.PebbleDB, func()) {
 	t.Helper()
-	dbPath, err := os.MkdirTemp("", "Pebble_test_")
+	dir, err := os.MkdirTemp("", "pebble_test")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 
-	db := Storage.NewPebbleDB()
-	opts := &Storage.Options{CreateIfMissing: true}
-	err = db.Init(dbPath, opts)
-	if err != nil {
+	opts := &storage.Options{
+		HNSWConfig: storage.HNSWConfig{
+			Dim:            4,
+			M:              16,
+			EfConstruction: 200,
+			EfSearch:       100,
+			WALEnabled:     walEnabled,
+		},
+	}
+
+	db := storage.NewPebbleDB()
+	if err := db.Init(dir, opts); err != nil {
 		t.Fatalf("failed to init db: %v", err)
 	}
 
-	return db, dbPath
+	teardown := func() {
+		db.Close()
+		os.RemoveAll(dir)
+	}
+
+	return db, teardown
 }
 
-func TestPutGetDelete(t *testing.T) {
-	db, dbPath := setupTestDB(t)
-	defer os.RemoveAll(dbPath)
-	defer db.Close()
+func TestStoreAndGetVector(t *testing.T) {
+	db, teardown := setupTestDB(t, false)
+	defer teardown()
 
-	key := []byte("hello")
-	value := []byte("world")
+	id := "test_vector"
+	vector := []float32{0.1, 0.2, 0.3, 0.4}
+	metadata := []byte("test_metadata")
 
-	// Test Put
-	err := db.Put(key, value)
+	if err := db.StoreVector(id, vector, metadata); err != nil {
+		t.Fatalf("failed to store vector: %v", err)
+	}
+
+	retrievedVector, retrievedMetadata, err := db.GetVector(id)
 	if err != nil {
-		t.Fatalf("Put failed: %v", err)
+		t.Fatalf("failed to get vector: %v", err)
 	}
 
-	// Test Get
-	retrievedValue, err := db.Get(key)
-	if err != nil {
-		t.Fatalf("Get failed: %v", err)
-	}
-	if !reflect.DeepEqual(retrievedValue, value) {
-		t.Fatalf("Get returned wrong value: got %s, want %s", retrievedValue, value)
+	if !reflect.DeepEqual(vector, retrievedVector) {
+		t.Errorf("expected vector %v, got %v", vector, retrievedVector)
 	}
 
-	// Test Exists
-	exists, err := db.Exists(key)
-	if err != nil {
-		t.Fatalf("Exists failed: %v", err)
-	}
-	if !exists {
-		t.Fatal("Exists returned false for existing key")
-	}
-
-	// Test Delete
-	err = db.Delete(key)
-	if err != nil {
-		t.Fatalf("Delete failed: %v", err)
-	}
-
-	// Test Get after Delete
-	retrievedValue, err = db.Get(key)
-	if err != nil {
-		t.Fatalf("Get after delete failed: %v", err)
-	}
-	if retrievedValue != nil {
-		t.Fatalf("Get after delete returned non-nil value: got %s", retrievedValue)
-	}
-
-	// Test Exists after Delete
-	exists, err = db.Exists(key)
-	if err != nil {
-		t.Fatalf("Exists after delete failed: %v", err)
-	}
-	if exists {
-		t.Fatal("Exists returned true for deleted key")
+	if !reflect.DeepEqual(metadata, retrievedMetadata) {
+		t.Errorf("expected metadata %v, got %v", metadata, retrievedMetadata)
 	}
 }
 
-func TestIteration(t *testing.T) {
-	db, dbPath := setupTestDB(t)
-	defer os.RemoveAll(dbPath)
-	defer db.Close()
+func TestDeleteVector(t *testing.T) {
+	db, teardown := setupTestDB(t, false)
+	defer teardown()
 
-	prefix := []byte("user:")
+	id := "test_vector"
+	vector := []float32{0.1, 0.2, 0.3, 0.4}
+	metadata := []byte("test_metadata")
 
-	// Intentionally NOT in sorted order — to catch ordering bugs
-	data := []Storage.KeyValuePair{
-		{Key: []byte("user:10"), Value: []byte("john")},
-		{Key: []byte("user:2"), Value: []byte("bob")},
-		{Key: []byte("user:1"), Value: []byte("alice")},
-		{Key: []byte("user:30"), Value: []byte("charlie")},
+	if err := db.StoreVector(id, vector, metadata); err != nil {
+		t.Fatalf("failed to store vector: %v", err)
 	}
 
-	expected := make(map[string][]byte)
-	for _, kv := range data {
-		if err := db.Put(kv.Key, kv.Value); err != nil {
-			t.Fatalf("Put failed: %v", err)
-		}
-		expected[string(kv.Key)] = kv.Value
+	if err := db.DeleteVector(id); err != nil {
+		t.Fatalf("failed to delete vector: %v", err)
 	}
 
-	// This key must NOT appear
-	if err := db.Put([]byte("other:1"), []byte("d")); err != nil {
-		t.Fatalf("Put failed: %v", err)
-	}
-
-	// Test Scan
-	scanResults, err := db.Scan(prefix, 10)
-	if err != nil {
-		t.Fatalf("Scan failed: %v", err)
-	}
-
-	if len(scanResults) != len(data) {
-		t.Fatalf("Scan returned wrong number of results: got %d, want %d", len(scanResults), len(data))
-	}
-
-	// Order-independent + safe comparison
-	for _, kv := range scanResults {
-		want, ok := expected[string(kv.Key)]
-		if !ok {
-			t.Errorf("Scan returned unexpected key: %s", kv.Key)
-			continue
-		}
-		if !bytes.Equal(kv.Value, want) {
-			t.Errorf("wrong value for key %s: got %s, want %s", kv.Key, kv.Value, want)
-		}
-		delete(expected, string(kv.Key))
-	}
-	if len(expected) > 0 {
-		t.Errorf("Scan missing keys: %v", expected)
-	}
-
-	// Test Iterate
-	var iterateResults []Storage.KeyValuePair
-	err = db.Iterate(prefix, func(key, value []byte) bool {
-		// MUST copy — Pebble reuses buffers!
-		iterateResults = append(iterateResults, Storage.KeyValuePair{
-			Key:   append([]byte(nil), key...),
-			Value: append([]byte(nil), value...),
-		})
-		return true
-	})
-	if err != nil {
-		t.Fatalf("Iterate failed: %v", err)
-	}
-
-	if len(iterateResults) != len(data) {
-		t.Fatalf("Iterate returned wrong number of results: got %d, want %d", len(iterateResults), len(data))
-	}
-
-	// Optional: verify keys are sorted (Pebble guarantees this)
-	for i := 1; i < len(iterateResults); i++ {
-		if bytes.Compare(iterateResults[i-1].Key, iterateResults[i].Key) > 0 {
-			t.Errorf("Iterate not returning keys in sorted order: %s > %s",
-				iterateResults[i-1].Key, iterateResults[i].Key)
-		}
+	_, _, err := db.GetVector(id)
+	if err == nil {
+		t.Errorf("expected error when getting deleted vector, but got nil")
 	}
 }
 
-func TestBatch(t *testing.T) {
-	db, dbPath := setupTestDB(t)
-	defer os.RemoveAll(dbPath)
-	defer db.Close()
+func TestSearch(t *testing.T) {
+	db, teardown := setupTestDB(t, false)
+	defer teardown()
 
-	puts := map[string][]byte{
-		"key1": []byte("val1"),
-		"key2": []byte("val2"),
+	vectors := map[string][]float32{
+		"v1": {0.1, 0.1, 0.1, 0.1},
+		"v2": {0.2, 0.2, 0.2, 0.2},
+		"v3": {0.8, 0.8, 0.8, 0.8},
+		"v4": {0.9, 0.9, 0.9, 0.9},
 	}
 
-	err := db.BatchPut(puts)
+	for id, vec := range vectors {
+		if err := db.StoreVector(id, vec, nil); err != nil {
+			t.Fatalf("failed to store vector: %v", err)
+		}
+	}
+
+	query := []float32{0.0, 0.0, 0.0, 0.0}
+	results, err := db.Search(query, 2)
 	if err != nil {
-		t.Fatalf("BatchPut failed: %v", err)
+		t.Fatalf("failed to search: %v", err)
 	}
 
-	for k, v := range puts {
-		retrieved, err := db.Get([]byte(k))
-		if err != nil {
-			t.Fatalf("Get failed for key %s: %v", k, err)
-		}
-		if !reflect.DeepEqual(retrieved, v) {
-			t.Fatalf("Get returned wrong value for key %s: got %s, want %s", k, retrieved, v)
-		}
+	expected := []string{"v1", "v2"}
+	if !reflect.DeepEqual(expected, results) {
+		t.Errorf("expected search results %v, got %v", expected, results)
 	}
+}
 
-	deletes := []string{"key1", "key2"}
-	err = db.BatchDelete(deletes)
+func TestPersistence(t *testing.T) {
+	dir, err := os.MkdirTemp("", "pebble_test")
 	if err != nil {
-		t.Fatalf("BatchDelete failed: %v", err)
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(dir)
+
+	opts := &storage.Options{
+		HNSWConfig: storage.HNSWConfig{
+			Dim:            4,
+			M:              16,
+			EfConstruction: 200,
+			EfSearch:       100,
+			WALEnabled:     false,
+		},
 	}
 
-	for _, k := range deletes {
-		exists, err := db.Exists([]byte(k))
-		if err != nil {
-			t.Fatalf("Exists failed for key %s: %v", k, err)
+	// First run
+	db := storage.NewPebbleDB()
+	if err := db.Init(dir, opts); err != nil {
+		t.Fatalf("failed to init db: %v", err)
+	}
+
+	vectors := map[string][]float32{
+		"v1": {0.1, 0.1, 0.1, 0.1},
+		"v2": {0.2, 0.2, 0.2, 0.2},
+	}
+
+	for id, vec := range vectors {
+		if err := db.StoreVector(id, vec, nil); err != nil {
+			t.Fatalf("failed to store vector: %v", err)
 		}
-		if exists {
-			t.Fatalf("Key %s should have been deleted", k)
+	}
+	db.Close()
+
+	// Second run
+	db2 := storage.NewPebbleDB()
+	if err := db2.Init(dir, opts); err != nil {
+		t.Fatalf("failed to init db on second run: %v", err)
+	}
+	defer db2.Close()
+
+	query := []float32{0.0, 0.0, 0.0, 0.0}
+	results, err := db2.Search(query, 2)
+	if err != nil {
+		t.Fatalf("failed to search on second run: %v", err)
+	}
+
+	expected := []string{"v1", "v2"}
+	if !reflect.DeepEqual(expected, results) {
+		t.Errorf("expected search results %v, got %v", expected, results)
+	}
+}
+
+func TestWAL(t *testing.T) {
+	dir, err := os.MkdirTemp("", "pebble_test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(dir)
+
+	opts := &storage.Options{
+		HNSWConfig: storage.HNSWConfig{
+			Dim:            4,
+			M:              16,
+			EfConstruction: 200,
+			EfSearch:       100,
+			WALEnabled:     true,
+		},
+	}
+
+	// First run with "crash"
+	db := storage.NewPebbleDB()
+	if err := db.Init(dir, opts); err != nil {
+		t.Fatalf("failed to init db: %v", err)
+	}
+
+	vectors := map[string][]float32{
+		"v1": {0.1, 0.1, 0.1, 0.1},
+		"v2": {0.2, 0.2, 0.2, 0.2},
+	}
+
+	for id, vec := range vectors {
+		if err := db.StoreVector(id, vec, nil); err != nil {
+			t.Fatalf("failed to store vector: %v", err)
 		}
+	}
+	// Don't call db.Close() to simulate a crash
+
+	// Second run
+	db2 := storage.NewPebbleDB()
+	if err := db2.Init(dir, opts); err != nil {
+		t.Fatalf("failed to init db on second run: %v", err)
+	}
+	defer db2.Close()
+
+	query := []float32{0.0, 0.0, 0.0, 0.0}
+	results, err := db2.Search(query, 2)
+	if err != nil {
+		t.Fatalf("failed to search on second run: %v", err)
+	}
+
+	expected := []string{"v1", "v2"}
+	if !reflect.DeepEqual(expected, results) {
+		t.Errorf("expected search results %v, got %v", expected, results)
 	}
 }

@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
 
 	"github.com/cockroachdb/pebble"
@@ -155,10 +157,30 @@ func (r *PebbleDB) EntryCount(prefix []byte) (int64, error) {
 	return count, err
 }
 
-// decodeVectorWithMeta is a placeholder for vector and metadata deserialization.
+// decodeVectorWithMeta deserializes a vector and metadata from a byte slice.
 func decodeVectorWithMeta(data []byte) ([]float32, []byte, error) {
-	// Simplified (not production ready)
-	return nil, data, nil // Stub; properly deserialize
+	reader := bytes.NewReader(data)
+
+	var vecLen int32
+	if err := binary.Read(reader, binary.LittleEndian, &vecLen); err != nil {
+		return nil, nil, err
+	}
+
+	if vecLen < 0 {
+		return nil, nil, errors.New("invalid vector length")
+	}
+
+	vector := make([]float32, vecLen)
+	if err := binary.Read(reader, binary.LittleEndian, &vector); err != nil {
+		return nil, nil, err
+	}
+
+	metadata := make([]byte, reader.Len())
+	if _, err := reader.Read(metadata); err != nil {
+		return nil, nil, err
+	}
+
+	return vector, metadata, nil
 }
 
 // pebbleIterator implements the Iterator interface for PebbleDB.

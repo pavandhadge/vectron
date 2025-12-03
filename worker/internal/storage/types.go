@@ -6,6 +6,17 @@ type Options struct {
 	MaxOpenFiles    int
 	WriteBufferSize int
 	CacheSize       int64
+	HNSWConfig      HNSWConfig
+}
+
+// HNSWConfig defines the configuration for the HNSW index.
+type HNSWConfig struct {
+	Dim            int
+	M              int
+	EfConstruction int
+	EfSearch       int
+	DistanceMetric string
+	WALEnabled     bool
 }
 
 // BatchOperations holds operations to be performed in a batch.

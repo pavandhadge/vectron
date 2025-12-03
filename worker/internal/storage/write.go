@@ -1,7 +1,11 @@
 package storage
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
+	"fmt"
+	"time"
 )
 
 // Put inserts or updates a key-value pair.
@@ -66,24 +70,111 @@ func (r *PebbleDB) BatchDelete(keys []string) error {
 }
 
 // StoreVector stores a vector and its metadata.
+
 func (r *PebbleDB) StoreVector(id string, vector []float32, metadata []byte) error {
+
 	if r.db == nil {
+
 		return errors.New("db not initialized")
+
 	}
-	val := encodeVectorWithMeta(vector, metadata)
-	return r.Put([]byte(id), val)
+
+	val, err := encodeVectorWithMeta(vector, metadata)
+
+	if err != nil {
+
+		return err
+
+	}
+
+	batch := r.db.NewBatch()
+
+	defer batch.Close()
+
+	if err := batch.Set([]byte(id), val, nil); err != nil {
+
+		return err
+
+	}
+
+	if r.opts.HNSWConfig.WALEnabled {
+
+		walKey := []byte(fmt.Sprintf("%s%d_%s", hnswWALPrefix, time.Now().UnixNano(), id))
+
+		if err := batch.Set(walKey, val, nil); err != nil {
+
+			return err
+
+		}
+
+	}
+
+	if err := batch.Commit(r.writeOpts); err != nil {
+
+		return err
+
+	}
+
+	return r.hnsw.Add(id, vector)
+
 }
 
 // DeleteVector deletes a vector by its ID.
+
 func (r *PebbleDB) DeleteVector(id string) error {
+
 	if r.db == nil {
+
 		return errors.New("db not initialized")
+
 	}
-	return r.Delete([]byte(id))
+
+	batch := r.db.NewBatch()
+
+	defer batch.Close()
+
+	if err := batch.Delete([]byte(id), nil); err != nil {
+
+		return err
+
+	}
+
+	if r.opts.HNSWConfig.WALEnabled {
+
+		walKey := []byte(fmt.Sprintf("%s%d_%s_delete", hnswWALPrefix, time.Now().UnixNano(), id))
+
+		if err := batch.Set(walKey, nil, nil); err != nil {
+
+			return err
+
+		}
+
+	}
+
+	if err := batch.Commit(r.writeOpts); err != nil {
+
+		return err
+
+	}
+
+	return r.hnsw.Delete(id)
+
 }
 
-// encodeVectorWithMeta is a placeholder for vector and metadata serialization.
-func encodeVectorWithMeta(vector []float32, metadata []byte) []byte {
-	// Simplified (not production ready)
-	return metadata // Stub; properly serialize vector with meta
+// encodeVectorWithMeta serializes a vector and metadata into a byte slice.
+func encodeVectorWithMeta(vector []float32, metadata []byte) ([]byte, error) {
+	buf := new(bytes.Buffer)
+	// Write the length of the vector
+	if err := binary.Write(buf, binary.LittleEndian, int32(len(vector))); err != nil {
+		return nil, err
+	}
+	// Write the vector itself
+	if err := binary.Write(buf, binary.LittleEndian, vector); err != nil {
+		return nil, err
+	}
+	// Append the metadata
+	if _, err := buf.Write(metadata); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
