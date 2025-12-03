@@ -23,10 +23,10 @@ type KeyValuePair struct {
 // Iterator is the interface for a PebbleDB iterator.
 type Iterator interface {
 	Valid() bool
-	Seek(key []byte)
 	Next() bool
+	Seek([]byte)
 	Key() []byte
 	Value() []byte
-	Error() error
 	Close() error
+	Error() error
 }

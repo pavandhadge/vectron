@@ -111,7 +111,6 @@ func (r *PebbleDB) Iterate(prefix []byte, fn func(key, value []byte) bool) error
 	if r.db == nil {
 		return errors.New("db not initialized")
 	}
-	// iter := r.NewIterator(prefix)
 	iter, err := r.NewIterator(prefix)
 	if err != nil {
 		return err

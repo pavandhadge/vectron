@@ -1,20 +1,23 @@
-package storage
+package storageTest
 
 import (
+	"bytes"
 	"os"
 	"reflect"
 	"testing"
+
+	Storage "github.com/pavandhadge/vectron/worker/internal/storage"
 )
 
-func setupTestDB(t *testing.T) (Storage, string) {
+func setupTestDB(t *testing.T) (Storage.Storage, string) {
 	t.Helper()
 	dbPath, err := os.MkdirTemp("", "Pebble_test_")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 
-	db := NewPebbleDB()
-	opts := &Options{CreateIfMissing: true}
+	db := Storage.NewPebbleDB()
+	opts := &Storage.Options{CreateIfMissing: true}
 	err = db.Init(dbPath, opts)
 	if err != nil {
 		t.Fatalf("failed to init db: %v", err)
@@ -85,22 +88,26 @@ func TestIteration(t *testing.T) {
 	defer os.RemoveAll(dbPath)
 	defer db.Close()
 
-	// Add some data
 	prefix := []byte("user:")
-	data := []KeyValuePair{
-		{Key: []byte("user:1"), Value: []byte("a")},
-		{Key: []byte("user:2"), Value: []byte("b")},
-		{Key: []byte("user:3"), Value: []byte("c")},
+
+	// Intentionally NOT in sorted order — to catch ordering bugs
+	data := []Storage.KeyValuePair{
+		{Key: []byte("user:10"), Value: []byte("john")},
+		{Key: []byte("user:2"), Value: []byte("bob")},
+		{Key: []byte("user:1"), Value: []byte("alice")},
+		{Key: []byte("user:30"), Value: []byte("charlie")},
 	}
+
+	expected := make(map[string][]byte)
 	for _, kv := range data {
-		err := db.Put(kv.Key, kv.Value)
-		if err != nil {
+		if err := db.Put(kv.Key, kv.Value); err != nil {
 			t.Fatalf("Put failed: %v", err)
 		}
+		expected[string(kv.Key)] = kv.Value
 	}
-	// Add a key that should not be included
-	err := db.Put([]byte("other:1"), []byte("d"))
-	if err != nil {
+
+	// This key must NOT appear
+	if err := db.Put([]byte("other:1"), []byte("d")); err != nil {
 		t.Fatalf("Put failed: %v", err)
 	}
 
@@ -109,26 +116,51 @@ func TestIteration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Scan failed: %v", err)
 	}
+
 	if len(scanResults) != len(data) {
 		t.Fatalf("Scan returned wrong number of results: got %d, want %d", len(scanResults), len(data))
 	}
-	for i, kv := range scanResults {
-		if !reflect.DeepEqual(kv.Key, data[i].Key) {
-			t.Errorf("Scan returned wrong key at index %d: got %s, want %s", i, kv.Key, data[i].Key)
+
+	// Order-independent + safe comparison
+	for _, kv := range scanResults {
+		want, ok := expected[string(kv.Key)]
+		if !ok {
+			t.Errorf("Scan returned unexpected key: %s", kv.Key)
+			continue
 		}
+		if !bytes.Equal(kv.Value, want) {
+			t.Errorf("wrong value for key %s: got %s, want %s", kv.Key, kv.Value, want)
+		}
+		delete(expected, string(kv.Key))
+	}
+	if len(expected) > 0 {
+		t.Errorf("Scan missing keys: %v", expected)
 	}
 
 	// Test Iterate
-	var iterateResults []KeyValuePair
+	var iterateResults []Storage.KeyValuePair
 	err = db.Iterate(prefix, func(key, value []byte) bool {
-		iterateResults = append(iterateResults, KeyValuePair{Key: key, Value: value})
+		// MUST copy — Pebble reuses buffers!
+		iterateResults = append(iterateResults, Storage.KeyValuePair{
+			Key:   append([]byte(nil), key...),
+			Value: append([]byte(nil), value...),
+		})
 		return true
 	})
 	if err != nil {
 		t.Fatalf("Iterate failed: %v", err)
 	}
+
 	if len(iterateResults) != len(data) {
 		t.Fatalf("Iterate returned wrong number of results: got %d, want %d", len(iterateResults), len(data))
+	}
+
+	// Optional: verify keys are sorted (Pebble guarantees this)
+	for i := 1; i < len(iterateResults); i++ {
+		if bytes.Compare(iterateResults[i-1].Key, iterateResults[i].Key) > 0 {
+			t.Errorf("Iterate not returning keys in sorted order: %s > %s",
+				iterateResults[i-1].Key, iterateResults[i].Key)
+		}
 	}
 }
 
