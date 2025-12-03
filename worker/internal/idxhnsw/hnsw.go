@@ -48,7 +48,7 @@ func NewHNSW(store NodeStore, dim int, config HNSWConfig) *HNSW {
 		config.MaxLevel = 20
 	}
 
-	rand.Seed(time.Now().UnixNano())
+	rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	return &HNSW{
 		config:   config,

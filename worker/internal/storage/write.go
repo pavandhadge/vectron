@@ -74,89 +74,57 @@ func (r *PebbleDB) BatchDelete(keys []string) error {
 func (r *PebbleDB) StoreVector(id string, vector []float32, metadata []byte) error {
 
 	if r.db == nil {
-
 		return errors.New("db not initialized")
-
 	}
-
 	val, err := encodeVectorWithMeta(vector, metadata)
-
 	if err != nil {
-
 		return err
-
 	}
 
 	batch := r.db.NewBatch()
-
 	defer batch.Close()
 
 	if err := batch.Set([]byte(id), val, nil); err != nil {
-
 		return err
-
 	}
 
 	if r.opts.HNSWConfig.WALEnabled {
-
 		walKey := []byte(fmt.Sprintf("%s%d_%s", hnswWALPrefix, time.Now().UnixNano(), id))
-
 		if err := batch.Set(walKey, val, nil); err != nil {
-
 			return err
-
 		}
-
 	}
 
 	if err := batch.Commit(r.writeOpts); err != nil {
-
 		return err
-
 	}
-
 	return r.hnsw.Add(id, vector)
-
 }
 
 // DeleteVector deletes a vector by its ID.
 
 func (r *PebbleDB) DeleteVector(id string) error {
-
 	if r.db == nil {
-
 		return errors.New("db not initialized")
-
 	}
 
 	batch := r.db.NewBatch()
-
 	defer batch.Close()
 
 	if err := batch.Delete([]byte(id), nil); err != nil {
-
 		return err
-
 	}
 
 	if r.opts.HNSWConfig.WALEnabled {
-
 		walKey := []byte(fmt.Sprintf("%s%d_%s_delete", hnswWALPrefix, time.Now().UnixNano(), id))
-
 		if err := batch.Set(walKey, nil, nil); err != nil {
-
 			return err
-
 		}
-
 	}
 
 	if err := batch.Commit(r.writeOpts); err != nil {
-
 		return err
-
 	}
-
 	return r.hnsw.Delete(id)
 
 }

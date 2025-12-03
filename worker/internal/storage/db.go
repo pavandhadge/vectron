@@ -92,6 +92,7 @@ func (r *PebbleDB) loadHNSW(opts *Options) error {
 		}
 		return err
 	}
+
 	defer closer.Close()
 
 	if err := r.hnsw.Load(bytes.NewReader(data)); err != nil {
