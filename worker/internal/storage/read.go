@@ -1,9 +1,9 @@
 package storage
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
+	"math"
 
 	"github.com/cockroachdb/pebble"
 )
@@ -203,26 +203,22 @@ func (r *PebbleDB) EntryCount(prefix []byte) (int64, error) {
 
 // decodeVectorWithMeta deserializes a vector and metadata from a byte slice.
 func decodeVectorWithMeta(data []byte) ([]float32, []byte, error) {
-	reader := bytes.NewReader(data)
-
-	var vecLen int32
-	if err := binary.Read(reader, binary.LittleEndian, &vecLen); err != nil {
-		return nil, nil, err
+	if len(data) < 4 {
+		return nil, nil, errors.New("data too short for vector length")
 	}
 
-	if vecLen < 0 {
-		return nil, nil, errors.New("invalid vector length")
+	vecLen := int(binary.LittleEndian.Uint32(data[:4]))
+	expectedLen := 4 + vecLen*4
+	if expectedLen > len(data) {
+		return nil, nil, errors.New("data too short for vector")
 	}
 
 	vector := make([]float32, vecLen)
-	if err := binary.Read(reader, binary.LittleEndian, &vector); err != nil {
-		return nil, nil, err
+	for i := 0; i < vecLen; i++ {
+		vector[i] = math.Float32frombits(binary.LittleEndian.Uint32(data[4+i*4 : 8+i*4]))
 	}
 
-	metadata := make([]byte, reader.Len())
-	if _, err := reader.Read(metadata); err != nil {
-		return nil, nil, err
-	}
+	metadata := data[expectedLen:]
 
 	return vector, metadata, nil
 }

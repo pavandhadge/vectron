@@ -130,25 +130,30 @@ func (r *PebbleDB) BruteForceSearch(query []float32, k int) ([]string, error) {
 	heap.Init(h)
 
 	for iter.First(); iter.Valid(); iter.Next() {
-		// Assuming keys are vector IDs and values are encoded vectors + metadata
-		vec, _, err := decodeVectorWithMeta(iter.Value())
-		if err != nil {
-			// Skip if not a valid vector
+		key := iter.Key()
+
+		// CRITICAL FIX: Skip internal keys (WAL, metadata, etc.)
+		if len(key) > 0 && key[0] == '_' {
 			continue
 		}
 
-		dist := idxhnsw.EuclideanDistance(query, vec) // Assuming Euclidean, can be made configurable
+		vec, _, err := decodeVectorWithMeta(iter.Value())
+		if err != nil || vec == nil {
+			continue // skip deleted or malformed
+		}
+
+		dist := idxhnsw.EuclideanDistance(query, vec)
 
 		if h.Len() < k {
-			heap.Push(h, result{id: string(iter.Key()), dist: dist})
+			heap.Push(h, result{id: string(key), dist: dist})
 		} else if dist < (*h)[0].dist {
 			heap.Pop(h)
-			heap.Push(h, result{id: string(iter.Key()), dist: dist})
+			heap.Push(h, result{id: string(key), dist: dist})
 		}
 	}
 
-	if iter.Error() != nil {
-		return nil, iter.Error()
+	if err := iter.Error(); err != nil {
+		return nil, err
 	}
 
 	ids := make([]string, h.Len())

@@ -1,4 +1,4 @@
-package tests
+package worker_tests
 
 import (
 	"os"
@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/pavandhadge/vectron/worker/internal/storage"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -181,6 +182,59 @@ func TestPersistence(t *testing.T) {
 	if !reflect.DeepEqual(expected, results) {
 		t.Errorf("expected search results %v, got %v", expected, results)
 	}
+}
+
+func TestDeleteVector(t *testing.T) {
+	db, cleanup := setupTestDB(t, true)
+	defer cleanup()
+
+	id := "1234561"
+	vec := []float32{1.0, 2.0, 1.0, 2.0}
+	meta := []byte("test_metadata")
+
+	err := db.StoreVector(id, vec, meta)
+	assert.NoError(t, err)
+
+	err = db.DeleteVector(id)
+	assert.NoError(t, err)
+
+	retrievedVec, _, err := db.GetVector(id)
+	assert.NoError(t, err)
+	assert.Nil(t, retrievedVec)
+}
+
+func TestGetVectorNotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t, true)
+	defer cleanup()
+
+	retrievedVec, _, err := db.GetVector("non_existent_vector")
+	assert.NoError(t, err)
+	assert.Nil(t, retrievedVec)
+}
+
+func TestBruteForceSearch(t *testing.T) {
+	db, cleanup := setupTestDB(t, true)
+	defer cleanup()
+
+	vecs := map[string][]float32{
+		"1234561712": {4.0, 1.0, 1.0, 2.0},
+		"1234562812": {4.1, 1.1, 1.0, 2.0},
+		"1234563512": {5.0, 5.0, 1.0, 2.0},
+		"1234564512": {5.1, 5.1, 1.0, 2.0},
+	}
+
+	for id, vec := range vecs {
+		err := db.StoreVector(id, vec, nil)
+		assert.NoError(t, err)
+	}
+
+	query := []float32{4.0, 1.0, 1.0, 2.0}
+	k := 2
+	results, err := db.BruteForceSearch(query, k)
+	assert.NoError(t, err)
+	assert.Len(t, results, 2)
+	assert.Contains(t, results, "1234561712")
+	assert.Contains(t, results, "1234562812")
 }
 
 func TestWAL_CrashRecovery(t *testing.T) {

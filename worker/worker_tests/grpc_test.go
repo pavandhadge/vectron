@@ -1,4 +1,4 @@
-package tests
+package worker_tests
 
 import (
 	"context"
@@ -70,7 +70,7 @@ func TestGRPCStoreAndSearch(t *testing.T) {
 	// Store a vector
 	storeReq := &worker.StoreVectorRequest{
 		Vector: &worker.Vector{
-			Id:     "test_vector",
+			Id:     "1235461",
 			Vector: []float32{1.0, 2.0},
 		},
 	}
@@ -88,5 +88,5 @@ func TestGRPCStoreAndSearch(t *testing.T) {
 	searchResp, err := client.Search(context.Background(), searchReq)
 	assert.NoError(t, err)
 	assert.Len(t, searchResp.GetIds(), 1)
-	assert.Equal(t, "test_vector", searchResp.GetIds()[0])
+	assert.Equal(t, "1235461", searchResp.GetIds()[0])
 }
