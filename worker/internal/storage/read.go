@@ -127,16 +127,60 @@ func (r *PebbleDB) Iterate(prefix []byte, fn func(key, value []byte) bool) error
 	return iter.Error()
 }
 
-// GetVector retrieves a vector and its metadata by ID.
+// idxhnsw/pebbledb.go or storage.go
+
+// Public: clean API — never leaks deletion state
 func (r *PebbleDB) GetVector(id string) ([]float32, []byte, error) {
-	if r.db == nil {
-		return nil, nil, errors.New("db not initialized")
-	}
-	val, err := r.Get([]byte(id))
-	if err != nil || val == nil {
+	val, closer, err := r.db.Get([]byte(id))
+	if err != nil {
+		if errors.Is(err, pebble.ErrNotFound) {
+			return nil, nil, nil // key doesn't exist → not deleted
+		}
 		return nil, nil, err
 	}
-	return decodeVectorWithMeta(val)
+	if closer != nil {
+		defer closer.Close()
+	}
+	if len(val) == 0 {
+		return nil, nil, nil
+	}
+
+	vec, meta, decodeErr := decodeVectorWithMeta(val)
+	if decodeErr != nil || vec == nil {
+		return nil, nil, nil // malformed or soft-deleted → treat as not found
+	}
+	return vec, meta, nil
+}
+
+// IsDeleted returns true if the vector is unavailable to the user.
+// This includes:
+// - Soft-deleted (tombstone present, vec == nil)
+// - Permanently deleted (key removed by cleanup)
+// - Never existed
+func (r *PebbleDB) IsDeleted(id string) (bool, error) {
+	val, closer, err := r.db.Get([]byte(id))
+	if err != nil {
+		if errors.Is(err, pebble.ErrNotFound) {
+			return true, nil // key gone → deleted/unavailable
+		}
+		return false, err
+	}
+	if closer != nil {
+		closer.Close()
+	}
+
+	if len(val) == 0 {
+		return true, nil // explicit tombstone (empty value)
+	}
+
+	vec, _, decodeErr := decodeVectorWithMeta(val)
+	if decodeErr != nil {
+		return false, decodeErr // malformed → error
+	}
+
+	// vec == nil → soft-deleted
+	// vec != nil → alive
+	return vec == nil, nil
 }
 
 // Size returns the size of the database on disk.

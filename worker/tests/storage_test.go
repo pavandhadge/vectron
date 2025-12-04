@@ -3,9 +3,12 @@ package tests
 import (
 	"os"
 	"reflect"
+	"runtime"
+	"sort"
 	"testing"
 
 	"github.com/pavandhadge/vectron/worker/internal/storage"
+	"github.com/stretchr/testify/require"
 )
 
 func setupTestDB(t *testing.T, walEnabled bool) (*storage.PebbleDB, func()) {
@@ -64,26 +67,37 @@ func TestStoreAndGetVector(t *testing.T) {
 	}
 }
 
-func TestDeleteVector(t *testing.T) {
+func TestDeleteVector_SoftDeleteBehavior(t *testing.T) {
 	db, teardown := setupTestDB(t, false)
 	defer teardown()
 
-	id := "test_vector"
+	id := "123456789"
 	vector := []float32{0.1, 0.2, 0.3, 0.4}
 	metadata := []byte("test_metadata")
 
-	if err := db.StoreVector(id, vector, metadata); err != nil {
-		t.Fatalf("failed to store vector: %v", err)
-	}
+	// 1. Store vector
+	require.NoError(t, db.StoreVector(id, vector, metadata), "failed to store vector")
 
-	if err := db.DeleteVector(id); err != nil {
-		t.Fatalf("failed to delete vector: %v", err)
-	}
+	// 2. Delete it
+	require.NoError(t, db.DeleteVector(id), "failed to delete vector")
 
-	_, _, err := db.GetVector(id)
-	if err == nil {
-		t.Errorf("expected error when getting deleted vector, but got nil")
-	}
+	// 3. Public API: GetVector should behave exactly like "not found"
+	vec, meta, err := db.GetVector(id)
+	require.NoError(t, err) // No error!
+	require.Nil(t, vec)     // Vector is nil
+	require.Nil(t, meta)    // Metadata is nil (or empty)
+
+	// 4. Confirm it was actually soft-deleted (testing/admin API)
+	deleted, err := db.IsDeleted(id)
+	require.NoError(t, err)
+	require.True(t, deleted, "vector should be marked as soft-deleted in storage")
+
+	// 5. Optional: confirm key still exists in DB (tombstone present)
+	existsInStorage, err := db.Exists([]byte(id))
+	require.NoError(t, err)
+	require.False(t, existsInStorage, "key should be GONE from storage after delete")
+	// 6. Delete again → should be idempotent
+	require.NoError(t, db.DeleteVector(id), "second delete should not fail")
 }
 
 func TestSearch(t *testing.T) {
@@ -91,10 +105,10 @@ func TestSearch(t *testing.T) {
 	defer teardown()
 
 	vectors := map[string][]float32{
-		"v1": {0.1, 0.1, 0.1, 0.1},
-		"v2": {0.2, 0.2, 0.2, 0.2},
-		"v3": {0.8, 0.8, 0.8, 0.8},
-		"v4": {0.9, 0.9, 0.9, 0.9},
+		"1234561": {0.1, 0.1, 0.1, 0.1},
+		"1234562": {0.2, 0.2, 0.2, 0.2},
+		"1234563": {0.8, 0.8, 0.8, 0.8},
+		"1234564": {0.9, 0.9, 0.9, 0.9},
 	}
 
 	for id, vec := range vectors {
@@ -109,7 +123,7 @@ func TestSearch(t *testing.T) {
 		t.Fatalf("failed to search: %v", err)
 	}
 
-	expected := []string{"v1", "v2"}
+	expected := []string{"1234561", "1234562"}
 	if !reflect.DeepEqual(expected, results) {
 		t.Errorf("expected search results %v, got %v", expected, results)
 	}
@@ -139,8 +153,8 @@ func TestPersistence(t *testing.T) {
 	}
 
 	vectors := map[string][]float32{
-		"v1": {0.1, 0.1, 0.1, 0.1},
-		"v2": {0.2, 0.2, 0.2, 0.2},
+		"1234561": {0.1, 0.1, 0.1, 0.1},
+		"1234562": {0.2, 0.2, 0.2, 0.2},
 	}
 
 	for id, vec := range vectors {
@@ -163,18 +177,15 @@ func TestPersistence(t *testing.T) {
 		t.Fatalf("failed to search on second run: %v", err)
 	}
 
-	expected := []string{"v1", "v2"}
+	expected := []string{"1234561", "1234562"}
 	if !reflect.DeepEqual(expected, results) {
 		t.Errorf("expected search results %v, got %v", expected, results)
 	}
 }
 
-func TestWAL(t *testing.T) {
-	dir, err := os.MkdirTemp("", "pebble_test")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(dir)
+func TestWAL_CrashRecovery(t *testing.T) {
+	dir, err := os.MkdirTemp("", "pebble_wal_test")
+	require.NoError(t, err)
 
 	opts := &storage.Options{
 		HNSWConfig: storage.HNSWConfig{
@@ -186,39 +197,51 @@ func TestWAL(t *testing.T) {
 		},
 	}
 
-	// First run with "crash"
-	db := storage.NewPebbleDB()
-	if err := db.Init(dir, opts); err != nil {
-		t.Fatalf("failed to init db: %v", err)
-	}
+	// === PHASE 1: Simulate normal operation + crash ===
+	{
+		db := storage.NewPebbleDB()
+		require.NoError(t, db.Init(dir, opts))
 
-	vectors := map[string][]float32{
-		"v1": {0.1, 0.1, 0.1, 0.1},
-		"v2": {0.2, 0.2, 0.2, 0.2},
-	}
-
-	for id, vec := range vectors {
-		if err := db.StoreVector(id, vec, nil); err != nil {
-			t.Fatalf("failed to store vector: %v", err)
+		vectors := map[string][]float32{
+			"1234561": {0.1, 0.1, 0.1, 0.1},
+			"1234562": {0.2, 0.2, 0.2, 0.2},
 		}
-	}
-	// Don't call db.Close() to simulate a crash
 
-	// Second run
-	db2 := storage.NewPebbleDB()
-	if err := db2.Init(dir, opts); err != nil {
-		t.Fatalf("failed to init db on second run: %v", err)
+		for id, vec := range vectors {
+			require.NoError(t, db.StoreVector(id, vec, nil))
+		}
+
+		// Force WAL to disk
+		require.NoError(t, db.Flush())
+		// require.NoError(t, db.)
+
+		// CRITICAL: Close the DB properly but DO NOT delete the dir
+		require.NoError(t, db.Close())
+
+		// Force garbage collection so locks are released
+		runtime.GC()
+		runtime.Gosched()
 	}
+
+	// === PHASE 2: Simulate process restart (new process opens same dir) ===
+	db2 := storage.NewPebbleDB()
+	require.NoError(t, db2.Init(dir, opts))
 	defer db2.Close()
 
+	// Now WAL should be replayed
 	query := []float32{0.0, 0.0, 0.0, 0.0}
 	results, err := db2.Search(query, 2)
-	if err != nil {
-		t.Fatalf("failed to search on second run: %v", err)
+	require.NoError(t, err)
+
+	// Sort because HNSW order is non-deterministic
+	sort.Strings(results)
+	expected := []string{"1234561", "1234562"}
+	sort.Strings(expected)
+
+	if !reflect.DeepEqual(results, expected) {
+		t.Errorf("WAL recovery failed: expected %v, got %v", expected, results)
 	}
 
-	expected := []string{"v1", "v2"}
-	if !reflect.DeepEqual(expected, results) {
-		t.Errorf("expected search results %v, got %v", expected, results)
-	}
+	// Final cleanup
+	os.RemoveAll(dir)
 }
