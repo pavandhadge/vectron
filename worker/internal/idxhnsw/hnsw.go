@@ -24,13 +24,14 @@ type HNSWConfig struct {
 }
 
 type HNSW struct {
-	config   HNSWConfig
-	dim      int
-	entry    uint32
-	maxLayer int
-	nodes    map[uint32]*Node
-	store    NodeStore
-	mu       sync.RWMutex
+	config       HNSWConfig
+	dim          int
+	entry        uint32
+	maxLayer     int
+	nodes        map[uint32]*Node
+	store        NodeStore
+	mu           sync.RWMutex
+	deletedCount int64
 }
 
 // NewHNSW creates a new index
@@ -50,14 +51,17 @@ func NewHNSW(store NodeStore, dim int, config HNSWConfig) *HNSW {
 
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	return &HNSW{
-		config:   config,
-		dim:      dim,
-		store:    store,
-		nodes:    make(map[uint32]*Node),
-		entry:    0,
-		maxLayer: 0,
+	h := &HNSW{
+		config:       config,
+		dim:          dim,
+		store:        store,
+		nodes:        make(map[uint32]*Node),
+		entry:        0,
+		maxLayer:     0,
+		deletedCount: 0,
 	}
+	h.StartCleanup(DefaultCleanupConfig) // auto-start
+	return h
 }
 
 // Public methods
