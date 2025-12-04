@@ -2,6 +2,7 @@ package storage
 
 // Options defines the configuration for the PebbleDB instance.
 type Options struct {
+	Path            string
 	CreateIfMissing bool
 	MaxOpenFiles    int
 	WriteBufferSize int

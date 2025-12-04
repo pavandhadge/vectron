@@ -20,12 +20,12 @@ type Node struct {
 // --- Distance functions (unchanged) ---
 func (h *HNSW) distance(a, b []float32) float32 {
 	if h.config.Distance == "cosine" {
-		return cosineDistance(a, b)
+		return CosineDistance(a, b)
 	}
-	return euclideanDistance(a, b)
+	return EuclideanDistance(a, b)
 }
 
-func euclideanDistance(a, b []float32) float32 {
+func EuclideanDistance(a, b []float32) float32 {
 	var sum float32
 	for i := range a {
 		d := a[i] - b[i]
@@ -34,7 +34,7 @@ func euclideanDistance(a, b []float32) float32 {
 	return sum
 }
 
-func cosineDistance(a, b []float32) float32 {
+func CosineDistance(a, b []float32) float32 {
 	var dot, normA, normB float32
 	for i := range a {
 		dot += a[i] * b[i]

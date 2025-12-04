@@ -6,9 +6,9 @@ import (
 	"log"
 	"net"
 
-	"github.com/pavandhadge/vectron/internal/proto/worker"
 	"github.com/pavandhadge/vectron/worker/internal"
 	"github.com/pavandhadge/vectron/worker/internal/storage"
+	"github.com/pavandhadge/vectron/worker/proto/worker"
 	"google.golang.org/grpc"
 )
 

@@ -72,61 +72,111 @@ func (r *PebbleDB) BatchDelete(keys []string) error {
 // StoreVector stores a vector and its metadata.
 
 func (r *PebbleDB) StoreVector(id string, vector []float32, metadata []byte) error {
-
 	if r.db == nil {
 		return errors.New("db not initialized")
 	}
+
+	// 1. Add to HNSW index first
+	if err := r.hnsw.Add(id, vector); err != nil {
+		return fmt.Errorf("failed to add vector to HNSW index: %w", err)
+	}
+
+	// 2. If HNSW update is successful, commit to PebbleDB
 	val, err := encodeVectorWithMeta(vector, metadata)
 	if err != nil {
-		return err
+		// Rollback HNSW add
+		if rollbackErr := r.hnsw.Delete(id); rollbackErr != nil {
+			return fmt.Errorf("failed to encode vector with meta, and also failed to rollback HNSW add: %w", rollbackErr)
+		}
+		return fmt.Errorf("failed to encode vector with meta: %w", err)
 	}
 
 	batch := r.db.NewBatch()
 	defer batch.Close()
 
 	if err := batch.Set([]byte(id), val, nil); err != nil {
-		return err
+		// Rollback HNSW add
+		if rollbackErr := r.hnsw.Delete(id); rollbackErr != nil {
+			return fmt.Errorf("failed to set vector in batch, and also failed to rollback HNSW add: %w", rollbackErr)
+		}
+		return fmt.Errorf("failed to set vector in batch: %w", err)
 	}
 
 	if r.opts.HNSWConfig.WALEnabled {
 		walKey := []byte(fmt.Sprintf("%s%d_%s", hnswWALPrefix, time.Now().UnixNano(), id))
 		if err := batch.Set(walKey, val, nil); err != nil {
-			return err
+			// Rollback HNSW add
+			if rollbackErr := r.hnsw.Delete(id); rollbackErr != nil {
+				return fmt.Errorf("failed to set WAL in batch, and also failed to rollback HNSW add: %w", rollbackErr)
+			}
+			return fmt.Errorf("failed to set WAL in batch: %w", err)
 		}
 	}
 
 	if err := batch.Commit(r.writeOpts); err != nil {
-		return err
+		// Rollback HNSW add
+		if rollbackErr := r.hnsw.Delete(id); rollbackErr != nil {
+			return fmt.Errorf("failed to commit batch, and also failed to rollback HNSW add: %w", rollbackErr)
+		}
+		return fmt.Errorf("failed to commit batch: %w", err)
 	}
-	return r.hnsw.Add(id, vector)
+
+	return nil
 }
 
 // DeleteVector deletes a vector by its ID.
-
 func (r *PebbleDB) DeleteVector(id string) error {
 	if r.db == nil {
 		return errors.New("db not initialized")
 	}
 
+	// 1. Fetch the vector from PebbleDB to get the vector data for rollback.
+	vec, _, err := r.GetVector(id)
+	if err != nil {
+		return fmt.Errorf("failed to get vector for rollback: %w", err)
+	}
+	if vec == nil {
+		// Vector doesn't exist, so nothing to delete.
+		return nil
+	}
+
+	// 2. Delete from HNSW index first
+	if err := r.hnsw.Delete(id); err != nil {
+		return fmt.Errorf("failed to delete vector from HNSW index: %w", err)
+	}
+
+	// 3. If HNSW update is successful, commit to PebbleDB
 	batch := r.db.NewBatch()
 	defer batch.Close()
 
 	if err := batch.Delete([]byte(id), nil); err != nil {
-		return err
+		// Rollback HNSW delete
+		if rollbackErr := r.hnsw.Add(id, vec); rollbackErr != nil {
+			return fmt.Errorf("failed to delete vector from batch, and also failed to rollback HNSW delete: %w", rollbackErr)
+		}
+		return fmt.Errorf("failed to delete vector from batch: %w", err)
 	}
 
 	if r.opts.HNSWConfig.WALEnabled {
 		walKey := []byte(fmt.Sprintf("%s%d_%s_delete", hnswWALPrefix, time.Now().UnixNano(), id))
 		if err := batch.Set(walKey, nil, nil); err != nil {
-			return err
+			// Rollback HNSW delete
+			if rollbackErr := r.hnsw.Add(id, vec); rollbackErr != nil {
+				return fmt.Errorf("failed to set WAL in batch, and also failed to rollback HNSW delete: %w", rollbackErr)
+			}
+			return fmt.Errorf("failed to set WAL in batch: %w", err)
 		}
 	}
 
 	if err := batch.Commit(r.writeOpts); err != nil {
-		return err
+		// Rollback HNSW delete
+		if rollbackErr := r.hnsw.Add(id, vec); rollbackErr != nil {
+			return fmt.Errorf("failed to commit batch, and also failed to rollback HNSW delete: %w", rollbackErr)
+		}
+		return fmt.Errorf("failed to commit batch: %w", err)
 	}
-	return r.hnsw.Delete(id)
 
+	return nil
 }
 
 // encodeVectorWithMeta serializes a vector and metadata into a byte slice.
