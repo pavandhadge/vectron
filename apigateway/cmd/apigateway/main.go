@@ -11,10 +11,11 @@ import (
 	"github.com/pavandhadge/vectron/apigateway/internal/translator"
 	pb "github.com/pavandhadge/vectron/apigateway/proto/apigateway"
 	placementpb "github.com/pavandhadge/vectron/apigateway/proto/placementdriver"
-	workerpb "github.com/pavandhadge/vectron/worker/proto/worker"
+	workerpb "github.com/pavandhadge/vectron/apigateway/proto/worker"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 )
@@ -31,13 +32,16 @@ func (s *gatewayServer) forwardToWorker(ctx context.Context, collection string, 
 	resp, err := s.placementClient.GetWorker(ctx, &placementpb.GetWorkerRequest{
 		Collection: collection,
 	})
-	if err != nil || resp.Address == "" {
-		return nil, status.Errorf(grpc.Code(err), "collection %s not found", collection)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "could not get worker for collection %q: %v", collection, err)
+	}
+	if resp.Address == "" {
+		return nil, status.Errorf(codes.NotFound, "collection %q not found", collection)
 	}
 
 	conn, err := grpc.Dial(resp.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return nil, status.Errorf(grpc.Code(err), "worker unreachable")
+		return nil, status.Errorf(codes.Internal, "worker for collection %q at %s is unreachable: %v", collection, resp.Address, err)
 	}
 	defer conn.Close()
 
@@ -48,27 +52,85 @@ func (s *gatewayServer) forwardToWorker(ctx context.Context, collection string, 
 // ================ RPCs IMPLEMENTED ================
 
 func (s *gatewayServer) CreateCollection(ctx context.Context, req *pb.CreateCollectionRequest) (*pb.CreateCollectionResponse, error) {
-	// This will be a call to the placement driver
-	// For now, we'll return a dummy response.
-	return &pb.CreateCollectionResponse{Success: true}, nil
-}
+	if req.Name == "" {
+		return nil, status.Error(codes.InvalidArgument, "collection name cannot be empty")
+	}
+	if req.Dimension <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "dimension must be a positive number")
+	}
 
-func (s *gatewayServer) Upsert(ctx context.T, req *pb.UpsertRequest) (*pb.UpsertResponse, error) {
-	result, err := s.forwardToWorker(ctx, req.Collection, func(c workerpb.WorkerServiceClient) (interface{}, error) {
-		workerReq := translator.ToWorkerStoreVectorRequest(req)
-		res, err := c.StoreVector(ctx, workerReq)
-		if err != nil {
-			return nil, err
-		}
-		return translator.FromWorkerStoreVectorResponse(res), nil
-	})
+	pdReq := &placementpb.CreateCollectionRequest{
+		Name:      req.Name,
+		Dimension: req.Dimension,
+		Distance:  req.Distance,
+	}
+	res, err := s.placementClient.CreateCollection(ctx, pdReq)
 	if err != nil {
 		return nil, err
 	}
-	return result.(*pb.UpsertResponse), nil
+	return &pb.CreateCollectionResponse{Success: res.Success}, nil
+}
+
+func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.UpsertResponse, error) {
+	if req.Collection == "" {
+		return nil, status.Error(codes.InvalidArgument, "collection name cannot be empty")
+	}
+	if len(req.Points) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "at least one point is required for upsert")
+	}
+	for _, point := range req.Points {
+		if point.Id == "" {
+			return nil, status.Error(codes.InvalidArgument, "point ID cannot be empty")
+		}
+		if len(point.Vector) == 0 {
+			return nil, status.Error(codes.InvalidArgument, "point vector cannot be empty")
+		}
+	}
+
+	// Get worker for the collection
+	pdResp, err := s.placementClient.GetWorker(ctx, &placementpb.GetWorkerRequest{
+		Collection: req.Collection,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get worker for collection %s: %v", req.Collection, err)
+	}
+	if pdResp.Address == "" {
+		return nil, status.Errorf(codes.NotFound, "collection %s not found", req.Collection)
+	}
+
+	// Connect to worker
+	conn, err := grpc.Dial(pdResp.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "worker at %s unreachable: %v", pdResp.Address, err)
+	}
+	defer conn.Close()
+	client := workerpb.NewWorkerServiceClient(conn)
+
+	// Upsert points one by one
+	var upsertedCount int32
+	for _, point := range req.Points {
+		workerReq := translator.ToWorkerStoreVectorRequestFromPoint(point)
+		_, err := client.StoreVector(ctx, workerReq)
+		if err != nil {
+			// In a real implementation, we might want to collect errors
+			// and continue, or implement rollback logic.
+			// For now, fail on the first error.
+			return nil, status.Errorf(codes.Internal, "failed to upsert point %s: %v", point.Id, err)
+		}
+		upsertedCount++
+	}
+
+	return &pb.UpsertResponse{Upserted: upsertedCount}, nil
 }
 
 func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.SearchResponse, error) {
+	if req.Collection == "" {
+		return nil, status.Error(codes.InvalidArgument, "collection name cannot be empty")
+	}
+	if len(req.Vector) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "search vector cannot be empty")
+	}
+
 	if req.TopK == 0 {
 		req.TopK = 10
 	}
@@ -117,9 +179,12 @@ func (s *gatewayServer) Delete(ctx context.Context, req *pb.DeleteRequest) (*pb.
 }
 
 func (s *gatewayServer) ListCollections(ctx context.Context, req *pb.ListCollectionsRequest) (*pb.ListCollectionsResponse, error) {
-	// This will be a call to the placement driver
-	// For now, we'll return a dummy response.
-	return &pb.ListCollectionsResponse{Collections: []string{"dummy_collection"}}, nil
+	pdReq := &placementpb.ListCollectionsRequest{}
+	res, err := s.placementClient.ListCollections(ctx, pdReq)
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ListCollectionsResponse{Collections: res.Collections}, nil
 }
 
 // ================ MAIN ================

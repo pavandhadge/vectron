@@ -933,8 +933,8 @@ const file_worker_proto_rawDesc = "" +
 	"\x0eStatusResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\"\x0e\n" +
 	"\fFlushRequest\"\x0f\n" +
-	"\rFlushResponse2\xf6\x05\n" +
-	"\x06Worker\x12^\n" +
+	"\rFlushResponse2\xfd\x05\n" +
+	"\rWorkerService\x12^\n" +
 	"\vStoreVector\x12%.vectron.worker.v1.StoreVectorRequest\x1a&.vectron.worker.v1.StoreVectorResponse\"\x00\x12X\n" +
 	"\tGetVector\x12#.vectron.worker.v1.GetVectorRequest\x1a$.vectron.worker.v1.GetVectorResponse\"\x00\x12a\n" +
 	"\fDeleteVector\x12&.vectron.worker.v1.DeleteVectorRequest\x1a'.vectron.worker.v1.DeleteVectorResponse\"\x00\x12O\n" +
@@ -985,24 +985,24 @@ var file_worker_proto_depIdxs = []int32{
 	0,  // 1: vectron.worker.v1.GetVectorResponse.vector:type_name -> vectron.worker.v1.Vector
 	9,  // 2: vectron.worker.v1.PutRequest.kv:type_name -> vectron.worker.v1.KeyValuePair
 	9,  // 3: vectron.worker.v1.GetResponse.kv:type_name -> vectron.worker.v1.KeyValuePair
-	1,  // 4: vectron.worker.v1.Worker.StoreVector:input_type -> vectron.worker.v1.StoreVectorRequest
-	3,  // 5: vectron.worker.v1.Worker.GetVector:input_type -> vectron.worker.v1.GetVectorRequest
-	5,  // 6: vectron.worker.v1.Worker.DeleteVector:input_type -> vectron.worker.v1.DeleteVectorRequest
-	7,  // 7: vectron.worker.v1.Worker.Search:input_type -> vectron.worker.v1.SearchRequest
-	10, // 8: vectron.worker.v1.Worker.Put:input_type -> vectron.worker.v1.PutRequest
-	12, // 9: vectron.worker.v1.Worker.Get:input_type -> vectron.worker.v1.GetRequest
-	14, // 10: vectron.worker.v1.Worker.Delete:input_type -> vectron.worker.v1.DeleteRequest
-	16, // 11: vectron.worker.v1.Worker.Status:input_type -> vectron.worker.v1.StatusRequest
-	18, // 12: vectron.worker.v1.Worker.Flush:input_type -> vectron.worker.v1.FlushRequest
-	2,  // 13: vectron.worker.v1.Worker.StoreVector:output_type -> vectron.worker.v1.StoreVectorResponse
-	4,  // 14: vectron.worker.v1.Worker.GetVector:output_type -> vectron.worker.v1.GetVectorResponse
-	6,  // 15: vectron.worker.v1.Worker.DeleteVector:output_type -> vectron.worker.v1.DeleteVectorResponse
-	8,  // 16: vectron.worker.v1.Worker.Search:output_type -> vectron.worker.v1.SearchResponse
-	11, // 17: vectron.worker.v1.Worker.Put:output_type -> vectron.worker.v1.PutResponse
-	13, // 18: vectron.worker.v1.Worker.Get:output_type -> vectron.worker.v1.GetResponse
-	15, // 19: vectron.worker.v1.Worker.Delete:output_type -> vectron.worker.v1.DeleteResponse
-	17, // 20: vectron.worker.v1.Worker.Status:output_type -> vectron.worker.v1.StatusResponse
-	19, // 21: vectron.worker.v1.Worker.Flush:output_type -> vectron.worker.v1.FlushResponse
+	1,  // 4: vectron.worker.v1.WorkerService.StoreVector:input_type -> vectron.worker.v1.StoreVectorRequest
+	3,  // 5: vectron.worker.v1.WorkerService.GetVector:input_type -> vectron.worker.v1.GetVectorRequest
+	5,  // 6: vectron.worker.v1.WorkerService.DeleteVector:input_type -> vectron.worker.v1.DeleteVectorRequest
+	7,  // 7: vectron.worker.v1.WorkerService.Search:input_type -> vectron.worker.v1.SearchRequest
+	10, // 8: vectron.worker.v1.WorkerService.Put:input_type -> vectron.worker.v1.PutRequest
+	12, // 9: vectron.worker.v1.WorkerService.Get:input_type -> vectron.worker.v1.GetRequest
+	14, // 10: vectron.worker.v1.WorkerService.Delete:input_type -> vectron.worker.v1.DeleteRequest
+	16, // 11: vectron.worker.v1.WorkerService.Status:input_type -> vectron.worker.v1.StatusRequest
+	18, // 12: vectron.worker.v1.WorkerService.Flush:input_type -> vectron.worker.v1.FlushRequest
+	2,  // 13: vectron.worker.v1.WorkerService.StoreVector:output_type -> vectron.worker.v1.StoreVectorResponse
+	4,  // 14: vectron.worker.v1.WorkerService.GetVector:output_type -> vectron.worker.v1.GetVectorResponse
+	6,  // 15: vectron.worker.v1.WorkerService.DeleteVector:output_type -> vectron.worker.v1.DeleteVectorResponse
+	8,  // 16: vectron.worker.v1.WorkerService.Search:output_type -> vectron.worker.v1.SearchResponse
+	11, // 17: vectron.worker.v1.WorkerService.Put:output_type -> vectron.worker.v1.PutResponse
+	13, // 18: vectron.worker.v1.WorkerService.Get:output_type -> vectron.worker.v1.GetResponse
+	15, // 19: vectron.worker.v1.WorkerService.Delete:output_type -> vectron.worker.v1.DeleteResponse
+	17, // 20: vectron.worker.v1.WorkerService.Status:output_type -> vectron.worker.v1.StatusResponse
+	19, // 21: vectron.worker.v1.WorkerService.Flush:output_type -> vectron.worker.v1.FlushResponse
 	13, // [13:22] is the sub-list for method output_type
 	4,  // [4:13] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name

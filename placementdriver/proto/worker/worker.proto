@@ -4,7 +4,7 @@ package worker;
 option go_package = "github.com/pavandhadge/vectron/worker/proto/worker";
 
 // The worker service definition.
-service Worker {
+service WorkerService{
   // Vector operations
   rpc StoreVector(StoreVectorRequest) returns (StoreVectorResponse) {}
   rpc GetVector(GetVectorRequest) returns (GetVectorResponse) {}

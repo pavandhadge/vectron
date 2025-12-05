@@ -19,23 +19,23 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Worker_StoreVector_FullMethodName  = "/vectron.worker.v1.Worker/StoreVector"
-	Worker_GetVector_FullMethodName    = "/vectron.worker.v1.Worker/GetVector"
-	Worker_DeleteVector_FullMethodName = "/vectron.worker.v1.Worker/DeleteVector"
-	Worker_Search_FullMethodName       = "/vectron.worker.v1.Worker/Search"
-	Worker_Put_FullMethodName          = "/vectron.worker.v1.Worker/Put"
-	Worker_Get_FullMethodName          = "/vectron.worker.v1.Worker/Get"
-	Worker_Delete_FullMethodName       = "/vectron.worker.v1.Worker/Delete"
-	Worker_Status_FullMethodName       = "/vectron.worker.v1.Worker/Status"
-	Worker_Flush_FullMethodName        = "/vectron.worker.v1.Worker/Flush"
+	WorkerService_StoreVector_FullMethodName  = "/vectron.worker.v1.WorkerService/StoreVector"
+	WorkerService_GetVector_FullMethodName    = "/vectron.worker.v1.WorkerService/GetVector"
+	WorkerService_DeleteVector_FullMethodName = "/vectron.worker.v1.WorkerService/DeleteVector"
+	WorkerService_Search_FullMethodName       = "/vectron.worker.v1.WorkerService/Search"
+	WorkerService_Put_FullMethodName          = "/vectron.worker.v1.WorkerService/Put"
+	WorkerService_Get_FullMethodName          = "/vectron.worker.v1.WorkerService/Get"
+	WorkerService_Delete_FullMethodName       = "/vectron.worker.v1.WorkerService/Delete"
+	WorkerService_Status_FullMethodName       = "/vectron.worker.v1.WorkerService/Status"
+	WorkerService_Flush_FullMethodName        = "/vectron.worker.v1.WorkerService/Flush"
 )
 
-// WorkerClient is the client API for Worker service.
+// WorkerServiceClient is the client API for WorkerService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // The worker service definition.
-type WorkerClient interface {
+type WorkerServiceClient interface {
 	// Vector operations
 	StoreVector(ctx context.Context, in *StoreVectorRequest, opts ...grpc.CallOption) (*StoreVectorResponse, error)
 	GetVector(ctx context.Context, in *GetVectorRequest, opts ...grpc.CallOption) (*GetVectorResponse, error)
@@ -50,110 +50,110 @@ type WorkerClient interface {
 	Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*FlushResponse, error)
 }
 
-type workerClient struct {
+type workerServiceClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewWorkerClient(cc grpc.ClientConnInterface) WorkerClient {
-	return &workerClient{cc}
+func NewWorkerServiceClient(cc grpc.ClientConnInterface) WorkerServiceClient {
+	return &workerServiceClient{cc}
 }
 
-func (c *workerClient) StoreVector(ctx context.Context, in *StoreVectorRequest, opts ...grpc.CallOption) (*StoreVectorResponse, error) {
+func (c *workerServiceClient) StoreVector(ctx context.Context, in *StoreVectorRequest, opts ...grpc.CallOption) (*StoreVectorResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(StoreVectorResponse)
-	err := c.cc.Invoke(ctx, Worker_StoreVector_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, WorkerService_StoreVector_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *workerClient) GetVector(ctx context.Context, in *GetVectorRequest, opts ...grpc.CallOption) (*GetVectorResponse, error) {
+func (c *workerServiceClient) GetVector(ctx context.Context, in *GetVectorRequest, opts ...grpc.CallOption) (*GetVectorResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetVectorResponse)
-	err := c.cc.Invoke(ctx, Worker_GetVector_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, WorkerService_GetVector_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *workerClient) DeleteVector(ctx context.Context, in *DeleteVectorRequest, opts ...grpc.CallOption) (*DeleteVectorResponse, error) {
+func (c *workerServiceClient) DeleteVector(ctx context.Context, in *DeleteVectorRequest, opts ...grpc.CallOption) (*DeleteVectorResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DeleteVectorResponse)
-	err := c.cc.Invoke(ctx, Worker_DeleteVector_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, WorkerService_DeleteVector_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *workerClient) Search(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*SearchResponse, error) {
+func (c *workerServiceClient) Search(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*SearchResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SearchResponse)
-	err := c.cc.Invoke(ctx, Worker_Search_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, WorkerService_Search_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *workerClient) Put(ctx context.Context, in *PutRequest, opts ...grpc.CallOption) (*PutResponse, error) {
+func (c *workerServiceClient) Put(ctx context.Context, in *PutRequest, opts ...grpc.CallOption) (*PutResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(PutResponse)
-	err := c.cc.Invoke(ctx, Worker_Put_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, WorkerService_Put_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *workerClient) Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error) {
+func (c *workerServiceClient) Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetResponse)
-	err := c.cc.Invoke(ctx, Worker_Get_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, WorkerService_Get_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *workerClient) Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*DeleteResponse, error) {
+func (c *workerServiceClient) Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*DeleteResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DeleteResponse)
-	err := c.cc.Invoke(ctx, Worker_Delete_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, WorkerService_Delete_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *workerClient) Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error) {
+func (c *workerServiceClient) Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(StatusResponse)
-	err := c.cc.Invoke(ctx, Worker_Status_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, WorkerService_Status_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *workerClient) Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*FlushResponse, error) {
+func (c *workerServiceClient) Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*FlushResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(FlushResponse)
-	err := c.cc.Invoke(ctx, Worker_Flush_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, WorkerService_Flush_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// WorkerServer is the server API for Worker service.
-// All implementations must embed UnimplementedWorkerServer
+// WorkerServiceServer is the server API for WorkerService service.
+// All implementations must embed UnimplementedWorkerServiceServer
 // for forward compatibility.
 //
 // The worker service definition.
-type WorkerServer interface {
+type WorkerServiceServer interface {
 	// Vector operations
 	StoreVector(context.Context, *StoreVectorRequest) (*StoreVectorResponse, error)
 	GetVector(context.Context, *GetVectorRequest) (*GetVectorResponse, error)
@@ -166,268 +166,268 @@ type WorkerServer interface {
 	// Control/Admin operations
 	Status(context.Context, *StatusRequest) (*StatusResponse, error)
 	Flush(context.Context, *FlushRequest) (*FlushResponse, error)
-	mustEmbedUnimplementedWorkerServer()
+	mustEmbedUnimplementedWorkerServiceServer()
 }
 
-// UnimplementedWorkerServer must be embedded to have
+// UnimplementedWorkerServiceServer must be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
 // pointer dereference when methods are called.
-type UnimplementedWorkerServer struct{}
+type UnimplementedWorkerServiceServer struct{}
 
-func (UnimplementedWorkerServer) StoreVector(context.Context, *StoreVectorRequest) (*StoreVectorResponse, error) {
+func (UnimplementedWorkerServiceServer) StoreVector(context.Context, *StoreVectorRequest) (*StoreVectorResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method StoreVector not implemented")
 }
-func (UnimplementedWorkerServer) GetVector(context.Context, *GetVectorRequest) (*GetVectorResponse, error) {
+func (UnimplementedWorkerServiceServer) GetVector(context.Context, *GetVectorRequest) (*GetVectorResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetVector not implemented")
 }
-func (UnimplementedWorkerServer) DeleteVector(context.Context, *DeleteVectorRequest) (*DeleteVectorResponse, error) {
+func (UnimplementedWorkerServiceServer) DeleteVector(context.Context, *DeleteVectorRequest) (*DeleteVectorResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteVector not implemented")
 }
-func (UnimplementedWorkerServer) Search(context.Context, *SearchRequest) (*SearchResponse, error) {
+func (UnimplementedWorkerServiceServer) Search(context.Context, *SearchRequest) (*SearchResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Search not implemented")
 }
-func (UnimplementedWorkerServer) Put(context.Context, *PutRequest) (*PutResponse, error) {
+func (UnimplementedWorkerServiceServer) Put(context.Context, *PutRequest) (*PutResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Put not implemented")
 }
-func (UnimplementedWorkerServer) Get(context.Context, *GetRequest) (*GetResponse, error) {
+func (UnimplementedWorkerServiceServer) Get(context.Context, *GetRequest) (*GetResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Get not implemented")
 }
-func (UnimplementedWorkerServer) Delete(context.Context, *DeleteRequest) (*DeleteResponse, error) {
+func (UnimplementedWorkerServiceServer) Delete(context.Context, *DeleteRequest) (*DeleteResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Delete not implemented")
 }
-func (UnimplementedWorkerServer) Status(context.Context, *StatusRequest) (*StatusResponse, error) {
+func (UnimplementedWorkerServiceServer) Status(context.Context, *StatusRequest) (*StatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Status not implemented")
 }
-func (UnimplementedWorkerServer) Flush(context.Context, *FlushRequest) (*FlushResponse, error) {
+func (UnimplementedWorkerServiceServer) Flush(context.Context, *FlushRequest) (*FlushResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Flush not implemented")
 }
-func (UnimplementedWorkerServer) mustEmbedUnimplementedWorkerServer() {}
-func (UnimplementedWorkerServer) testEmbeddedByValue()                {}
+func (UnimplementedWorkerServiceServer) mustEmbedUnimplementedWorkerServiceServer() {}
+func (UnimplementedWorkerServiceServer) testEmbeddedByValue()                       {}
 
-// UnsafeWorkerServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to WorkerServer will
+// UnsafeWorkerServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to WorkerServiceServer will
 // result in compilation errors.
-type UnsafeWorkerServer interface {
-	mustEmbedUnimplementedWorkerServer()
+type UnsafeWorkerServiceServer interface {
+	mustEmbedUnimplementedWorkerServiceServer()
 }
 
-func RegisterWorkerServer(s grpc.ServiceRegistrar, srv WorkerServer) {
-	// If the following call panics, it indicates UnimplementedWorkerServer was
+func RegisterWorkerServiceServer(s grpc.ServiceRegistrar, srv WorkerServiceServer) {
+	// If the following call panics, it indicates UnimplementedWorkerServiceServer was
 	// embedded by pointer and is nil.  This will cause panics if an
 	// unimplemented method is ever invoked, so we test this at initialization
 	// time to prevent it from happening at runtime later due to I/O.
 	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
 		t.testEmbeddedByValue()
 	}
-	s.RegisterService(&Worker_ServiceDesc, srv)
+	s.RegisterService(&WorkerService_ServiceDesc, srv)
 }
 
-func _Worker_StoreVector_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _WorkerService_StoreVector_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(StoreVectorRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(WorkerServer).StoreVector(ctx, in)
+		return srv.(WorkerServiceServer).StoreVector(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Worker_StoreVector_FullMethodName,
+		FullMethod: WorkerService_StoreVector_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(WorkerServer).StoreVector(ctx, req.(*StoreVectorRequest))
+		return srv.(WorkerServiceServer).StoreVector(ctx, req.(*StoreVectorRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Worker_GetVector_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _WorkerService_GetVector_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetVectorRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(WorkerServer).GetVector(ctx, in)
+		return srv.(WorkerServiceServer).GetVector(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Worker_GetVector_FullMethodName,
+		FullMethod: WorkerService_GetVector_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(WorkerServer).GetVector(ctx, req.(*GetVectorRequest))
+		return srv.(WorkerServiceServer).GetVector(ctx, req.(*GetVectorRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Worker_DeleteVector_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _WorkerService_DeleteVector_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DeleteVectorRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(WorkerServer).DeleteVector(ctx, in)
+		return srv.(WorkerServiceServer).DeleteVector(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Worker_DeleteVector_FullMethodName,
+		FullMethod: WorkerService_DeleteVector_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(WorkerServer).DeleteVector(ctx, req.(*DeleteVectorRequest))
+		return srv.(WorkerServiceServer).DeleteVector(ctx, req.(*DeleteVectorRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Worker_Search_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _WorkerService_Search_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SearchRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(WorkerServer).Search(ctx, in)
+		return srv.(WorkerServiceServer).Search(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Worker_Search_FullMethodName,
+		FullMethod: WorkerService_Search_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(WorkerServer).Search(ctx, req.(*SearchRequest))
+		return srv.(WorkerServiceServer).Search(ctx, req.(*SearchRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Worker_Put_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _WorkerService_Put_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PutRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(WorkerServer).Put(ctx, in)
+		return srv.(WorkerServiceServer).Put(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Worker_Put_FullMethodName,
+		FullMethod: WorkerService_Put_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(WorkerServer).Put(ctx, req.(*PutRequest))
+		return srv.(WorkerServiceServer).Put(ctx, req.(*PutRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Worker_Get_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _WorkerService_Get_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(WorkerServer).Get(ctx, in)
+		return srv.(WorkerServiceServer).Get(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Worker_Get_FullMethodName,
+		FullMethod: WorkerService_Get_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(WorkerServer).Get(ctx, req.(*GetRequest))
+		return srv.(WorkerServiceServer).Get(ctx, req.(*GetRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Worker_Delete_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _WorkerService_Delete_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DeleteRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(WorkerServer).Delete(ctx, in)
+		return srv.(WorkerServiceServer).Delete(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Worker_Delete_FullMethodName,
+		FullMethod: WorkerService_Delete_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(WorkerServer).Delete(ctx, req.(*DeleteRequest))
+		return srv.(WorkerServiceServer).Delete(ctx, req.(*DeleteRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Worker_Status_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _WorkerService_Status_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(StatusRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(WorkerServer).Status(ctx, in)
+		return srv.(WorkerServiceServer).Status(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Worker_Status_FullMethodName,
+		FullMethod: WorkerService_Status_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(WorkerServer).Status(ctx, req.(*StatusRequest))
+		return srv.(WorkerServiceServer).Status(ctx, req.(*StatusRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Worker_Flush_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _WorkerService_Flush_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(FlushRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(WorkerServer).Flush(ctx, in)
+		return srv.(WorkerServiceServer).Flush(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Worker_Flush_FullMethodName,
+		FullMethod: WorkerService_Flush_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(WorkerServer).Flush(ctx, req.(*FlushRequest))
+		return srv.(WorkerServiceServer).Flush(ctx, req.(*FlushRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-// Worker_ServiceDesc is the grpc.ServiceDesc for Worker service.
+// WorkerService_ServiceDesc is the grpc.ServiceDesc for WorkerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
-var Worker_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "vectron.worker.v1.Worker",
-	HandlerType: (*WorkerServer)(nil),
+var WorkerService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "vectron.worker.v1.WorkerService",
+	HandlerType: (*WorkerServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
 			MethodName: "StoreVector",
-			Handler:    _Worker_StoreVector_Handler,
+			Handler:    _WorkerService_StoreVector_Handler,
 		},
 		{
 			MethodName: "GetVector",
-			Handler:    _Worker_GetVector_Handler,
+			Handler:    _WorkerService_GetVector_Handler,
 		},
 		{
 			MethodName: "DeleteVector",
-			Handler:    _Worker_DeleteVector_Handler,
+			Handler:    _WorkerService_DeleteVector_Handler,
 		},
 		{
 			MethodName: "Search",
-			Handler:    _Worker_Search_Handler,
+			Handler:    _WorkerService_Search_Handler,
 		},
 		{
 			MethodName: "Put",
-			Handler:    _Worker_Put_Handler,
+			Handler:    _WorkerService_Put_Handler,
 		},
 		{
 			MethodName: "Get",
-			Handler:    _Worker_Get_Handler,
+			Handler:    _WorkerService_Get_Handler,
 		},
 		{
 			MethodName: "Delete",
-			Handler:    _Worker_Delete_Handler,
+			Handler:    _WorkerService_Delete_Handler,
 		},
 		{
 			MethodName: "Status",
-			Handler:    _Worker_Status_Handler,
+			Handler:    _WorkerService_Status_Handler,
 		},
 		{
 			MethodName: "Flush",
-			Handler:    _Worker_Flush_Handler,
+			Handler:    _WorkerService_Flush_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

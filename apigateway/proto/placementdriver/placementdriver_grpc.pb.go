@@ -21,11 +21,14 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	PlacementService_GetWorker_FullMethodName      = "/vectron.placementdriver.v1.PlacementService/GetWorker"
-	PlacementService_RegisterWorker_FullMethodName = "/vectron.placementdriver.v1.PlacementService/RegisterWorker"
-	PlacementService_Heartbeat_FullMethodName      = "/vectron.placementdriver.v1.PlacementService/Heartbeat"
-	PlacementService_ListWorkers_FullMethodName    = "/vectron.placementdriver.v1.PlacementService/ListWorkers"
-	PlacementService_Rebalance_FullMethodName      = "/vectron.placementdriver.v1.PlacementService/Rebalance"
+	PlacementService_GetWorker_FullMethodName        = "/vectron.placementdriver.v1.PlacementService/GetWorker"
+	PlacementService_RegisterWorker_FullMethodName   = "/vectron.placementdriver.v1.PlacementService/RegisterWorker"
+	PlacementService_Heartbeat_FullMethodName        = "/vectron.placementdriver.v1.PlacementService/Heartbeat"
+	PlacementService_ListWorkers_FullMethodName      = "/vectron.placementdriver.v1.PlacementService/ListWorkers"
+	PlacementService_Rebalance_FullMethodName        = "/vectron.placementdriver.v1.PlacementService/Rebalance"
+	PlacementService_CreateCollection_FullMethodName = "/vectron.placementdriver.v1.PlacementService/CreateCollection"
+	PlacementService_ListCollections_FullMethodName  = "/vectron.placementdriver.v1.PlacementService/ListCollections"
+	PlacementService_DeleteCollection_FullMethodName = "/vectron.placementdriver.v1.PlacementService/DeleteCollection"
 )
 
 // PlacementServiceClient is the client API for PlacementService service.
@@ -42,6 +45,10 @@ type PlacementServiceClient interface {
 	ListWorkers(ctx context.Context, in *ListWorkersRequest, opts ...grpc.CallOption) (*ListWorkersResponse, error)
 	// Admin: force rebalance (future)
 	Rebalance(ctx context.Context, in *RebalanceRequest, opts ...grpc.CallOption) (*RebalanceResponse, error)
+	// Collection management
+	CreateCollection(ctx context.Context, in *CreateCollectionRequest, opts ...grpc.CallOption) (*CreateCollectionResponse, error)
+	ListCollections(ctx context.Context, in *ListCollectionsRequest, opts ...grpc.CallOption) (*ListCollectionsResponse, error)
+	DeleteCollection(ctx context.Context, in *DeleteCollectionRequest, opts ...grpc.CallOption) (*DeleteCollectionResponse, error)
 }
 
 type placementServiceClient struct {
@@ -102,6 +109,36 @@ func (c *placementServiceClient) Rebalance(ctx context.Context, in *RebalanceReq
 	return out, nil
 }
 
+func (c *placementServiceClient) CreateCollection(ctx context.Context, in *CreateCollectionRequest, opts ...grpc.CallOption) (*CreateCollectionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateCollectionResponse)
+	err := c.cc.Invoke(ctx, PlacementService_CreateCollection_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *placementServiceClient) ListCollections(ctx context.Context, in *ListCollectionsRequest, opts ...grpc.CallOption) (*ListCollectionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListCollectionsResponse)
+	err := c.cc.Invoke(ctx, PlacementService_ListCollections_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *placementServiceClient) DeleteCollection(ctx context.Context, in *DeleteCollectionRequest, opts ...grpc.CallOption) (*DeleteCollectionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteCollectionResponse)
+	err := c.cc.Invoke(ctx, PlacementService_DeleteCollection_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PlacementServiceServer is the server API for PlacementService service.
 // All implementations must embed UnimplementedPlacementServiceServer
 // for forward compatibility.
@@ -116,6 +153,10 @@ type PlacementServiceServer interface {
 	ListWorkers(context.Context, *ListWorkersRequest) (*ListWorkersResponse, error)
 	// Admin: force rebalance (future)
 	Rebalance(context.Context, *RebalanceRequest) (*RebalanceResponse, error)
+	// Collection management
+	CreateCollection(context.Context, *CreateCollectionRequest) (*CreateCollectionResponse, error)
+	ListCollections(context.Context, *ListCollectionsRequest) (*ListCollectionsResponse, error)
+	DeleteCollection(context.Context, *DeleteCollectionRequest) (*DeleteCollectionResponse, error)
 	mustEmbedUnimplementedPlacementServiceServer()
 }
 
@@ -140,6 +181,15 @@ func (UnimplementedPlacementServiceServer) ListWorkers(context.Context, *ListWor
 }
 func (UnimplementedPlacementServiceServer) Rebalance(context.Context, *RebalanceRequest) (*RebalanceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Rebalance not implemented")
+}
+func (UnimplementedPlacementServiceServer) CreateCollection(context.Context, *CreateCollectionRequest) (*CreateCollectionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateCollection not implemented")
+}
+func (UnimplementedPlacementServiceServer) ListCollections(context.Context, *ListCollectionsRequest) (*ListCollectionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListCollections not implemented")
+}
+func (UnimplementedPlacementServiceServer) DeleteCollection(context.Context, *DeleteCollectionRequest) (*DeleteCollectionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteCollection not implemented")
 }
 func (UnimplementedPlacementServiceServer) mustEmbedUnimplementedPlacementServiceServer() {}
 func (UnimplementedPlacementServiceServer) testEmbeddedByValue()                          {}
@@ -252,6 +302,60 @@ func _PlacementService_Rebalance_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PlacementService_CreateCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateCollectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlacementServiceServer).CreateCollection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlacementService_CreateCollection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlacementServiceServer).CreateCollection(ctx, req.(*CreateCollectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PlacementService_ListCollections_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListCollectionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlacementServiceServer).ListCollections(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlacementService_ListCollections_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlacementServiceServer).ListCollections(ctx, req.(*ListCollectionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PlacementService_DeleteCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteCollectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlacementServiceServer).DeleteCollection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlacementService_DeleteCollection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlacementServiceServer).DeleteCollection(ctx, req.(*DeleteCollectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // PlacementService_ServiceDesc is the grpc.ServiceDesc for PlacementService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -278,6 +382,18 @@ var PlacementService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Rebalance",
 			Handler:    _PlacementService_Rebalance_Handler,
+		},
+		{
+			MethodName: "CreateCollection",
+			Handler:    _PlacementService_CreateCollection_Handler,
+		},
+		{
+			MethodName: "ListCollections",
+			Handler:    _PlacementService_ListCollections_Handler,
+		},
+		{
+			MethodName: "DeleteCollection",
+			Handler:    _PlacementService_DeleteCollection_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

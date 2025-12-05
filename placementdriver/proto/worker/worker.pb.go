@@ -933,8 +933,8 @@ const file_worker_proto_rawDesc = "" +
 	"\x0eStatusResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\"\x0e\n" +
 	"\fFlushRequest\"\x0f\n" +
-	"\rFlushResponse2\xb0\x04\n" +
-	"\x06Worker\x12H\n" +
+	"\rFlushResponse2\xb7\x04\n" +
+	"\rWorkerService\x12H\n" +
 	"\vStoreVector\x12\x1a.worker.StoreVectorRequest\x1a\x1b.worker.StoreVectorResponse\"\x00\x12B\n" +
 	"\tGetVector\x12\x18.worker.GetVectorRequest\x1a\x19.worker.GetVectorResponse\"\x00\x12K\n" +
 	"\fDeleteVector\x12\x1b.worker.DeleteVectorRequest\x1a\x1c.worker.DeleteVectorResponse\"\x00\x129\n" +
@@ -985,24 +985,24 @@ var file_worker_proto_depIdxs = []int32{
 	0,  // 1: worker.GetVectorResponse.vector:type_name -> worker.Vector
 	9,  // 2: worker.PutRequest.kv:type_name -> worker.KeyValuePair
 	9,  // 3: worker.GetResponse.kv:type_name -> worker.KeyValuePair
-	1,  // 4: worker.Worker.StoreVector:input_type -> worker.StoreVectorRequest
-	3,  // 5: worker.Worker.GetVector:input_type -> worker.GetVectorRequest
-	5,  // 6: worker.Worker.DeleteVector:input_type -> worker.DeleteVectorRequest
-	7,  // 7: worker.Worker.Search:input_type -> worker.SearchRequest
-	10, // 8: worker.Worker.Put:input_type -> worker.PutRequest
-	12, // 9: worker.Worker.Get:input_type -> worker.GetRequest
-	14, // 10: worker.Worker.Delete:input_type -> worker.DeleteRequest
-	16, // 11: worker.Worker.Status:input_type -> worker.StatusRequest
-	18, // 12: worker.Worker.Flush:input_type -> worker.FlushRequest
-	2,  // 13: worker.Worker.StoreVector:output_type -> worker.StoreVectorResponse
-	4,  // 14: worker.Worker.GetVector:output_type -> worker.GetVectorResponse
-	6,  // 15: worker.Worker.DeleteVector:output_type -> worker.DeleteVectorResponse
-	8,  // 16: worker.Worker.Search:output_type -> worker.SearchResponse
-	11, // 17: worker.Worker.Put:output_type -> worker.PutResponse
-	13, // 18: worker.Worker.Get:output_type -> worker.GetResponse
-	15, // 19: worker.Worker.Delete:output_type -> worker.DeleteResponse
-	17, // 20: worker.Worker.Status:output_type -> worker.StatusResponse
-	19, // 21: worker.Worker.Flush:output_type -> worker.FlushResponse
+	1,  // 4: worker.WorkerService.StoreVector:input_type -> worker.StoreVectorRequest
+	3,  // 5: worker.WorkerService.GetVector:input_type -> worker.GetVectorRequest
+	5,  // 6: worker.WorkerService.DeleteVector:input_type -> worker.DeleteVectorRequest
+	7,  // 7: worker.WorkerService.Search:input_type -> worker.SearchRequest
+	10, // 8: worker.WorkerService.Put:input_type -> worker.PutRequest
+	12, // 9: worker.WorkerService.Get:input_type -> worker.GetRequest
+	14, // 10: worker.WorkerService.Delete:input_type -> worker.DeleteRequest
+	16, // 11: worker.WorkerService.Status:input_type -> worker.StatusRequest
+	18, // 12: worker.WorkerService.Flush:input_type -> worker.FlushRequest
+	2,  // 13: worker.WorkerService.StoreVector:output_type -> worker.StoreVectorResponse
+	4,  // 14: worker.WorkerService.GetVector:output_type -> worker.GetVectorResponse
+	6,  // 15: worker.WorkerService.DeleteVector:output_type -> worker.DeleteVectorResponse
+	8,  // 16: worker.WorkerService.Search:output_type -> worker.SearchResponse
+	11, // 17: worker.WorkerService.Put:output_type -> worker.PutResponse
+	13, // 18: worker.WorkerService.Get:output_type -> worker.GetResponse
+	15, // 19: worker.WorkerService.Delete:output_type -> worker.DeleteResponse
+	17, // 20: worker.WorkerService.Status:output_type -> worker.StatusResponse
+	19, // 21: worker.WorkerService.Flush:output_type -> worker.FlushResponse
 	13, // [13:22] is the sub-list for method output_type
 	4,  // [4:13] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name
