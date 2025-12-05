@@ -1,51 +1,48 @@
 package middleware
 
 import (
-	"net/http"
-	"sync"
-	"time"
+    "context"
+    "sync"
+    "time"
+
+    "google.golang.org/grpc"
+    "google.golang.org/grpc/codes"
+    "google.golang.org/grpc/status"
 )
 
 type limiter struct {
-	count   int
-	resetAt time.Time
+    count   int
+    resetAt time.Time
 }
 
 var (
-	mu     sync.Mutex
-	limits = make(map[string]*limiter)
+    mu     sync.Mutex
+    limits = make(map[string]*limiter)
 )
 
-func RateLimit(rps int) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			userID, ok := r.Context().Value(UserIDKey).(string)
-			if !ok {
-				http.Error(w, `{"error":"auth required"}`, http.StatusUnauthorized)
-				return
-			}
+func RateLimitInterceptor(rps int) func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+    return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+        userID, ok := ctx.Value("user_id").(string)
+        if !ok {
+            return nil, status.Errorf(codes.Unauthenticated, "no user")
+        }
 
-			mu.Lock()
-			l := limits[userID]
-			now := time.Now()
+        mu.Lock()
+        l := limits[userID]
+        now := time.Now()
+        if l == nil || now.After(l.resetAt) {
+            l = &limiter{count: 1, resetAt: now.Add(time.Second)}
+            limits[userID] = l
+        } else {
+            if l.count++
+        }
+        remaining := rps - l.count
+        mu.Unlock()
 
-			if l == nil || now.After(l.resetAt) {
-				l = &limiter{count: 0, resetAt: now.Add(time.Second)}
-				limits[userID] = l
-			}
+        if remaining < 0 {
+            return nil, status.Errorf(codes.ResourceExhausted, "rate limit exceeded")
+        }
 
-			if l.count >= rps {
-				w.Header().Set("X-RateLimit-Reset", l.resetAt.Format(time.RFC3339))
-				http.Error(w, `{"error":"rate limit exceeded"}`, http.StatusTooManyRequests)
-				mu.Unlock()
-				return
-			}
-
-			l.count++
-			mu.Unlock()
-
-			w.Header().Set("X-RateLimit-Remaining", string(rune(rps-l.count)))
-			next.ServeHTTP(w, r)
-		})
-	}
+        return handler(ctx, req)
+    }
 }

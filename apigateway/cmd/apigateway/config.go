@@ -3,17 +3,19 @@ package main
 import "os"
 
 type Config struct {
-	ListenAddr      string
-	PlacementDriver string // e.g. "placement:6300"
+	GRPCAddr        string // gateway gRPC port
+	HTTPAddr        string // gateway HTTP port
+	PlacementDriver string
 	JWTSecret       string
 	RateLimitRPS    int
 }
 
 func LoadConfig() Config {
 	return Config{
-		ListenAddr:      getEnv("LISTEN_ADDR", ":8080"),
-		PlacementDriver: getEnv("PLACEMENT_DRIVER", "localhost:6300"),
-		JWTSecret:       getEnv("JWT_SECRET", "change-me-in-production"),
+		GRPCAddr:        getEnv("GRPC_ADDR", ":8081"),
+		HTTPAddr:        getEnv("HTTP_ADDR", ":8080"),
+		PlacementDriver: getEnv("PLACEMENT_DRIVER", "placement:6300"),
+		JWTSecret:       getEnv("JWT_SECRET", "CHANGE_ME_IN_PRODUCTION"),
 		RateLimitRPS:    100,
 	}
 }
