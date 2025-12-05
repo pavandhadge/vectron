@@ -1,5 +1,3 @@
-package main
-
 import (
 	"context"
 	"log"
@@ -11,6 +9,7 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 var cfg = LoadConfig()
@@ -22,24 +21,27 @@ func main() {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Create gateway mux
 	mux := runtime.NewServeMux(
 		runtime.WithMarshalerOption(runtime.MIMEWildcard, &runtime.JSONPb{
-			MarshalOptions:   runtime.MarshalOptions{EmitDefaults: true},
-			UnmarshalOptions: runtime.UnmarshalOptions{DiscardUnknown: true},
+			MarshalOptions: protojson.MarshalOptions{
+				EmitUnpopulated: true,
+			},
+			UnmarshalOptions: protojson.UnmarshalOptions{
+				DiscardUnknown: true,
+			},
 		}),
 	)
 
-	// Connect to your placement driver (or worker directly for now)
-	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
-	err := pb.RegisterVectronServiceHandlerFromEndpoint(
+	opts := []grpc.DialOption{
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	}
+
+	if err := pb.RegisterVectronServiceHandlerFromEndpoint(
 		ctx, mux, cfg.PlacementDriver, opts,
-	)
-	if err != nil {
+	); err != nil {
 		log.Fatalf("Failed to connect to placement driver: %v", err)
 	}
 
-	// Middleware chain (order matters!)
 	handler := middleware.Logging(
 		middleware.RateLimit(cfg.RateLimitRPS)(
 			middleware.Auth(mux),
@@ -48,7 +50,6 @@ func main() {
 
 	log.Printf("Vectron API Gateway starting on %s", cfg.ListenAddr)
 	log.Printf("Forwarding to placement driver at %s", cfg.PlacementDriver)
-	log.Printf("JWT secret loaded, rate limit: %d RPS", cfg.RateLimitRPS)
 
 	log.Fatal(http.ListenAndServe(cfg.ListenAddr, handler))
 }
