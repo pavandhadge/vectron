@@ -12,10 +12,6 @@ import (
 	"google.golang.org/grpc/peer"
 )
 
-type contextKey string
-
-const UserIDKey contextKey = "user_id"
-
 // === gRPC Unary Interceptor (for gRPC requests) ===
 func LoggingInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	start := time.Now()
