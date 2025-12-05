@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 package vectron.worker.v1;
-option go_package = "github.com/pavandhadge/vectron/worker/proto/worker";
+option go_package = "github.com/pavandhadge/vectron/apigateway/proto/worker";
 
 // The worker service definition.
 service Worker {

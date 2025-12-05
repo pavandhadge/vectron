@@ -24,6 +24,11 @@ service PlacementService {
 
   // Admin: force rebalance (future)
   rpc Rebalance(RebalanceRequest) returns (RebalanceResponse) {}
+
+  // Collection management
+  rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse) {}
+  rpc ListCollections(ListCollectionsRequest) returns (ListCollectionsResponse) {}
+  rpc DeleteCollection(DeleteCollectionRequest) returns (DeleteCollectionResponse) {}
 }
 
 // ===============================================
@@ -94,4 +99,28 @@ message RebalanceRequest {
 
 message RebalanceResponse {
   bool started = 1;
+}
+
+message CreateCollectionRequest {
+  string name = 1;
+  int32 dimension = 2;
+  string distance = 3;
+}
+
+message CreateCollectionResponse {
+  bool success = 1;
+}
+
+message ListCollectionsRequest {}
+
+message ListCollectionsResponse {
+  repeated string collections = 1;
+}
+
+message DeleteCollectionRequest {
+  string name = 1;
+}
+
+message DeleteCollectionResponse {
+  bool success = 1;
 }

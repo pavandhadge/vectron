@@ -943,7 +943,7 @@ const file_worker_proto_rawDesc = "" +
 	"\x03Get\x12\x1d.vectron.worker.v1.GetRequest\x1a\x1e.vectron.worker.v1.GetResponse\"\x00\x12O\n" +
 	"\x06Delete\x12 .vectron.worker.v1.DeleteRequest\x1a!.vectron.worker.v1.DeleteResponse\"\x00\x12O\n" +
 	"\x06Status\x12 .vectron.worker.v1.StatusRequest\x1a!.vectron.worker.v1.StatusResponse\"\x00\x12L\n" +
-	"\x05Flush\x12\x1f.vectron.worker.v1.FlushRequest\x1a .vectron.worker.v1.FlushResponse\"\x00B4Z2github.com/pavandhadge/vectron/worker/proto/workerb\x06proto3"
+	"\x05Flush\x12\x1f.vectron.worker.v1.FlushRequest\x1a .vectron.worker.v1.FlushResponse\"\x00B8Z6github.com/pavandhadge/vectron/apigateway/proto/workerb\x06proto3"
 
 var (
 	file_worker_proto_rawDescOnce sync.Once
