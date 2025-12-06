@@ -1,244 +1,206 @@
 package main
 
 import (
-	"context"
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"log"
 	"net"
-	"sync"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
 	"time"
 
+	"github.com/hashicorp/raft"
+	"github.com/pavandhadge/vectron/placementdriver/internal/fsm"
+	pdRaft "github.com/pavandhadge/vectron/placementdriver/internal/raft"
+	"github.com/pavandhadge/vectron/placementdriver/internal/server"
 	pb "github.com/pavandhadge/vectron/placementdriver/proto/placementdriver"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
 )
 
-// server implements the PlacementService
-type server struct {
-	pb.UnimplementedPlacementServiceServer
+var (
+	grpcAddr  string
+	raftAddr  string
+	httpAddr  string
+	nodeID    string
+	dataDir   string
+	bootstrap bool
+	joinAddr  string
+)
 
-	mu              sync.RWMutex
-	workerStore     WorkerStore
-	collectionStore CollectionStore
-	workerIdx       int // for round-robin
+func init() {
+	flag.StringVar(&grpcAddr, "grpc-addr", "localhost:6001", "gRPC listen address")
+	flag.StringVar(&raftAddr, "raft-addr", "localhost:7001", "Raft listen address")
+	flag.StringVar(&httpAddr, "http-addr", "localhost:8001", "HTTP listen address for join requests")
+	flag.StringVar(&nodeID, "node-id", "", "Node ID")
+	flag.StringVar(&dataDir, "data-dir", "data/", "Data directory")
+	flag.BoolVar(&bootstrap, "bootstrap", false, "Bootstrap the cluster")
+	flag.StringVar(&joinAddr, "join", "", "Join address")
 }
-
-type WorkerInfo struct {
-	ID            string
-	Address       string
-	LastHeartbeat time.Time
-	Collections   []string
-}
-
-type CollectionInfo struct {
-	Name     string
-	WorkerID string
-}
-
-type WorkerStore interface {
-	RegisterWorker(ctx context.Context, workerInfo WorkerInfo) error
-	GetWorker(ctx context.Context, workerID string) (WorkerInfo, error)
-	ListWorkers(ctx context.Context) ([]WorkerInfo, error)
-	DeleteWorker(ctx context.Context, workerID string) error
-	UpdateWorkerHeartbeat(ctx context.Context, workerID string, heartbeat time.Time) error
-}
-
-type CollectionStore interface {
-	CreateCollection(ctx context.Context, collectionInfo CollectionInfo) error
-	GetCollection(ctx context.Context, collectionName string) (CollectionInfo, error)
-	ListCollections(ctx context.Context) ([]CollectionInfo, error)
-	DeleteCollection(ctx context.Context, collectionName string) error
-}
-
-type etcdStore struct {
-	client *clientv3.Client
-}
-
-func NewEtcdStore(client *clientv3.Client) (*etcdStore, error) {
-	return &etcdStore{client: client}, nil
-}
-
-func (s *etcdStore) RegisterWorker(ctx context.Context, workerInfo WorkerInfo) error {
-	key := fmt.Sprintf("/workers/%s", workerInfo.ID)
-	value, err := json.Marshal(workerInfo)
-	if err != nil {
-		return fmt.Errorf("failed to marshal worker info: %w", err)
-	}
-
-	_, err = s.client.Put(ctx, key, string(value))
-	if err != nil {
-		return fmt.Errorf("failed to put worker info into etcd: %w", err)
-	}
-
-	return nil
-}
-
-func (s *etcdStore) GetWorker(ctx context.Context, workerID string) (WorkerInfo, error) {
-	key := fmt.Sprintf("/workers/%s", workerID)
-
-	resp, err := s.client.Get(ctx, key)
-	if err != nil {
-		return WorkerInfo{}, fmt.Errorf("failed to get worker info from etcd: %w", err)
-	}
-
-	if len(resp.Kvs) == 0 {
-		return WorkerInfo{}, fmt.Errorf("worker %s not found", workerID)
-	}
-
-	var workerInfo WorkerInfo
-	err = json.Unmarshal(resp.Kvs[0].Value, &workerInfo)
-	if err != nil {
-		return WorkerInfo{}, fmt.Errorf("failed to unmarshal worker info: %w", err)
-	}
-
-	return workerInfo, nil
-}
-
-func (s *etcdStore) ListWorkers(ctx context.Context) ([]WorkerInfo, error) {
-	resp, err := s.client.Get(ctx, "/workers/", clientv3.WithPrefix())
-	if err != nil {
-		return nil, fmt.Errorf("failed to list workers from etcd: %w", err)
-	}
-
-	var workerInfos []WorkerInfo
-	for _, kv := range resp.Kvs {
-		var workerInfo WorkerInfo
-		err = json.Unmarshal(kv.Value, &workerInfo)
-		if err != nil {
-			return nil, fmt.Errorf("failed to unmarshal worker info: %w", err)
-		}
-		workerInfos = append(workerInfos, workerInfo)
-	}
-
-	return workerInfos, nil
-}
-
-func (s *etcdStore) DeleteWorker(ctx context.Context, workerID string) error {
-	key := fmt.Sprintf("/workers/%s", workerID)
-
-	_, err := s.client.Delete(ctx, key)
-	if err != nil {
-		return fmt.Errorf("failed to delete worker from etcd: %w", err)
-	}
-
-	return nil
-}
-
-func (s *etcdStore) UpdateWorkerHeartbeat(ctx context.Context, workerID string, heartbeat time.Time) error {
-	workerInfo, err := s.GetWorker(ctx, workerID)
-	if err != nil {
-		return err
-	}
-	workerInfo.LastHeartbeat = heartbeat
-	return s.RegisterWorker(ctx, workerInfo)
-}
-
-func (s *etcdStore) CreateCollection(ctx context.Context, collectionInfo CollectionInfo) error {
-	key := fmt.Sprintf("/collections/%s", collectionInfo.Name)
-	value, err := json.Marshal(collectionInfo)
-	if err != nil {
-		return fmt.Errorf("failed to marshal collection info: %w", err)
-	}
-
-	_, err = s.client.Put(ctx, key, string(value))
-	if err != nil {
-		return fmt.Errorf("failed to put collection info into etcd: %w", err)
-	}
-
-	return nil
-}
-
-func (s *etcdStore) GetCollection(ctx context.Context, collectionName string) (CollectionInfo, error) {
-	key := fmt.Sprintf("/collections/%s", collectionName)
-
-	resp, err := s.client.Get(ctx, key)
-	if err != nil {
-		return CollectionInfo{}, fmt.Errorf("failed to get collection info from etcd: %w", err)
-	}
-
-	if len(resp.Kvs) == 0 {
-		return CollectionInfo{}, fmt.Errorf("collection %s not found", collectionName)
-	}
-
-	var collectionInfo CollectionInfo
-	err = json.Unmarshal(resp.Kvs[0].Value, &collectionInfo)
-	if err != nil {
-		return CollectionInfo{}, fmt.Errorf("failed to unmarshal collection info: %w", err)
-	}
-
-	return collectionInfo, nil
-}
-
-func (s *etcdStore) ListCollections(ctx context.Context) ([]CollectionInfo, error) {
-	resp, err := s.client.Get(ctx, "/collections/", clientv3.WithPrefix())
-	if err != nil {
-		return nil, fmt.Errorf("failed to list collections from etcd: %w", err)
-	}
-
-	var collectionInfos []CollectionInfo
-	for _, kv := range resp.Kvs {
-		var collectionInfo CollectionInfo
-		err = json.Unmarshal(kv.Value, &collectionInfo)
-		if err != nil {
-			return nil, fmt.Errorf("failed to unmarshal collection info: %w", err)
-		}
-		collectionInfos = append(collectionInfos, collectionInfo)
-	}
-
-	return collectionInfos, nil
-}
-
-func (s *etcdStore) DeleteCollection(ctx context.Context, collectionName string) error {
-	key := fmt.Sprintf("/collections/%s", collectionName)
-
-	_, err := s.client.Delete(ctx, key)
-	if err != nil {
-		return fmt.Errorf("failed to delete collection from etcd: %w", err)
-	}
-
-	return nil
-}
-
-var heartbeatTimeout *time.Duration
 
 func main() {
-	// You can pass the port via command-line flag or env var in a real app
-	port := "6001"
-
-	heartbeatTimeout = flag.Duration("heartbeat-timeout", 30*time.Second, "heartbeat timeout")
 	flag.Parse()
 
-	// Initialize etcd client
-	etcdEndpoints := []string{"localhost:2379"} // Replace with your etcd endpoints
-	etcdClient, err := clientv3.New(clientv3.Config{
-		Endpoints:   etcdEndpoints,
-		DialTimeout: 5 * time.Second,
+	if nodeID == "" {
+		log.Fatalf("node-id is required")
+	}
+
+	dataDir = filepath.Join(dataDir, nodeID)
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		log.Fatalf("failed to create data dir: %v", err)
+	}
+
+	// Create the FSM.
+	fsm := fsm.NewFSM()
+
+	// Create the Raft node.
+	raftNode, err := pdRaft.NewRaft(&pdRaft.Config{
+		NodeID:     nodeID,
+		ListenAddr: raftAddr,
+		DataDir:    dataDir,
+		Bootstrap:  bootstrap,
+	}, fsm)
+	if err != nil {
+		log.Fatalf("failed to create raft node: %v", err)
+	}
+
+	// Create the gRPC server.
+	grpcServer := server.NewServer(raftNode, fsm)
+
+	// Start the gRPC server.
+	lis, err := net.Listen("tcp", grpcAddr)
+	if err != nil {
+		log.Fatalf("failed to listen on %s: %v", grpcAddr, err)
+	}
+	s := grpc.NewServer()
+	pb.RegisterPlacementServiceServer(s, grpcServer)
+	go func() {
+		log.Printf("gRPC server listening at %v", lis.Addr())
+		if err := s.Serve(lis); err != nil {
+			log.Fatalf("failed to serve gRPC: %v", err)
+		}
+	}()
+
+	// Start the HTTP server for join requests.
+	http.HandleFunc("/join", func(w http.ResponseWriter, r *http.Request) {
+		m := make(map[string]string)
+		if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		remoteAddr := m["addr"]
+		nodeID := m["id"]
+
+		if raftNode.State() != raft.Leader {
+			// Forward the request to the leader.
+			leader := raftNode.Leader()
+			if leader == "" {
+				http.Error(w, "no leader", http.StatusServiceUnavailable)
+				return
+			}
+
+			// Get leader's http address from its raft address.
+			// This is a simplification. A real system would need a more robust discovery mechanism.
+			// Here we assume the HTTP port can be derived from the Raft port.
+			// A better approach would be to store the HTTP address in the FSM.
+			// For now, we'll assume http is raft port + 100
+			parts := strings.Split(string(leader), ":")
+			if len(parts) != 2 {
+				http.Error(w, "invalid leader address", http.StatusInternalServerError)
+				return
+			}
+			port, err := strconv.Atoi(parts[1])
+			if err != nil {
+				http.Error(w, "invalid leader port", http.StatusInternalServerError)
+				return
+			}
+			leaderHttpAddr := fmt.Sprintf("%s:%d", parts[0], port+1000) // Assuming HTTP is 1000 ports away from raft
+
+			b, err := json.Marshal(m)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			resp, err := http.Post(fmt.Sprintf("http://%s/join", leaderHttpAddr), "application/json", bytes.NewReader(b))
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			defer resp.Body.Close()
+
+			// copy header
+			for k, vv := range resp.Header {
+				for _, v := range vv {
+					w.Header().Add(k, v)
+				}
+			}
+			w.WriteHeader(resp.StatusCode)
+
+			io.Copy(w, resp.Body)
+
+			return
+		}
+
+		future := raftNode.AddVoter(raft.ServerID(nodeID), raft.ServerAddress(remoteAddr), 0, 0)
+		if err := future.Error(); err != nil {
+			log.Printf("failed to add voter: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		log.Printf("added voter %s at %s", nodeID, remoteAddr)
 	})
-	if err != nil {
-		log.Fatalf("failed to connect to etcd: %v", err)
-	}
-	defer etcdClient.Close()
 
-	etcdStore, err := NewEtcdStore(etcdClient)
-	if err != nil {
-		log.Fatalf("failed to create etcd store: %v", err)
-	}
+	go func() {
+		log.Printf("HTTP server listening on %s", httpAddr)
+		if err := http.ListenAndServe(httpAddr, nil); err != nil {
+			log.Fatalf("failed to start HTTP server: %v", err)
+		}
+	}()
 
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
-	if err != nil {
-		log.Fatalf("failed to listen on port %s: %v", port, err)
+	// If join address is specified, join the cluster.
+	if joinAddr != "" {
+		join(joinAddr, raftAddr, nodeID)
 	}
 
-	grpcServer := grpc.NewServer()
-	pb.RegisterPlacementServiceServer(grpcServer, &server{
-		workerStore:     etcdStore,
-		collectionStore: etcdStore,
-	})
+	// Wait for a signal to shutdown.
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit
+	log.Println("shutting down server...")
 
-	log.Printf("Placement driver listening at %v", lis.Addr())
-	if err := grpcServer.Serve(lis); err != nil {
-		log.Fatalf("failed to serve gRPC server: %v", err)
+	s.GracefulStop()
+	shutdownFuture := raftNode.Shutdown()
+	if err := shutdownFuture.Error(); err != nil {
+		log.Printf("failed to shutdown raft: %v", err)
+	}
+	log.Println("server stopped")
+}
+
+func join(joinAddr, raftAddr, nodeID string) {
+	b, err := json.Marshal(map[string]string{"addr": raftAddr, "id": nodeID})
+	if err != nil {
+		log.Fatalf("failed to marshal join request: %v", err)
+	}
+
+	for {
+		resp, err := http.Post(fmt.Sprintf("http://%s/join", joinAddr), "application/json", bytes.NewReader(b))
+		if err == nil {
+			defer resp.Body.Close()
+			body, _ := ioutil.ReadAll(resp.Body)
+			log.Printf("joined cluster successfully, response: %s", string(body))
+			return
+		}
+
+		log.Printf("failed to join cluster, will retry in 5s: %v", err)
+		time.Sleep(5 * time.Second)
 	}
 }
