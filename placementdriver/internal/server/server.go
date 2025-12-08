@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strconv"
 	"sync"
+	"time"
 
-	"github.com/google/uuid"
 	"github.com/pavandhadge/vectron/placementdriver/internal/fsm"
 	"github.com/pavandhadge/vectron/placementdriver/internal/raft"
 	pb "github.com/pavandhadge/vectron/placementdriver/proto/placementdriver"
@@ -13,10 +15,15 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+const (
+	raftTimeout          = 5 * time.Second
+	defaultInitialShards = 8
+)
+
 // Server implements the PlacementService gRPC service.
 type Server struct {
 	pb.UnimplementedPlacementServiceServer
-	raft *raft.Raft
+	raft *raft.Node
 	fsm  *fsm.FSM
 
 	mu        sync.Mutex
@@ -24,19 +31,20 @@ type Server struct {
 }
 
 // NewServer creates a new Server.
-func NewServer(r *raft.Raft, f *fsm.FSM) *Server {
+func NewServer(r *raft.Node, f *fsm.FSM) *Server {
 	return &Server{
 		raft: r,
 		fsm:  f,
 	}
 }
 
-// RegisterWorker handles a worker registration request.
+// RegisterWorker handles a worker registration request. The FSM assigns a new unique uint64 ID.
 func (s *Server) RegisterWorker(ctx context.Context, req *pb.RegisterWorkerRequest) (*pb.RegisterWorkerResponse, error) {
-	workerID := uuid.New().String()
+	if req.Address == "" {
+		return nil, status.Error(codes.InvalidArgument, "worker address is required")
+	}
 
 	payload := fsm.RegisterWorkerPayload{
-		ID:      workerID,
 		Address: req.Address,
 	}
 
@@ -55,37 +63,111 @@ func (s *Server) RegisterWorker(ctx context.Context, req *pb.RegisterWorkerReque
 		return nil, status.Errorf(codes.Internal, "failed to marshal command: %v", err)
 	}
 
-	if err := s.raft.Propose(cmdBytes); err != nil {
+	res, err := s.raft.Propose(cmdBytes, raftTimeout)
+	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to propose command: %v", err)
 	}
 
+	newWorkerID := res.Value
+	if newWorkerID == 0 {
+		return nil, status.Errorf(codes.Internal, "FSM failed to assign worker ID")
+	}
+
 	return &pb.RegisterWorkerResponse{
-		WorkerId: workerID,
+		WorkerId: strconv.FormatUint(newWorkerID, 10),
 		Success:  true,
 	}, nil
 }
 
+// Heartbeat is called by a worker to signal it's alive and to get its shard assignments.
+func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.HeartbeatResponse, error) {
+	workerID, err := strconv.ParseUint(req.WorkerId, 10, 64)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid worker_id format: %v", err)
+	}
+
+	// Propose a command to update the worker's last heartbeat time.
+	hbPayload := fsm.UpdateWorkerHeartbeatPayload{WorkerID: workerID}
+	payloadBytes, err := json.Marshal(hbPayload)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to marshal heartbeat payload: %v", err)
+	}
+	cmd := fsm.Command{Type: fsm.UpdateWorkerHeartbeat, Payload: payloadBytes}
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to marshal heartbeat command: %v", err)
+	}
+
+	if _, err := s.raft.Propose(cmdBytes, raftTimeout); err != nil {
+		// Log the error but don't fail the whole heartbeat, as getting shard info is also important.
+		fmt.Printf("Warning: failed to propose heartbeat for worker %d: %v\n", workerID, err)
+	}
+
+	// Find all shards assigned to this worker.
+	assignedShards := make([]*fsm.ShardInfo, 0)
+	collections := s.fsm.GetCollections()
+	for _, coll := range collections {
+		for _, shard := range coll.Shards {
+			for _, replicaID := range shard.Replicas {
+				if replicaID == workerID {
+					assignedShards = append(assignedShards, shard)
+					break
+				}
+			}
+		}
+	}
+
+	// Serialize the shard list and send it back to the worker.
+	shardListBytes, err := json.Marshal(assignedShards)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to serialize shard list: %v", err)
+	}
+
+	return &pb.HeartbeatResponse{
+		Ok:      true,
+		Message: string(shardListBytes),
+	}, nil
+}
+
 // GetWorker handles a request to get a worker for a specific collection.
+// TODO: This is a temporary implementation. It should hash the vector_id to find the
+// correct shard and return the leader of that shard's replica group.
+// For now, it returns the address of the first replica of the first shard.
 func (s *Server) GetWorker(ctx context.Context, req *pb.GetWorkerRequest) (*pb.GetWorkerResponse, error) {
 	if req.Collection == "" {
 		return nil, status.Error(codes.InvalidArgument, "collection name is required")
 	}
 
-	// This is a read operation, so we can query the FSM directly.
-	// For read-after-write consistency, clients should ideally talk to the leader.
 	collection, ok := s.fsm.GetCollection(req.Collection)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "collection '%s' not found", req.Collection)
 	}
 
-	worker, ok := s.fsm.GetWorker(collection.WorkerID)
+	if len(collection.Shards) == 0 {
+		return nil, status.Errorf(codes.Internal, "collection '%s' has no shards", req.Collection)
+	}
+
+	// Find the first shard (iteration order over map is not guaranteed).
+	var firstShard *fsm.ShardInfo
+	for _, shard := range collection.Shards {
+		firstShard = shard
+		break
+	}
+
+	if len(firstShard.Replicas) == 0 {
+		return nil, status.Errorf(codes.Internal, "shard '%d' has no replicas", firstShard.ShardID)
+	}
+
+	// Get the worker info for the first replica.
+	firstReplicaID := firstShard.Replicas[0]
+	worker, ok := s.fsm.GetWorker(firstReplicaID)
 	if !ok {
-		// This indicates an inconsistent state, which should ideally not happen.
-		return nil, status.Errorf(codes.Internal, "worker with ID '%s' not found for collection '%s'", collection.WorkerID, req.Collection)
+		return nil, status.Errorf(codes.Internal, "worker with ID '%d' not found for shard '%d'", firstReplicaID, firstShard.ShardID)
 	}
 
 	return &pb.GetWorkerResponse{
 		Address: worker.Address,
+		ShardId: uint32(firstShard.ShardID), // Note: possible truncation if shard ID > 2^32
 	}, nil
 }
 
@@ -96,7 +178,7 @@ func (s *Server) ListWorkers(ctx context.Context, req *pb.ListWorkersRequest) (*
 	workerInfos := make([]*pb.WorkerInfo, 0, len(workers))
 	for _, w := range workers {
 		workerInfos = append(workerInfos, &pb.WorkerInfo{
-			WorkerId:      w.ID,
+			WorkerId:      strconv.FormatUint(w.ID, 10),
 			Address:       w.Address,
 			LastHeartbeat: w.LastHeartbeat.Unix(),
 		})
@@ -113,22 +195,11 @@ func (s *Server) CreateCollection(ctx context.Context, req *pb.CreateCollectionR
 		return nil, status.Error(codes.InvalidArgument, "collection name is required")
 	}
 
-	workers := s.fsm.GetWorkers()
-	if len(workers) == 0 {
-		return nil, status.Error(codes.FailedPrecondition, "no workers available to assign collection to")
-	}
-
-	// Assign a worker using round-robin.
-	s.mu.Lock()
-	worker := workers[s.workerIdx%len(workers)]
-	s.workerIdx++
-	s.mu.Unlock()
-
 	payload := fsm.CreateCollectionPayload{
-		Name:      req.Name,
-		Dimension: req.Dimension,
-		Distance:  req.Distance,
-		WorkerID:  worker.ID,
+		Name:          req.Name,
+		Dimension:     req.Dimension,
+		Distance:      req.Distance,
+		InitialShards: defaultInitialShards,
 	}
 
 	payloadBytes, err := json.Marshal(payload)
@@ -146,7 +217,7 @@ func (s *Server) CreateCollection(ctx context.Context, req *pb.CreateCollectionR
 		return nil, status.Errorf(codes.Internal, "failed to marshal command: %v", err)
 	}
 
-	if err := s.raft.Propose(cmdBytes); err != nil {
+	if _, err := s.raft.Propose(cmdBytes, raftTimeout); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to propose command: %v", err)
 	}
 

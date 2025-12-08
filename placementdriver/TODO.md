@@ -1,7 +1,12 @@
-continue working on the placmeent driver
-i have put all hte proto files in the ./placementdriver/proto/ and u have implemented the main.go filein the ./placementdriver/cmd/placementdriver
-but tis baisc
-i want u to implement the placmeent driver as
-raft based system which is source of truth and it easily updates the configuration adn a all abt the system like new collection , new shards , adresses of worker , which node is down adn up and aeverything easily and share it with other nodes int he raft
-use a persistant storage fo rhte placement storage configuration wich can be updated easily like the etdc or something
-i want the placemtn driver to be really really reliable nad just work
+You already have three working components:
+
+an API gateway that can talk to workers,
+a Placement Driver (PD) that can create collections and register worker nodes, and
+a powerful worker node that already contains a full storage engine built on Pebble + a custom in-memory HNSW implementation for a single collection.
+
+Now transform it into a real distributed, auto-scalable, fault-tolerant vector database as follows:
+The Placement Driver must become a small 3-node dragonboat Raft cluster that stores the global shard map: every collection is split into many range-based shards (key = XXH3_64(string ID) → uint64), and for every shard PD stores exactly three worker node IDs that must replicate it (replication factor = 3). PD exposes a gRPC watch/stream API so workers can instantly know which shards they are supposed to run.
+Each physical machine continues to run exactly ONE worker process (your current binary). Inside that single process you start exactly ONE dragonboat NodeHost. This NodeHost will dynamically join and leave hundreds of different Raft clusters — one Raft cluster per shard it is assigned to own by the PD (dragonboat natively supports this pattern). The worker runs a background loop (or gRPC ServerStream) that constantly asks the PD “which shards should I own right now?” and compares the answer with the Raft clusters it is currently participating in. When a new shard appears in the list, it calls StartCluster() to create/join that shard’s Raft group and instantly opens a new Pebble instance + loads/builds its in-memory HNSW under ./data/<collection>/<shard_id>/. When a shard disappears from the list, it gracefully stops that Raft node and closes the Pebble DB.
+All writes (upserts/deletes) go through the Raft leader of the correct shard (PD returns the leader address). The leader proposes the mutation to dragonboat, the mutation is replicated to the two followers, and only after commit do all three replicas apply the change to their local Pebble DB and update their in-memory HNSW graph. Reads can go to any replica (leader by default for strong consistency in the MVP).
+Auto-splitting and rebalancing are driven exclusively by the PD: when a shard grows too large, PD picks a median split key, creates two new shard IDs, assigns three owners each, and atomically updates the routing table once the new shards have caught up. Adding capacity is as simple as starting a new machine with the same worker binary — it registers with PD and PD automatically migrates shards to it.
+Never spawn one process per collection or per shard — always keep exactly one long-running worker process per machine that dynamically participates in as many Raft groups as the PD tells it to. This is the exact same pattern used by CockroachDB, TiDB, and modern Qdrant/Milvus.
