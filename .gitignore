@@ -1,0 +1,96 @@
+# ============================
+# General OS / Editor trash
+# ============================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.tmp
+*.log
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# JetBrains
+.idea/
+
+# ============================
+# Node.js / JavaScript
+# ============================
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+pnpm-debug.log
+
+# Dist / build outputs
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Env files
+.env
+.env.*
+
+# ============================
+# Go
+# ============================
+# Go build artifacts
+bin/
+build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go modules cache (never commit)
+go.sum
+vendor/
+
+# Generated Protobuf Go files
+*_pb.go
+*_grpc.pb.go
+
+# ============================
+# Python
+# ============================
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+venv/
+.env/
+.venv/
+
+# Python build artifacts
+build/
+dist/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# ============================
+# Protobuf (General)
+# ============================
+*_pb.js
+*_grpc_pb.js
+*.pb.cc
+*.pb.h
+
+# ============================
+# Logs and dumps
+# ============================
+*.out
+*.err
+*.dump
+
+# ============================
+# Misc
+# ============================
+*.local
+*.cache/

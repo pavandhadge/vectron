@@ -1,14 +1,15 @@
 import * as grpc from "@grpc/grpc-js";
-import { VectronServiceClient } from "./proto/apigateway_grpc_pb";
+import { VectronServiceClient } from "../proto/apigateway/apigateway_grpc_pb.js";
+import { CreateCollectionRequest } from "../proto/apigateway/createcollectionrequest.js";
 import {
-  CreateCollectionRequest,
   ListCollectionsRequest,
   UpsertRequest,
   SearchRequest,
   GetRequest,
   DeleteRequest,
   Point as ProtoPoint,
-} from "./proto/apigateway_pb";
+} from "../proto/apigateway/apigateway_pb";
+
 import {
   VectronError,
   AuthenticationError,

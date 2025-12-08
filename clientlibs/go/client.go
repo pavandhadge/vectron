@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	// Assuming the generated protobuf code is in this package
-	"github.com/pavandhadge/vectron/apigateway/proto/apigateway"
+	"github.com/pavandhadge/vectron/clientlibs/go/proto/apigateway"
 )
 
 // Point represents a single vector point.
