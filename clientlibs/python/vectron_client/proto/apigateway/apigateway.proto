@@ -5,7 +5,7 @@ package vectron.v1;
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 
-option go_package = "github.com/pavandhadge/vectron/clientlibs/js/proto/apigateway";
+option go_package = "github.com/pavandhadge/vectron/clientlibs/python/proto/apigateway";
 
 // ===============================
 // Vectron Public API

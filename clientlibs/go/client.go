@@ -219,7 +219,7 @@ func (c *Client) Get(collection string, pointID string) (*Point, error) {
 // Delete deletes a point by its ID.
 func (c *Client) Delete(collection string, pointID string) error {
 	if collection == "" || pointID == "" {
-		return nil, fmt.Errorf("%w: collection name and point ID cannot be empty", ErrInvalidArgument)
+		return fmt.Errorf("%w: collection name and point ID cannot be empty", ErrInvalidArgument)
 	}
 
 	ctx, cancel := c.getContext()
