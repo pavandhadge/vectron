@@ -1,49 +1,87 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
-	"net"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
 
-	"github.com/pavandhadge/vectron/worker/internal"
-	"github.com/pavandhadge/vectron/worker/internal/storage"
-	"github.com/pavandhadge/vectron/worker/proto/worker"
-	"google.golang.org/grpc"
+	"github.com/lni/dragonboat/v4"
+	"github.com/lni/dragonboat/v4/config"
+	"github.com/pavandhadge/vectron/placementdriver/internal/fsm"
+	"github.com/pavandhadge/vectron/worker/internal/pd"
+	"github.com/pavandhadge/vectron/worker/internal/shard"
 )
 
 func main() {
 	var (
-		grpcAddr    = flag.String("grpc-addr", ":9090", "gRPC server address")
-		storagePath = flag.String("storage-path", "./data", "Storage path")
+		grpcAddr      = flag.String("grpc-addr", "localhost:9090", "gRPC server address")
+		raftAddr      = flag.String("raft-addr", "localhost:9191", "Raft communication address")
+		pdAddr        = flag.String("pd-addr", "localhost:6001", "Placement Driver gRPC address")
+		nodeID        = flag.Uint64("node-id", 1, "Worker Node ID (must be > 0)")
+		workerDataDir = flag.String("data-dir", "./worker-data", "Parent directory for all worker data")
 	)
 	flag.Parse()
 
-	// Initialize storage
-	db := storage.NewPebbleDB()
-	opts := &storage.Options{
-		Path: *storagePath,
-		HNSWConfig: storage.HNSWConfig{
-			WALEnabled: true,
-		},
+	if *nodeID == 0 {
+		log.Fatalf("node-id must be > 0")
 	}
-	if err := db.Init(opts.Path, opts); err != nil {
-		log.Fatalf("failed to initialize storage: %v", err)
+
+	// Create the top-level directory for the NodeHost.
+	nhDataDir := filepath.Join(*workerDataDir, fmt.Sprintf("node-%d", *nodeID))
+	if err := os.MkdirAll(nhDataDir, 0750); err != nil {
+		log.Fatalf("failed to create nodehost data dir: %v", err)
 	}
-	defer db.Close()
 
-	// Create gRPC server
-	grpcServer := internal.NewGrpcServer(db)
-
-	// Start gRPC server
-	lis, err := net.Listen("tcp", *grpcAddr)
+	// Configure and create the NodeHost.
+	nhc := config.NodeHostConfig{
+		DeploymentID:  1,
+		NodeHostDir:   nhDataDir,
+		RaftAddress:   *raftAddr,
+		ListenAddress: *raftAddr,
+	}
+	nh, err := dragonboat.NewNodeHost(nhc)
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		log.Fatalf("failed to create nodehost: %v", err)
 	}
-	s := grpc.NewServer()
-	worker.RegisterWorkerServer(s, grpcServer)
-	fmt.Printf("gRPC server listening on %s\n", *grpcAddr)
-	if err := s.Serve(lis); err != nil {
-		log.Fatalf("failed to serve: %v", err)
+	defer nh.Stop()
+
+	log.Printf("Dragonboat NodeHost created. Node ID: %d, Raft Address: %s", *nodeID, *raftAddr)
+
+	// Create client for Placement Driver
+	pdClient, err := pd.NewClient(*pdAddr, *raftAddr)
+	if err != nil {
+		log.Fatalf("failed to create PD client: %v", err)
 	}
+	defer pdClient.Close()
+
+	// Register the worker with the PD.
+	if err := pdClient.Register(context.Background()); err != nil {
+		log.Fatalf("failed to register with PD: %v", err)
+	}
+
+	// Create the shard manager.
+	shardManager := shard.NewManager(nh, *workerDataDir, *nodeID)
+
+	// Start the heartbeat loop and shard assignment processing.
+	shardUpdateChan := make(chan []*fsm.ShardAssignment)
+	go pdClient.StartHeartbeatLoop(shardUpdateChan)
+
+	// Goroutine to listen for shard assignments and manage local replicas.
+	go func() {
+		for assignments := range shardUpdateChan {
+			shardManager.SyncShards(assignments)
+		}
+	}()
+
+	log.Println("Worker started. Waiting for signals.")
+	sig_chan := make(chan os.Signal, 1)
+	signal.Notify(sig_chan, os.Interrupt, syscall.SIGTERM)
+	<-sig_chan
+
+	log.Println("Shutting down worker.")
 }

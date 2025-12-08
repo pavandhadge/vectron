@@ -56,9 +56,15 @@ type UpdateWorkerHeartbeatPayload struct {
 	WorkerID uint64 `json:"worker_id"`
 }
 
-// ======================================================================================
 // Shard and Collection Data Structures
 // ======================================================================================
+
+// ShardAssignment contains all info a worker needs to manage a shard replica.
+// This is a DTO and is not stored in the FSM state directly.
+type ShardAssignment struct {
+	ShardInfo      *ShardInfo        `json:"shard_info"`
+	InitialMembers map[uint64]string `json:"initial_members"` // map[nodeID]raftAddress
+}
 
 // ShardInfo holds the metadata for a single shard.
 type ShardInfo struct {

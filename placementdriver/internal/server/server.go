@@ -99,33 +99,56 @@ func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.H
 	}
 
 	if _, err := s.raft.Propose(cmdBytes, raftTimeout); err != nil {
-		// Log the error but don't fail the whole heartbeat, as getting shard info is also important.
 		fmt.Printf("Warning: failed to propose heartbeat for worker %d: %v\n", workerID, err)
 	}
 
-	// Find all shards assigned to this worker.
-	assignedShards := make([]*fsm.ShardInfo, 0)
+	// Find all shards assigned to this worker and enrich with peer addresses.
+	assignments := make([]*ShardAssignment, 0)
+	allWorkers := s.fsm.GetWorkers()
+	workerMap := make(map[uint64]fsm.WorkerInfo, len(allWorkers))
+	for _, w := range allWorkers {
+		workerMap[w.ID] = w
+	}
+
 	collections := s.fsm.GetCollections()
 	for _, coll := range collections {
 		for _, shard := range coll.Shards {
+			isReplica := false
 			for _, replicaID := range shard.Replicas {
 				if replicaID == workerID {
-					assignedShards = append(assignedShards, shard)
+					isReplica = true
 					break
 				}
+			}
+
+			if isReplica {
+				initialMembers := make(map[uint64]string)
+				for _, replicaID := range shard.Replicas {
+					if worker, ok := workerMap[replicaID]; ok {
+						initialMembers[replicaID] = worker.Address
+					} else {
+						// This replica's worker is not registered or known. This is an inconsistent state.
+						fmt.Printf("Warning: could not find worker address for replica %d in shard %d\n", replicaID, shard.ShardID)
+					}
+				}
+
+				assignments = append(assignments, &ShardAssignment{
+					ShardInfo:      shard,
+					InitialMembers: initialMembers,
+				})
 			}
 		}
 	}
 
 	// Serialize the shard list and send it back to the worker.
-	shardListBytes, err := json.Marshal(assignedShards)
+	assignmentBytes, err := json.Marshal(assignments)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to serialize shard list: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to serialize shard assignments: %v", err)
 	}
 
 	return &pb.HeartbeatResponse{
 		Ok:      true,
-		Message: string(shardListBytes),
+		Message: string(assignmentBytes),
 	}, nil
 }
 
@@ -147,7 +170,6 @@ func (s *Server) GetWorker(ctx context.Context, req *pb.GetWorkerRequest) (*pb.G
 		return nil, status.Errorf(codes.Internal, "collection '%s' has no shards", req.Collection)
 	}
 
-	// Find the first shard (iteration order over map is not guaranteed).
 	var firstShard *fsm.ShardInfo
 	for _, shard := range collection.Shards {
 		firstShard = shard
@@ -158,7 +180,6 @@ func (s *Server) GetWorker(ctx context.Context, req *pb.GetWorkerRequest) (*pb.G
 		return nil, status.Errorf(codes.Internal, "shard '%d' has no replicas", firstShard.ShardID)
 	}
 
-	// Get the worker info for the first replica.
 	firstReplicaID := firstShard.Replicas[0]
 	worker, ok := s.fsm.GetWorker(firstReplicaID)
 	if !ok {
@@ -167,7 +188,7 @@ func (s *Server) GetWorker(ctx context.Context, req *pb.GetWorkerRequest) (*pb.G
 
 	return &pb.GetWorkerResponse{
 		Address: worker.Address,
-		ShardId: uint32(firstShard.ShardID), // Note: possible truncation if shard ID > 2^32
+		ShardId: uint32(firstShard.ShardID),
 	}, nil
 }
 
