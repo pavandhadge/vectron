@@ -19,15 +19,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	WorkerService_StoreVector_FullMethodName  = "/worker.WorkerService/StoreVector"
-	WorkerService_GetVector_FullMethodName    = "/worker.WorkerService/GetVector"
-	WorkerService_DeleteVector_FullMethodName = "/worker.WorkerService/DeleteVector"
-	WorkerService_Search_FullMethodName       = "/worker.WorkerService/Search"
-	WorkerService_Put_FullMethodName          = "/worker.WorkerService/Put"
-	WorkerService_Get_FullMethodName          = "/worker.WorkerService/Get"
-	WorkerService_Delete_FullMethodName       = "/worker.WorkerService/Delete"
-	WorkerService_Status_FullMethodName       = "/worker.WorkerService/Status"
-	WorkerService_Flush_FullMethodName        = "/worker.WorkerService/Flush"
+	WorkerService_StoreVector_FullMethodName  = "/vectron.worker.v1.WorkerService/StoreVector"
+	WorkerService_GetVector_FullMethodName    = "/vectron.worker.v1.WorkerService/GetVector"
+	WorkerService_DeleteVector_FullMethodName = "/vectron.worker.v1.WorkerService/DeleteVector"
+	WorkerService_Search_FullMethodName       = "/vectron.worker.v1.WorkerService/Search"
+	WorkerService_Put_FullMethodName          = "/vectron.worker.v1.WorkerService/Put"
+	WorkerService_Get_FullMethodName          = "/vectron.worker.v1.WorkerService/Get"
+	WorkerService_Delete_FullMethodName       = "/vectron.worker.v1.WorkerService/Delete"
+	WorkerService_Status_FullMethodName       = "/vectron.worker.v1.WorkerService/Status"
+	WorkerService_Flush_FullMethodName        = "/vectron.worker.v1.WorkerService/Flush"
 )
 
 // WorkerServiceClient is the client API for WorkerService service.
@@ -390,7 +390,7 @@ func _WorkerService_Flush_Handler(srv interface{}, ctx context.Context, dec func
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var WorkerService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "worker.WorkerService",
+	ServiceName: "vectron.worker.v1.WorkerService",
 	HandlerType: (*WorkerServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

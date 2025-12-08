@@ -6,8 +6,9 @@ import (
 )
 
 // ToWorkerStoreVectorRequestFromPoint translates a public API Point to a worker Vector for storage.
-func ToWorkerStoreVectorRequestFromPoint(point *apigatewaypb.Point) *workerpb.StoreVectorRequest {
+func ToWorkerStoreVectorRequestFromPoint(point *apigatewaypb.Point, shardID uint64) *workerpb.StoreVectorRequest {
 	return &workerpb.StoreVectorRequest{
+		ShardId: shardID,
 		Vector: &workerpb.Vector{
 			Id:       point.Id,
 			Vector:   point.Vector,
@@ -17,10 +18,11 @@ func ToWorkerStoreVectorRequestFromPoint(point *apigatewaypb.Point) *workerpb.St
 }
 
 // ToWorkerSearchRequest translates a SearchRequest from the public API to the worker's format.
-func ToWorkerSearchRequest(req *apigatewaypb.SearchRequest) *workerpb.SearchRequest {
+func ToWorkerSearchRequest(req *apigatewaypb.SearchRequest, shardID uint64) *workerpb.SearchRequest {
 	return &workerpb.SearchRequest{
-		Vector: req.Vector,
-		K:      int32(req.TopK),
+		ShardId: shardID,
+		Vector:  req.Vector,
+		K:       int32(req.TopK),
 	}
 }
 
@@ -40,9 +42,10 @@ func FromWorkerSearchResponse(res *workerpb.SearchResponse) *apigatewaypb.Search
 }
 
 // ToWorkerGetVectorRequest translates a GetRequest to a GetVectorRequest.
-func ToWorkerGetVectorRequest(req *apigatewaypb.GetRequest) *workerpb.GetVectorRequest {
+func ToWorkerGetVectorRequest(req *apigatewaypb.GetRequest, shardID uint64) *workerpb.GetVectorRequest {
 	return &workerpb.GetVectorRequest{
-		Id: req.Id,
+		ShardId: shardID,
+		Id:      req.Id,
 	}
 }
 
@@ -61,9 +64,10 @@ func FromWorkerGetVectorResponse(res *workerpb.GetVectorResponse) *apigatewaypb.
 }
 
 // ToWorkerDeleteVectorRequest translates a DeleteRequest to a DeleteVectorRequest.
-func ToWorkerDeleteVectorRequest(req *apigatewaypb.DeleteRequest) *workerpb.DeleteVectorRequest {
+func ToWorkerDeleteVectorRequest(req *apigatewaypb.DeleteRequest, shardID uint64) *workerpb.DeleteVectorRequest {
 	return &workerpb.DeleteVectorRequest{
-		Id: req.Id,
+		ShardId: shardID,
+		Id:      req.Id,
 	}
 }
 

@@ -84,7 +84,8 @@ func (x *Vector) GetMetadata() []byte {
 
 type StoreVectorRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Vector        *Vector                `protobuf:"bytes,1,opt,name=vector,proto3" json:"vector,omitempty"`
+	ShardId       uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	Vector        *Vector                `protobuf:"bytes,2,opt,name=vector,proto3" json:"vector,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -117,6 +118,13 @@ func (x *StoreVectorRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use StoreVectorRequest.ProtoReflect.Descriptor instead.
 func (*StoreVectorRequest) Descriptor() ([]byte, []int) {
 	return file_worker_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *StoreVectorRequest) GetShardId() uint64 {
+	if x != nil {
+		return x.ShardId
+	}
+	return 0
 }
 
 func (x *StoreVectorRequest) GetVector() *Vector {
@@ -164,7 +172,8 @@ func (*StoreVectorResponse) Descriptor() ([]byte, []int) {
 
 type GetVectorRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	ShardId       uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	Id            string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -197,6 +206,13 @@ func (x *GetVectorRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use GetVectorRequest.ProtoReflect.Descriptor instead.
 func (*GetVectorRequest) Descriptor() ([]byte, []int) {
 	return file_worker_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *GetVectorRequest) GetShardId() uint64 {
+	if x != nil {
+		return x.ShardId
+	}
+	return 0
 }
 
 func (x *GetVectorRequest) GetId() string {
@@ -252,7 +268,8 @@ func (x *GetVectorResponse) GetVector() *Vector {
 
 type DeleteVectorRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	ShardId       uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	Id            string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -285,6 +302,13 @@ func (x *DeleteVectorRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use DeleteVectorRequest.ProtoReflect.Descriptor instead.
 func (*DeleteVectorRequest) Descriptor() ([]byte, []int) {
 	return file_worker_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *DeleteVectorRequest) GetShardId() uint64 {
+	if x != nil {
+		return x.ShardId
+	}
+	return 0
 }
 
 func (x *DeleteVectorRequest) GetId() string {
@@ -332,9 +356,10 @@ func (*DeleteVectorResponse) Descriptor() ([]byte, []int) {
 
 type SearchRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Vector        []float32              `protobuf:"fixed32,1,rep,packed,name=vector,proto3" json:"vector,omitempty"`
-	K             int32                  `protobuf:"varint,2,opt,name=k,proto3" json:"k,omitempty"`
-	BruteForce    bool                   `protobuf:"varint,3,opt,name=brute_force,json=bruteForce,proto3" json:"brute_force,omitempty"`
+	ShardId       uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	Vector        []float32              `protobuf:"fixed32,2,rep,packed,name=vector,proto3" json:"vector,omitempty"`
+	K             int32                  `protobuf:"varint,3,opt,name=k,proto3" json:"k,omitempty"`
+	BruteForce    bool                   `protobuf:"varint,4,opt,name=brute_force,json=bruteForce,proto3" json:"brute_force,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -367,6 +392,13 @@ func (x *SearchRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SearchRequest.ProtoReflect.Descriptor instead.
 func (*SearchRequest) Descriptor() ([]byte, []int) {
 	return file_worker_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *SearchRequest) GetShardId() uint64 {
+	if x != nil {
+		return x.ShardId
+	}
+	return 0
 }
 
 func (x *SearchRequest) GetVector() []float32 {
@@ -489,7 +521,8 @@ func (x *KeyValuePair) GetValue() []byte {
 
 type PutRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Kv            *KeyValuePair          `protobuf:"bytes,1,opt,name=kv,proto3" json:"kv,omitempty"`
+	ShardId       uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	Kv            *KeyValuePair          `protobuf:"bytes,2,opt,name=kv,proto3" json:"kv,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -522,6 +555,13 @@ func (x *PutRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use PutRequest.ProtoReflect.Descriptor instead.
 func (*PutRequest) Descriptor() ([]byte, []int) {
 	return file_worker_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *PutRequest) GetShardId() uint64 {
+	if x != nil {
+		return x.ShardId
+	}
+	return 0
 }
 
 func (x *PutRequest) GetKv() *KeyValuePair {
@@ -569,7 +609,8 @@ func (*PutResponse) Descriptor() ([]byte, []int) {
 
 type GetRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Key           []byte                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	ShardId       uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	Key           []byte                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -602,6 +643,13 @@ func (x *GetRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use GetRequest.ProtoReflect.Descriptor instead.
 func (*GetRequest) Descriptor() ([]byte, []int) {
 	return file_worker_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *GetRequest) GetShardId() uint64 {
+	if x != nil {
+		return x.ShardId
+	}
+	return 0
 }
 
 func (x *GetRequest) GetKey() []byte {
@@ -657,7 +705,8 @@ func (x *GetResponse) GetKv() *KeyValuePair {
 
 type DeleteRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Key           []byte                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	ShardId       uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	Key           []byte                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -690,6 +739,13 @@ func (x *DeleteRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use DeleteRequest.ProtoReflect.Descriptor instead.
 func (*DeleteRequest) Descriptor() ([]byte, []int) {
 	return file_worker_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *DeleteRequest) GetShardId() uint64 {
+	if x != nil {
+		return x.ShardId
+	}
+	return 0
 }
 
 func (x *DeleteRequest) GetKey() []byte {
@@ -738,6 +794,7 @@ func (*DeleteResponse) Descriptor() ([]byte, []int) {
 // Control/Admin messages
 type StatusRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	ShardId       uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -770,6 +827,13 @@ func (x *StatusRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use StatusRequest.ProtoReflect.Descriptor instead.
 func (*StatusRequest) Descriptor() ([]byte, []int) {
 	return file_worker_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *StatusRequest) GetShardId() uint64 {
+	if x != nil {
+		return x.ShardId
+	}
+	return 0
 }
 
 type StatusResponse struct {
@@ -818,6 +882,7 @@ func (x *StatusResponse) GetStatus() string {
 
 type FlushRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	ShardId       uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -850,6 +915,13 @@ func (x *FlushRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use FlushRequest.ProtoReflect.Descriptor instead.
 func (*FlushRequest) Descriptor() ([]byte, []int) {
 	return file_worker_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *FlushRequest) GetShardId() uint64 {
+	if x != nil {
+		return x.ShardId
+	}
+	return 0
 }
 
 type FlushResponse struct {
@@ -892,58 +964,67 @@ var File_worker_proto protoreflect.FileDescriptor
 
 const file_worker_proto_rawDesc = "" +
 	"\n" +
-	"\fworker.proto\x12\x06worker\"L\n" +
+	"\fworker.proto\x12\x11vectron.worker.v1\"L\n" +
 	"\x06Vector\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06vector\x18\x02 \x03(\x02R\x06vector\x12\x1a\n" +
-	"\bmetadata\x18\x03 \x01(\fR\bmetadata\"<\n" +
-	"\x12StoreVectorRequest\x12&\n" +
-	"\x06vector\x18\x01 \x01(\v2\x0e.worker.VectorR\x06vector\"\x15\n" +
-	"\x13StoreVectorResponse\"\"\n" +
-	"\x10GetVectorRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\";\n" +
-	"\x11GetVectorResponse\x12&\n" +
-	"\x06vector\x18\x01 \x01(\v2\x0e.worker.VectorR\x06vector\"%\n" +
-	"\x13DeleteVectorRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\x16\n" +
-	"\x14DeleteVectorResponse\"V\n" +
-	"\rSearchRequest\x12\x16\n" +
-	"\x06vector\x18\x01 \x03(\x02R\x06vector\x12\f\n" +
-	"\x01k\x18\x02 \x01(\x05R\x01k\x12\x1f\n" +
-	"\vbrute_force\x18\x03 \x01(\bR\n" +
+	"\bmetadata\x18\x03 \x01(\fR\bmetadata\"b\n" +
+	"\x12StoreVectorRequest\x12\x19\n" +
+	"\bshard_id\x18\x01 \x01(\x04R\ashardId\x121\n" +
+	"\x06vector\x18\x02 \x01(\v2\x19.vectron.worker.v1.VectorR\x06vector\"\x15\n" +
+	"\x13StoreVectorResponse\"=\n" +
+	"\x10GetVectorRequest\x12\x19\n" +
+	"\bshard_id\x18\x01 \x01(\x04R\ashardId\x12\x0e\n" +
+	"\x02id\x18\x02 \x01(\tR\x02id\"F\n" +
+	"\x11GetVectorResponse\x121\n" +
+	"\x06vector\x18\x01 \x01(\v2\x19.vectron.worker.v1.VectorR\x06vector\"@\n" +
+	"\x13DeleteVectorRequest\x12\x19\n" +
+	"\bshard_id\x18\x01 \x01(\x04R\ashardId\x12\x0e\n" +
+	"\x02id\x18\x02 \x01(\tR\x02id\"\x16\n" +
+	"\x14DeleteVectorResponse\"q\n" +
+	"\rSearchRequest\x12\x19\n" +
+	"\bshard_id\x18\x01 \x01(\x04R\ashardId\x12\x16\n" +
+	"\x06vector\x18\x02 \x03(\x02R\x06vector\x12\f\n" +
+	"\x01k\x18\x03 \x01(\x05R\x01k\x12\x1f\n" +
+	"\vbrute_force\x18\x04 \x01(\bR\n" +
 	"bruteForce\"\"\n" +
 	"\x0eSearchResponse\x12\x10\n" +
 	"\x03ids\x18\x01 \x03(\tR\x03ids\"6\n" +
 	"\fKeyValuePair\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\fR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\fR\x05value\"2\n" +
+	"\x05value\x18\x02 \x01(\fR\x05value\"X\n" +
 	"\n" +
-	"PutRequest\x12$\n" +
-	"\x02kv\x18\x01 \x01(\v2\x14.worker.KeyValuePairR\x02kv\"\r\n" +
-	"\vPutResponse\"\x1e\n" +
+	"PutRequest\x12\x19\n" +
+	"\bshard_id\x18\x01 \x01(\x04R\ashardId\x12/\n" +
+	"\x02kv\x18\x02 \x01(\v2\x1f.vectron.worker.v1.KeyValuePairR\x02kv\"\r\n" +
+	"\vPutResponse\"9\n" +
 	"\n" +
-	"GetRequest\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\fR\x03key\"3\n" +
-	"\vGetResponse\x12$\n" +
-	"\x02kv\x18\x01 \x01(\v2\x14.worker.KeyValuePairR\x02kv\"!\n" +
-	"\rDeleteRequest\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\fR\x03key\"\x10\n" +
-	"\x0eDeleteResponse\"\x0f\n" +
-	"\rStatusRequest\"(\n" +
+	"GetRequest\x12\x19\n" +
+	"\bshard_id\x18\x01 \x01(\x04R\ashardId\x12\x10\n" +
+	"\x03key\x18\x02 \x01(\fR\x03key\">\n" +
+	"\vGetResponse\x12/\n" +
+	"\x02kv\x18\x01 \x01(\v2\x1f.vectron.worker.v1.KeyValuePairR\x02kv\"<\n" +
+	"\rDeleteRequest\x12\x19\n" +
+	"\bshard_id\x18\x01 \x01(\x04R\ashardId\x12\x10\n" +
+	"\x03key\x18\x02 \x01(\fR\x03key\"\x10\n" +
+	"\x0eDeleteResponse\"*\n" +
+	"\rStatusRequest\x12\x19\n" +
+	"\bshard_id\x18\x01 \x01(\x04R\ashardId\"(\n" +
 	"\x0eStatusResponse\x12\x16\n" +
-	"\x06status\x18\x01 \x01(\tR\x06status\"\x0e\n" +
-	"\fFlushRequest\"\x0f\n" +
-	"\rFlushResponse2\xb7\x04\n" +
-	"\rWorkerService\x12H\n" +
-	"\vStoreVector\x12\x1a.worker.StoreVectorRequest\x1a\x1b.worker.StoreVectorResponse\"\x00\x12B\n" +
-	"\tGetVector\x12\x18.worker.GetVectorRequest\x1a\x19.worker.GetVectorResponse\"\x00\x12K\n" +
-	"\fDeleteVector\x12\x1b.worker.DeleteVectorRequest\x1a\x1c.worker.DeleteVectorResponse\"\x00\x129\n" +
-	"\x06Search\x12\x15.worker.SearchRequest\x1a\x16.worker.SearchResponse\"\x00\x120\n" +
-	"\x03Put\x12\x12.worker.PutRequest\x1a\x13.worker.PutResponse\"\x00\x120\n" +
-	"\x03Get\x12\x12.worker.GetRequest\x1a\x13.worker.GetResponse\"\x00\x129\n" +
-	"\x06Delete\x12\x15.worker.DeleteRequest\x1a\x16.worker.DeleteResponse\"\x00\x129\n" +
-	"\x06Status\x12\x15.worker.StatusRequest\x1a\x16.worker.StatusResponse\"\x00\x126\n" +
-	"\x05Flush\x12\x14.worker.FlushRequest\x1a\x15.worker.FlushResponse\"\x00B4Z2github.com/pavandhadge/vectron/worker/proto/workerb\x06proto3"
+	"\x06status\x18\x01 \x01(\tR\x06status\")\n" +
+	"\fFlushRequest\x12\x19\n" +
+	"\bshard_id\x18\x01 \x01(\x04R\ashardId\"\x0f\n" +
+	"\rFlushResponse2\xfd\x05\n" +
+	"\rWorkerService\x12^\n" +
+	"\vStoreVector\x12%.vectron.worker.v1.StoreVectorRequest\x1a&.vectron.worker.v1.StoreVectorResponse\"\x00\x12X\n" +
+	"\tGetVector\x12#.vectron.worker.v1.GetVectorRequest\x1a$.vectron.worker.v1.GetVectorResponse\"\x00\x12a\n" +
+	"\fDeleteVector\x12&.vectron.worker.v1.DeleteVectorRequest\x1a'.vectron.worker.v1.DeleteVectorResponse\"\x00\x12O\n" +
+	"\x06Search\x12 .vectron.worker.v1.SearchRequest\x1a!.vectron.worker.v1.SearchResponse\"\x00\x12F\n" +
+	"\x03Put\x12\x1d.vectron.worker.v1.PutRequest\x1a\x1e.vectron.worker.v1.PutResponse\"\x00\x12F\n" +
+	"\x03Get\x12\x1d.vectron.worker.v1.GetRequest\x1a\x1e.vectron.worker.v1.GetResponse\"\x00\x12O\n" +
+	"\x06Delete\x12 .vectron.worker.v1.DeleteRequest\x1a!.vectron.worker.v1.DeleteResponse\"\x00\x12O\n" +
+	"\x06Status\x12 .vectron.worker.v1.StatusRequest\x1a!.vectron.worker.v1.StatusResponse\"\x00\x12L\n" +
+	"\x05Flush\x12\x1f.vectron.worker.v1.FlushRequest\x1a .vectron.worker.v1.FlushResponse\"\x00B=Z;github.com/pavandhadge/vectron/placementdriver/proto/workerb\x06proto3"
 
 var (
 	file_worker_proto_rawDescOnce sync.Once
@@ -959,50 +1040,50 @@ func file_worker_proto_rawDescGZIP() []byte {
 
 var file_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_worker_proto_goTypes = []any{
-	(*Vector)(nil),               // 0: worker.Vector
-	(*StoreVectorRequest)(nil),   // 1: worker.StoreVectorRequest
-	(*StoreVectorResponse)(nil),  // 2: worker.StoreVectorResponse
-	(*GetVectorRequest)(nil),     // 3: worker.GetVectorRequest
-	(*GetVectorResponse)(nil),    // 4: worker.GetVectorResponse
-	(*DeleteVectorRequest)(nil),  // 5: worker.DeleteVectorRequest
-	(*DeleteVectorResponse)(nil), // 6: worker.DeleteVectorResponse
-	(*SearchRequest)(nil),        // 7: worker.SearchRequest
-	(*SearchResponse)(nil),       // 8: worker.SearchResponse
-	(*KeyValuePair)(nil),         // 9: worker.KeyValuePair
-	(*PutRequest)(nil),           // 10: worker.PutRequest
-	(*PutResponse)(nil),          // 11: worker.PutResponse
-	(*GetRequest)(nil),           // 12: worker.GetRequest
-	(*GetResponse)(nil),          // 13: worker.GetResponse
-	(*DeleteRequest)(nil),        // 14: worker.DeleteRequest
-	(*DeleteResponse)(nil),       // 15: worker.DeleteResponse
-	(*StatusRequest)(nil),        // 16: worker.StatusRequest
-	(*StatusResponse)(nil),       // 17: worker.StatusResponse
-	(*FlushRequest)(nil),         // 18: worker.FlushRequest
-	(*FlushResponse)(nil),        // 19: worker.FlushResponse
+	(*Vector)(nil),               // 0: vectron.worker.v1.Vector
+	(*StoreVectorRequest)(nil),   // 1: vectron.worker.v1.StoreVectorRequest
+	(*StoreVectorResponse)(nil),  // 2: vectron.worker.v1.StoreVectorResponse
+	(*GetVectorRequest)(nil),     // 3: vectron.worker.v1.GetVectorRequest
+	(*GetVectorResponse)(nil),    // 4: vectron.worker.v1.GetVectorResponse
+	(*DeleteVectorRequest)(nil),  // 5: vectron.worker.v1.DeleteVectorRequest
+	(*DeleteVectorResponse)(nil), // 6: vectron.worker.v1.DeleteVectorResponse
+	(*SearchRequest)(nil),        // 7: vectron.worker.v1.SearchRequest
+	(*SearchResponse)(nil),       // 8: vectron.worker.v1.SearchResponse
+	(*KeyValuePair)(nil),         // 9: vectron.worker.v1.KeyValuePair
+	(*PutRequest)(nil),           // 10: vectron.worker.v1.PutRequest
+	(*PutResponse)(nil),          // 11: vectron.worker.v1.PutResponse
+	(*GetRequest)(nil),           // 12: vectron.worker.v1.GetRequest
+	(*GetResponse)(nil),          // 13: vectron.worker.v1.GetResponse
+	(*DeleteRequest)(nil),        // 14: vectron.worker.v1.DeleteRequest
+	(*DeleteResponse)(nil),       // 15: vectron.worker.v1.DeleteResponse
+	(*StatusRequest)(nil),        // 16: vectron.worker.v1.StatusRequest
+	(*StatusResponse)(nil),       // 17: vectron.worker.v1.StatusResponse
+	(*FlushRequest)(nil),         // 18: vectron.worker.v1.FlushRequest
+	(*FlushResponse)(nil),        // 19: vectron.worker.v1.FlushResponse
 }
 var file_worker_proto_depIdxs = []int32{
-	0,  // 0: worker.StoreVectorRequest.vector:type_name -> worker.Vector
-	0,  // 1: worker.GetVectorResponse.vector:type_name -> worker.Vector
-	9,  // 2: worker.PutRequest.kv:type_name -> worker.KeyValuePair
-	9,  // 3: worker.GetResponse.kv:type_name -> worker.KeyValuePair
-	1,  // 4: worker.WorkerService.StoreVector:input_type -> worker.StoreVectorRequest
-	3,  // 5: worker.WorkerService.GetVector:input_type -> worker.GetVectorRequest
-	5,  // 6: worker.WorkerService.DeleteVector:input_type -> worker.DeleteVectorRequest
-	7,  // 7: worker.WorkerService.Search:input_type -> worker.SearchRequest
-	10, // 8: worker.WorkerService.Put:input_type -> worker.PutRequest
-	12, // 9: worker.WorkerService.Get:input_type -> worker.GetRequest
-	14, // 10: worker.WorkerService.Delete:input_type -> worker.DeleteRequest
-	16, // 11: worker.WorkerService.Status:input_type -> worker.StatusRequest
-	18, // 12: worker.WorkerService.Flush:input_type -> worker.FlushRequest
-	2,  // 13: worker.WorkerService.StoreVector:output_type -> worker.StoreVectorResponse
-	4,  // 14: worker.WorkerService.GetVector:output_type -> worker.GetVectorResponse
-	6,  // 15: worker.WorkerService.DeleteVector:output_type -> worker.DeleteVectorResponse
-	8,  // 16: worker.WorkerService.Search:output_type -> worker.SearchResponse
-	11, // 17: worker.WorkerService.Put:output_type -> worker.PutResponse
-	13, // 18: worker.WorkerService.Get:output_type -> worker.GetResponse
-	15, // 19: worker.WorkerService.Delete:output_type -> worker.DeleteResponse
-	17, // 20: worker.WorkerService.Status:output_type -> worker.StatusResponse
-	19, // 21: worker.WorkerService.Flush:output_type -> worker.FlushResponse
+	0,  // 0: vectron.worker.v1.StoreVectorRequest.vector:type_name -> vectron.worker.v1.Vector
+	0,  // 1: vectron.worker.v1.GetVectorResponse.vector:type_name -> vectron.worker.v1.Vector
+	9,  // 2: vectron.worker.v1.PutRequest.kv:type_name -> vectron.worker.v1.KeyValuePair
+	9,  // 3: vectron.worker.v1.GetResponse.kv:type_name -> vectron.worker.v1.KeyValuePair
+	1,  // 4: vectron.worker.v1.WorkerService.StoreVector:input_type -> vectron.worker.v1.StoreVectorRequest
+	3,  // 5: vectron.worker.v1.WorkerService.GetVector:input_type -> vectron.worker.v1.GetVectorRequest
+	5,  // 6: vectron.worker.v1.WorkerService.DeleteVector:input_type -> vectron.worker.v1.DeleteVectorRequest
+	7,  // 7: vectron.worker.v1.WorkerService.Search:input_type -> vectron.worker.v1.SearchRequest
+	10, // 8: vectron.worker.v1.WorkerService.Put:input_type -> vectron.worker.v1.PutRequest
+	12, // 9: vectron.worker.v1.WorkerService.Get:input_type -> vectron.worker.v1.GetRequest
+	14, // 10: vectron.worker.v1.WorkerService.Delete:input_type -> vectron.worker.v1.DeleteRequest
+	16, // 11: vectron.worker.v1.WorkerService.Status:input_type -> vectron.worker.v1.StatusRequest
+	18, // 12: vectron.worker.v1.WorkerService.Flush:input_type -> vectron.worker.v1.FlushRequest
+	2,  // 13: vectron.worker.v1.WorkerService.StoreVector:output_type -> vectron.worker.v1.StoreVectorResponse
+	4,  // 14: vectron.worker.v1.WorkerService.GetVector:output_type -> vectron.worker.v1.GetVectorResponse
+	6,  // 15: vectron.worker.v1.WorkerService.DeleteVector:output_type -> vectron.worker.v1.DeleteVectorResponse
+	8,  // 16: vectron.worker.v1.WorkerService.Search:output_type -> vectron.worker.v1.SearchResponse
+	11, // 17: vectron.worker.v1.WorkerService.Put:output_type -> vectron.worker.v1.PutResponse
+	13, // 18: vectron.worker.v1.WorkerService.Get:output_type -> vectron.worker.v1.GetResponse
+	15, // 19: vectron.worker.v1.WorkerService.Delete:output_type -> vectron.worker.v1.DeleteResponse
+	17, // 20: vectron.worker.v1.WorkerService.Status:output_type -> vectron.worker.v1.StatusResponse
+	19, // 21: vectron.worker.v1.WorkerService.Flush:output_type -> vectron.worker.v1.FlushResponse
 	13, // [13:22] is the sub-list for method output_type
 	4,  // [4:13] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name

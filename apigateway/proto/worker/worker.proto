@@ -4,7 +4,7 @@ package vectron.worker.v1;
 option go_package = "github.com/pavandhadge/vectron/apigateway/proto/worker";
 
 // The worker service definition.
-service WorkerService {
+service WorkerService{
   // Vector operations
   rpc StoreVector(StoreVectorRequest) returns (StoreVectorResponse) {}
   rpc GetVector(GetVectorRequest) returns (GetVectorResponse) {}
@@ -29,13 +29,15 @@ message Vector {
 }
 
 message StoreVectorRequest {
-  Vector vector = 1;
+  uint64 shard_id = 1;
+  Vector vector = 2;
 }
 
 message StoreVectorResponse {}
 
 message GetVectorRequest {
-  string id = 1;
+  uint64 shard_id = 1;
+  string id = 2;
 }
 
 message GetVectorResponse {
@@ -43,15 +45,17 @@ message GetVectorResponse {
 }
 
 message DeleteVectorRequest {
-  string id = 1;
+  uint64 shard_id = 1;
+  string id = 2;
 }
 
 message DeleteVectorResponse {}
 
 message SearchRequest {
-  repeated float vector = 1;
-  int32 k = 2;
-  bool brute_force = 3;
+  uint64 shard_id = 1;
+  repeated float vector = 2;
+  int32 k = 3;
+  bool brute_force = 4;
 }
 
 message SearchResponse {
@@ -65,13 +69,15 @@ message KeyValuePair {
 }
 
 message PutRequest {
-  KeyValuePair kv = 1;
+  uint64 shard_id = 1;
+  KeyValuePair kv = 2;
 }
 
 message PutResponse {}
 
 message GetRequest {
-  bytes key = 1;
+  uint64 shard_id = 1;
+  bytes key = 2;
 }
 
 message GetResponse {
@@ -79,18 +85,23 @@ message GetResponse {
 }
 
 message DeleteRequest {
-  bytes key = 1;
+  uint64 shard_id = 1;
+  bytes key = 2;
 }
 
 message DeleteResponse {}
 
 // Control/Admin messages
-message StatusRequest {}
+message StatusRequest {
+  uint64 shard_id = 1;
+}
 
 message StatusResponse {
   string status = 1;
 }
 
-message FlushRequest {}
+message FlushRequest {
+  uint64 shard_id = 1;
+}
 
 message FlushResponse {}

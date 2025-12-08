@@ -27,10 +27,12 @@ type gatewayServer struct {
 	placementClient placementpb.PlacementServiceClient
 }
 
-// Generic forwarder — used by all RPCs that go to a worker
-func (s *gatewayServer) forwardToWorker(ctx context.Context, collection string, call func(workerpb.WorkerServiceClient) (interface{}, error)) (interface{}, error) {
+// forwardToWorker gets a worker for a given collection and optional vector ID,
+// connects to it, and executes the given function.
+func (s *gatewayServer) forwardToWorker(ctx context.Context, collection string, vectorID string, call func(workerpb.WorkerServiceClient, uint64) (interface{}, error)) (interface{}, error) {
 	resp, err := s.placementClient.GetWorker(ctx, &placementpb.GetWorkerRequest{
 		Collection: collection,
+		VectorId:   vectorID,
 	})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "could not get worker for collection %q: %v", collection, err)
@@ -46,7 +48,7 @@ func (s *gatewayServer) forwardToWorker(ctx context.Context, collection string, 
 	defer conn.Close()
 
 	client := workerpb.NewWorkerServiceClient(conn)
-	return call(client)
+	return call(client, uint64(resp.ShardId))
 }
 
 // ================ RPCs IMPLEMENTED ================
@@ -78,6 +80,8 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 	if len(req.Points) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "at least one point is required for upsert")
 	}
+
+	var upsertedCount int32
 	for _, point := range req.Points {
 		if point.Id == "" {
 			return nil, status.Error(codes.InvalidArgument, "point ID cannot be empty")
@@ -85,32 +89,14 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 		if len(point.Vector) == 0 {
 			return nil, status.Error(codes.InvalidArgument, "point vector cannot be empty")
 		}
-	}
 
-	// Get worker for the collection
-	pdResp, err := s.placementClient.GetWorker(ctx, &placementpb.GetWorkerRequest{
-		Collection: req.Collection,
-	})
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get worker for collection %s: %v", req.Collection, err)
-	}
-	if pdResp.Address == "" {
-		return nil, status.Errorf(codes.NotFound, "collection %s not found", req.Collection)
-	}
+		// Get worker for this specific point.
+		_, err := s.forwardToWorker(ctx, req.Collection, point.Id, func(client workerpb.WorkerServiceClient, shardID uint64) (interface{}, error) {
+			workerReq := translator.ToWorkerStoreVectorRequestFromPoint(point, shardID)
+			_, err := client.StoreVector(ctx, workerReq)
+			return nil, err
+		})
 
-	// Connect to worker
-	conn, err := grpc.Dial(pdResp.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "worker at %s unreachable: %v", pdResp.Address, err)
-	}
-	defer conn.Close()
-	client := workerpb.NewWorkerServiceClient(conn)
-
-	// Upsert points one by one
-	var upsertedCount int32
-	for _, point := range req.Points {
-		workerReq := translator.ToWorkerStoreVectorRequestFromPoint(point)
-		_, err := client.StoreVector(ctx, workerReq)
 		if err != nil {
 			// In a real implementation, we might want to collect errors
 			// and continue, or implement rollback logic.
@@ -134,8 +120,8 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 	if req.TopK == 0 {
 		req.TopK = 10
 	}
-	result, err := s.forwardToWorker(ctx, req.Collection, func(c workerpb.WorkerServiceClient) (interface{}, error) {
-		workerReq := translator.ToWorkerSearchRequest(req)
+	result, err := s.forwardToWorker(ctx, req.Collection, "", func(c workerpb.WorkerServiceClient, shardID uint64) (interface{}, error) {
+		workerReq := translator.ToWorkerSearchRequest(req, shardID)
 		res, err := c.Search(ctx, workerReq)
 		if err != nil {
 			return nil, err
@@ -149,8 +135,8 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 }
 
 func (s *gatewayServer) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetResponse, error) {
-	result, err := s.forwardToWorker(ctx, req.Collection, func(c workerpb.WorkerServiceClient) (interface{}, error) {
-		workerReq := translator.ToWorkerGetVectorRequest(req)
+	result, err := s.forwardToWorker(ctx, req.Collection, req.Id, func(c workerpb.WorkerServiceClient, shardID uint64) (interface{}, error) {
+		workerReq := translator.ToWorkerGetVectorRequest(req, shardID)
 		res, err := c.GetVector(ctx, workerReq)
 		if err != nil {
 			return nil, err
@@ -164,8 +150,8 @@ func (s *gatewayServer) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetRes
 }
 
 func (s *gatewayServer) Delete(ctx context.Context, req *pb.DeleteRequest) (*pb.DeleteResponse, error) {
-	result, err := s.forwardToWorker(ctx, req.Collection, func(c workerpb.WorkerServiceClient) (interface{}, error) {
-		workerReq := translator.ToWorkerDeleteVectorRequest(req)
+	result, err := s.forwardToWorker(ctx, req.Collection, req.Id, func(c workerpb.WorkerServiceClient, shardID uint64) (interface{}, error) {
+		workerReq := translator.ToWorkerDeleteVectorRequest(req, shardID)
 		res, err := c.DeleteVector(ctx, workerReq)
 		if err != nil {
 			return nil, err
