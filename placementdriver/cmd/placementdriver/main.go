@@ -10,10 +10,10 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -72,6 +72,22 @@ func main() {
 		log.Fatalf("failed to create raft node: %v", err)
 	}
 
+	// If bootstrap is enabled, we are the first node.
+	// We need to wait until we are the leader, then register ourselves.
+	if bootstrap {
+		go func() {
+			for {
+				time.Sleep(1 * time.Second)
+				if raftNode.State() == raft.Leader {
+					if err := registerPeer(raftNode, nodeID, raftAddr, httpAddr); err != nil {
+						log.Fatalf("failed to register self: %v", err)
+					}
+					return
+				}
+			}
+		}()
+	}
+
 	// Create the gRPC server.
 	grpcServer := server.NewServer(raftNode, fsm)
 
@@ -97,66 +113,70 @@ func main() {
 			return
 		}
 
-		remoteAddr := m["addr"]
-		nodeID := m["id"]
+		remoteRaftAddr := m["addr"]
+		remoteNodeID := m["id"]
+		remoteAPIAddr := m["api_addr"]
 
 		if raftNode.State() != raft.Leader {
-			// Forward the request to the leader.
-			leader := raftNode.Leader()
-			if leader == "" {
+			leaderRaftAddr := raftNode.Leader()
+			if leaderRaftAddr == "" {
 				http.Error(w, "no leader", http.StatusServiceUnavailable)
 				return
 			}
 
-			// Get leader's http address from its raft address.
-			// This is a simplification. A real system would need a more robust discovery mechanism.
-			// Here we assume the HTTP port can be derived from the Raft port.
-			// A better approach would be to store the HTTP address in the FSM.
-			// For now, we'll assume http is raft port + 100
-			parts := strings.Split(string(leader), ":")
-			if len(parts) != 2 {
-				http.Error(w, "invalid leader address", http.StatusInternalServerError)
+			// Get leader's ID from its address
+			var leaderID string
+			cf := raftNode.GetConfiguration()
+			if err := cf.Error(); err != nil {
+				http.Error(w, "failed to get raft configuration", http.StatusInternalServerError)
 				return
 			}
-			port, err := strconv.Atoi(parts[1])
-			if err != nil {
-				http.Error(w, "invalid leader port", http.StatusInternalServerError)
-				return
-			}
-			leaderHttpAddr := fmt.Sprintf("%s:%d", parts[0], port+1000) // Assuming HTTP is 1000 ports away from raft
-
-			b, err := json.Marshal(m)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			resp, err := http.Post(fmt.Sprintf("http://%s/join", leaderHttpAddr), "application/json", bytes.NewReader(b))
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			defer resp.Body.Close()
-
-			// copy header
-			for k, vv := range resp.Header {
-				for _, v := range vv {
-					w.Header().Add(k, v)
+			for _, srv := range cf.Configuration().Servers {
+				if srv.Address == leaderRaftAddr {
+					leaderID = string(srv.ID)
+					break
 				}
 			}
-			w.WriteHeader(resp.StatusCode)
+			if leaderID == "" {
+				http.Error(w, "leader not found in configuration", http.StatusInternalServerError)
+				return
+			}
 
-			io.Copy(w, resp.Body)
+			// Get leader's http address from FSM
+			peer, ok := fsm.GetPeer(leaderID)
+			if !ok {
+				http.Error(w, "leader not ready", http.StatusServiceUnavailable)
+				return
+			}
 
+			// Redirect to the leader.
+			redirectURL := "http://" + peer.APIAddr + "/join"
+			log.Printf("redirecting join request to leader at %s", redirectURL)
+			http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
 			return
 		}
 
-		future := raftNode.AddVoter(raft.ServerID(nodeID), raft.ServerAddress(remoteAddr), 0, 0)
+		// This node is the leader. Add the new node as a voter.
+		future := raftNode.AddVoter(raft.ServerID(remoteNodeID), raft.ServerAddress(remoteRaftAddr), 0, 0)
 		if err := future.Error(); err != nil {
 			log.Printf("failed to add voter: %v", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		log.Printf("added voter %s at %s", nodeID, remoteAddr)
+		log.Printf("added voter %s at %s", remoteNodeID, remoteRaftAddr)
+
+		// Propose a command to register the new peer.
+		if err := registerPeer(raftNode, remoteNodeID, remoteRaftAddr, remoteAPIAddr); err != nil {
+			log.Printf("failed to register peer %s: %v", remoteNodeID, err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			// At this point, the voter is added but peer registration failed.
+			// This might lead to inconsistencies. A real production system would need
+			// a more robust way to handle this, e.g. retries or a cleanup mechanism.
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		io.WriteString(w, "OK")
 	})
 
 	go func() {
@@ -168,7 +188,12 @@ func main() {
 
 	// If join address is specified, join the cluster.
 	if joinAddr != "" {
-		join(joinAddr, raftAddr, nodeID)
+		go func() {
+			join(joinAddr, raftAddr, httpAddr, nodeID)
+			if err := registerPeer(raftNode, nodeID, raftAddr, httpAddr); err != nil {
+				log.Fatalf("failed to register self after joining: %v", err)
+			}
+		}()
 	}
 
 	// Wait for a signal to shutdown.
@@ -185,22 +210,94 @@ func main() {
 	log.Println("server stopped")
 }
 
-func join(joinAddr, raftAddr, nodeID string) {
-	b, err := json.Marshal(map[string]string{"addr": raftAddr, "id": nodeID})
+func join(joinAddr, raftAddr, apiAddr, nodeID string) {
+	b, err := json.Marshal(map[string]string{"addr": raftAddr, "api_addr": apiAddr, "id": nodeID})
 	if err != nil {
 		log.Fatalf("failed to marshal join request: %v", err)
 	}
 
+	// Create a client that does not follow redirects automatically for POST requests.
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
 	for {
-		resp, err := http.Post(fmt.Sprintf("http://%s/join", joinAddr), "application/json", bytes.NewReader(b))
-		if err == nil {
-			defer resp.Body.Close()
+		// The joinAddr might be just host:port, so we need to add http://
+		if !strings.HasPrefix(joinAddr, "http") {
+			joinAddr = "http://" + joinAddr
+		}
+
+		u, err := url.Parse(joinAddr)
+		if err != nil {
+			log.Fatalf("invalid join address: %v", err)
+		}
+		u.Path = "/join"
+
+		req, err := http.NewRequest("POST", u.String(), bytes.NewReader(b))
+		if err != nil {
+			log.Printf("failed to create join request: %v, will retry in 5s", err)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("failed to join cluster, will retry in 5s: %v", err)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
 			body, _ := ioutil.ReadAll(resp.Body)
 			log.Printf("joined cluster successfully, response: %s", string(body))
 			return
 		}
 
-		log.Printf("failed to join cluster, will retry in 5s: %v", err)
+		if resp.StatusCode == http.StatusTemporaryRedirect {
+			location := resp.Header.Get("Location")
+			if location == "" {
+				log.Printf("join redirect location is empty, will retry with the same address in 5s")
+			} else {
+				log.Printf("redirecting join request to %s", location)
+				joinAddr = location
+			}
+			time.Sleep(1 * time.Second) // small delay before retrying redirect
+			continue
+		}
+
+		body, _ := ioutil.ReadAll(resp.Body)
+		log.Printf("failed to join cluster with status %d: %s, will retry in 5s", resp.StatusCode, string(body))
 		time.Sleep(5 * time.Second)
 	}
+}
+
+func registerPeer(raftNode *pdRaft.Raft, nodeID, raftAddr, apiAddr string) error {
+	payload := fsm.RegisterPeerPayload{
+		ID:       nodeID,
+		RaftAddr: raftAddr,
+		APIAddr:  apiAddr,
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal register peer payload: %w", err)
+	}
+	cmd := &fsm.Command{
+		Type:    fsm.RegisterPeer,
+		Payload: payloadBytes,
+	}
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to marshal register peer command: %w", err)
+	}
+
+	applyFuture := raftNode.Apply(cmdBytes, 5*time.Second)
+	if err := applyFuture.Error(); err != nil {
+		return fmt.Errorf("failed to apply register peer command: %w", err)
+	}
+	log.Printf("registered peer %s with api address %s", nodeID, apiAddr)
+	return nil
 }
