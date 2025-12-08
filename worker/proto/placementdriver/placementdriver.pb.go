@@ -949,7 +949,7 @@ const file_placementdriver_proto_rawDesc = "" +
 	"\tRebalance\x12,.vectron.placementdriver.v1.RebalanceRequest\x1a-.vectron.placementdriver.v1.RebalanceResponse\"\x00\x12\x7f\n" +
 	"\x10CreateCollection\x123.vectron.placementdriver.v1.CreateCollectionRequest\x1a4.vectron.placementdriver.v1.CreateCollectionResponse\"\x00\x12|\n" +
 	"\x0fListCollections\x122.vectron.placementdriver.v1.ListCollectionsRequest\x1a3.vectron.placementdriver.v1.ListCollectionsResponse\"\x00\x12\x7f\n" +
-	"\x10DeleteCollection\x123.vectron.placementdriver.v1.DeleteCollectionRequest\x1a4.vectron.placementdriver.v1.DeleteCollectionResponse\"\x00BAZ?github.com/pavandhadge/vectron/apigateway/proto/placementdriverb\x06proto3"
+	"\x10DeleteCollection\x123.vectron.placementdriver.v1.DeleteCollectionRequest\x1a4.vectron.placementdriver.v1.DeleteCollectionResponse\"\x00B=Z;github.com/pavandhadge/vectron/wroker/proto/placementdriverb\x06proto3"
 
 var (
 	file_placementdriver_proto_rawDescOnce sync.Once

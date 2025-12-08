@@ -7,7 +7,7 @@ import (
 	"github.com/lni/dragonboat/config"
 	"github.com/lni/dragonboat/v4"
 	sm "github.com/lni/dragonboat/v4/statemachine"
-	"github.com/pavandhadge/vectron/placementdriver/internal/fsm"
+	"github.com/pavandhadge/vectron/worker/internal/pd"
 )
 
 // Manager is responsible for managing the lifecycle of shard replicas on a worker node.
@@ -32,13 +32,13 @@ func NewManager(nh *dragonboat.NodeHost, workerDataDir string, nodeID uint64) *M
 
 // SyncShards compares the desired shard assignments from the PD with the
 // currently running replicas and starts/stops replicas as needed.
-func (m *Manager) SyncShards(assignments []*fsm.ShardAssignment) {
+func (m *Manager) SyncShards(assignments []*pd.ShardAssignment) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	log.Printf("ShardManager: Syncing %d assignments.", len(assignments))
 
-	desiredShards := make(map[uint64]*fsm.ShardAssignment)
+	desiredShards := make(map[uint64]*pd.ShardAssignment)
 	for _, assignment := range assignments {
 		desiredShards[assignment.ShardInfo.ShardID] = assignment
 	}
@@ -52,7 +52,7 @@ func (m *Manager) SyncShards(assignments []*fsm.ShardAssignment) {
 	}
 
 	// Identify shards to start
-	shardsToStart := []*fsm.ShardAssignment{}
+	shardsToStart := []*pd.ShardAssignment{}
 	for shardID, assignment := range desiredShards {
 		if _, running := m.runningReplicas[shardID]; !running {
 			shardsToStart = append(shardsToStart, assignment)

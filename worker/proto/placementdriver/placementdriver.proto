@@ -3,7 +3,7 @@ syntax = "proto3";
 
 package vectron.placementdriver.v1;
 
-option go_package = "github.com/pavandhadge/vectron/apigateway/proto/placementdriver";
+option go_package = "github.com/pavandhadge/vectron/wroker/proto/placementdriver";
 
 // ===============================================
 // Placement Driver — The Brain of Vectron

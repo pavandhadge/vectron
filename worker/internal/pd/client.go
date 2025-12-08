@@ -8,8 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/pavandhadge/vectron/placementdriver/internal/fsm"
-	pd "github.com/pavandhadge/vectron/placementdriver/proto/placementdriver"
+	pd "github.com/pavandhadge/vectron/worker/proto/placementdriver"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -35,10 +34,11 @@ func NewClient(pdAddr string, workerAddr string) (*Client, error) {
 
 	grpcClient := pd.NewPlacementServiceClient(conn)
 	return &Client{
-		grpcClient: grpcClient,
-		conn:       conn,
-		workerAddr: workerAddr,
-	}, nil
+			grpcClient: grpcClient,
+			conn:       conn,
+			workerAddr: workerAddr,
+		},
+		nil
 }
 
 // Register registers the worker with the Placement Driver and gets a worker ID.
@@ -67,7 +67,7 @@ func (c *Client) Register(ctx context.Context) error {
 
 // StartHeartbeatLoop starts a background loop to send heartbeats to the PD.
 // It takes a channel to send shard assignment updates on.
-func (c *Client) StartHeartbeatLoop(shardUpdateChan chan<- []*fsm.ShardAssignment) {
+func (c *Client) StartHeartbeatLoop(shardUpdateChan chan<- []*ShardAssignment) {
 	log.Println("Starting heartbeat loop...")
 	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
@@ -83,7 +83,7 @@ func (c *Client) StartHeartbeatLoop(shardUpdateChan chan<- []*fsm.ShardAssignmen
 	}
 }
 
-func (c *Client) sendHeartbeat(shardUpdateChan chan<- []*fsm.ShardAssignment) {
+func (c *Client) sendHeartbeat(shardUpdateChan chan<- []*ShardAssignment) {
 	if c.workerID == 0 {
 		log.Println("Worker not registered yet, skipping heartbeat.")
 		return
@@ -109,7 +109,7 @@ func (c *Client) sendHeartbeat(shardUpdateChan chan<- []*fsm.ShardAssignment) {
 
 	// The response message contains the JSON-encoded shard assignments.
 	if res.Message != "" {
-		var assignments []*fsm.ShardAssignment
+		var assignments []*ShardAssignment
 		if err := json.Unmarshal([]byte(res.Message), &assignments); err != nil {
 			log.Printf("Failed to unmarshal shard assignments: %v", err)
 			return

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/lni/dragonboat/v4"
 	"github.com/lni/dragonboat/v4/config"
-	"github.com/pavandhadge/vectron/placementdriver/internal/fsm"
 	"github.com/pavandhadge/vectron/worker/internal"
 	"github.com/pavandhadge/vectron/worker/internal/pd"
 	"github.com/pavandhadge/vectron/worker/internal/shard"
@@ -64,15 +62,11 @@ func main() {
 	defer pdClient.Close()
 
 	// Register the worker with the PD.
-	if err := pdClient.Register(context.Background()); err != nil {
-		log.Fatalf("failed to register with PD: %v", err)
-	}
-
 	// Create the shard manager.
 	shardManager := shard.NewManager(nh, *workerDataDir, *nodeID)
 
 	// Start the heartbeat loop and shard assignment processing.
-	shardUpdateChan := make(chan []*fsm.ShardAssignment)
+	shardUpdateChan := make(chan []*pd.ShardAssignment)
 	go pdClient.StartHeartbeatLoop(shardUpdateChan)
 
 	// Goroutine to listen for shard assignments and manage local replicas.
