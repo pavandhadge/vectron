@@ -74,6 +74,8 @@ type ShardInfo struct {
 	KeyRangeEnd   uint64   `json:"key_range_end"`
 	Replicas      []uint64 `json:"replicas"` // Slice of worker node IDs
 	LeaderID      uint64   `json:"leader_id"`
+	Dimension     int32    `json:"dimension"`
+	Distance      string   `json:"distance"`
 }
 
 // Collection holds the metadata for a single collection, including its shards.
@@ -261,6 +263,8 @@ func (f *FSM) applyCreateCollection(payload CreateCollectionPayload) error {
 			KeyRangeStart: startKey,
 			KeyRangeEnd:   endKey,
 			Replicas:      replicas,
+			Dimension:     payload.Dimension,
+			Distance:      payload.Distance,
 		}
 		collection.Shards[shardID] = shard
 	}

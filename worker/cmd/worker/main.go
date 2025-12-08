@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -13,8 +14,11 @@ import (
 	"github.com/lni/dragonboat/v4"
 	"github.com/lni/dragonboat/v4/config"
 	"github.com/pavandhadge/vectron/placementdriver/internal/fsm"
+	"github.com/pavandhadge/vectron/worker/internal"
 	"github.com/pavandhadge/vectron/worker/internal/pd"
 	"github.com/pavandhadge/vectron/worker/internal/shard"
+	"github.com/pavandhadge/vectron/worker/proto/worker"
+	"google.golang.org/grpc"
 )
 
 func main() {
@@ -78,10 +82,25 @@ func main() {
 		}
 	}()
 
+	// Start the gRPC server.
+	lis, err := net.Listen("tcp", *grpcAddr)
+	if err != nil {
+		log.Fatalf("failed to listen on %s: %v", *grpcAddr, err)
+	}
+	s := grpc.NewServer()
+	worker.RegisterWorkerServiceServer(s, internal.NewGrpcServer(nh))
+	go func() {
+		log.Printf("gRPC server listening at %v", lis.Addr())
+		if err := s.Serve(lis); err != nil {
+			log.Fatalf("failed to serve gRPC: %v", err)
+		}
+	}()
+
 	log.Println("Worker started. Waiting for signals.")
 	sig_chan := make(chan os.Signal, 1)
 	signal.Notify(sig_chan, os.Interrupt, syscall.SIGTERM)
 	<-sig_chan
 
 	log.Println("Shutting down worker.")
+	s.GracefulStop()
 }

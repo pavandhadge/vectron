@@ -46,19 +46,18 @@ type StateMachine struct {
 }
 
 // NewStateMachine creates a new shard StateMachine.
-func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string) (*StateMachine, error) {
+func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dimension int32, distance string) (*StateMachine, error) {
 	dbPath := filepath.Join(workerDataDir, fmt.Sprintf("shard-%d", clusterID))
 
 	opts := &storage.Options{
 		Path:            dbPath,
 		CreateIfMissing: true,
-		// TODO: Configure HNSW from collection settings
 		HNSWConfig: storage.HNSWConfig{
-			Dim:            128, // Example dimension
+			Dim:            int(dimension),
 			M:              16,
 			EfConstruction: 200,
 			EfSearch:       100,
-			DistanceMetric: "euclidean",
+			DistanceMetric: distance,
 		},
 	}
 

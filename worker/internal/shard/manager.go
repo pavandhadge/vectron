@@ -84,7 +84,7 @@ func (m *Manager) SyncShards(assignments []*fsm.ShardAssignment) {
 		}
 
 		createFSM := func(clusterID uint64, nodeID uint64) sm.IOnDiskStateMachine {
-			sm, err := NewStateMachine(clusterID, nodeID, m.workerDataDir)
+			sm, err := NewStateMachine(clusterID, nodeID, m.workerDataDir, assignment.ShardInfo.Dimension, assignment.ShardInfo.Distance)
 			if err != nil {
 				log.Panicf("failed to create state machine: %v", err)
 			}

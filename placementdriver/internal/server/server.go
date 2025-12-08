@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"strconv"
 	"sync"
 	"time"
@@ -79,6 +80,12 @@ func (s *Server) RegisterWorker(ctx context.Context, req *pb.RegisterWorkerReque
 	}, nil
 }
 
+// ShardAssignment contains all info a worker needs to manage a shard replica.
+type ShardAssignment struct {
+	ShardInfo      *fsm.ShardInfo    `json:"shard_info"`
+	InitialMembers map[uint64]string `json:"initial_members"` // map[nodeID]raftAddress
+}
+
 // Heartbeat is called by a worker to signal it's alive and to get its shard assignments.
 func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.HeartbeatResponse, error) {
 	workerID, err := strconv.ParseUint(req.WorkerId, 10, 64)
@@ -152,10 +159,7 @@ func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.H
 	}, nil
 }
 
-// GetWorker handles a request to get a worker for a specific collection.
-// TODO: This is a temporary implementation. It should hash the vector_id to find the
-// correct shard and return the leader of that shard's replica group.
-// For now, it returns the address of the first replica of the first shard.
+// GetWorker handles a request to get a worker for a specific collection and vector ID.
 func (s *Server) GetWorker(ctx context.Context, req *pb.GetWorkerRequest) (*pb.GetWorkerResponse, error) {
 	if req.Collection == "" {
 		return nil, status.Error(codes.InvalidArgument, "collection name is required")
@@ -170,25 +174,45 @@ func (s *Server) GetWorker(ctx context.Context, req *pb.GetWorkerRequest) (*pb.G
 		return nil, status.Errorf(codes.Internal, "collection '%s' has no shards", req.Collection)
 	}
 
-	var firstShard *fsm.ShardInfo
-	for _, shard := range collection.Shards {
-		firstShard = shard
-		break
+	var targetShard *fsm.ShardInfo
+	if req.VectorId == "" {
+		// If no vector ID is provided, return the first shard for now.
+		// In a real scenario, this might route to a default shard or load balance.
+		for _, shard := range collection.Shards {
+			targetShard = shard
+			break
+		}
+	} else {
+		hash := fnv.New64a()
+		hash.Write([]byte(req.VectorId))
+		hashValue := hash.Sum64()
+		for _, shard := range collection.Shards {
+			if hashValue >= shard.KeyRangeStart && hashValue <= shard.KeyRangeEnd {
+				targetShard = shard
+				break
+			}
+		}
 	}
 
-	if len(firstShard.Replicas) == 0 {
-		return nil, status.Errorf(codes.Internal, "shard '%d' has no replicas", firstShard.ShardID)
+	if targetShard == nil {
+		return nil, status.Errorf(codes.NotFound, "no suitable shard found for vector_id '%s'", req.VectorId)
 	}
 
-	firstReplicaID := firstShard.Replicas[0]
+	if len(targetShard.Replicas) == 0 {
+		return nil, status.Errorf(codes.Internal, "shard '%d' has no replicas", targetShard.ShardID)
+	}
+
+	// TODO: Return the address of the LEADER of the replica group.
+	// For now, we return the address of the first replica.
+	firstReplicaID := targetShard.Replicas[0]
 	worker, ok := s.fsm.GetWorker(firstReplicaID)
 	if !ok {
-		return nil, status.Errorf(codes.Internal, "worker with ID '%d' not found for shard '%d'", firstReplicaID, firstShard.ShardID)
+		return nil, status.Errorf(codes.Internal, "worker with ID '%d' not found for shard '%d'", firstReplicaID, targetShard.ShardID)
 	}
 
 	return &pb.GetWorkerResponse{
 		Address: worker.Address,
-		ShardId: uint32(firstShard.ShardID),
+		ShardId: uint32(targetShard.ShardID),
 	}, nil
 }
 
