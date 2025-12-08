@@ -36,19 +36,7 @@ func init() {
 	flag.StringVar(&dataDir, "data-dir", "pd-data", "Data directory")
 }
 
-func main() {
-	flag.Parse()
-
-	if nodeID == 0 {
-		log.Fatalf("node-id is required and must be > 0")
-	}
-
-	// Parse the initial members flag.
-	initialMembers, err := parseInitialMembers(initialMembersStr)
-	if err != nil {
-		log.Fatalf("failed to parse initial members: %v", err)
-	}
-
+func Start(nodeID uint64, clusterID uint64, raftAddr, grpcAddr, dataDir string, initialMembers map[uint64]string) {
 	// Create the data directory.
 	nodeDataDir := filepath.Join(dataDir, fmt.Sprintf("node-%d", nodeID))
 	if err := os.MkdirAll(nodeDataDir, 0750); err != nil {
@@ -67,7 +55,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to create raft node: %v", err)
 	}
-	defer raftNode.Stop()
+	// Note: In a real test, we would need a way to stop this.
+	// For now, we assume the test process will be killed.
 
 	// Get the FSM instance from the Raft node.
 	fsm := raftNode.GetFSM()
@@ -83,21 +72,32 @@ func main() {
 	}
 	s := grpc.NewServer()
 	pb.RegisterPlacementServiceServer(s, grpcServer)
-	go func() {
-		log.Printf("gRPC server listening at %v", lis.Addr())
-		if err := s.Serve(lis); err != nil {
-			log.Fatalf("failed to serve gRPC: %v", err)
-		}
-	}()
+	log.Printf("gRPC server listening at %v", lis.Addr())
+	if err := s.Serve(lis); err != nil {
+		log.Fatalf("failed to serve gRPC: %v", err)
+	}
+}
+
+func main() {
+	flag.Parse()
+
+	if nodeID == 0 {
+		log.Fatalf("node-id is required and must be > 0")
+	}
+
+	// Parse the initial members flag.
+	initialMembers, err := parseInitialMembers(initialMembersStr)
+	if err != nil {
+		log.Fatalf("failed to parse initial members: %v", err)
+	}
+
+	go Start(nodeID, clusterID, raftAddr, grpcAddr, dataDir, initialMembers)
 
 	// Wait for a signal to shutdown.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	<-quit
 	log.Println("shutting down server...")
-
-	s.GracefulStop()
-	log.Println("server stopped")
 }
 
 // parseInitialMembers parses the -initial-members flag string.

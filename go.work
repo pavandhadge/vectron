@@ -2,5 +2,10 @@ go 1.24.0
 
 use (
 	.
+	./apigateway
+	./placementdriver
 	./worker
+	./clientlibs/go
 )
+
+replace google.golang.org/genproto => google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1

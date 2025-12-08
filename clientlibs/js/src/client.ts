@@ -1,15 +1,7 @@
+// First, import the gRPC module
 import * as grpc from "@grpc/grpc-js";
-import { VectronServiceClient } from "../proto/apigateway/apigateway_grpc_pb.js";
-import { CreateCollectionRequest } from "../proto/apigateway/createcollectionrequest.js";
-import {
-  ListCollectionsRequest,
-  UpsertRequest,
-  SearchRequest,
-  GetRequest,
-  DeleteRequest,
-  Point as ProtoPoint,
-} from "../proto/apigateway/apigateway_pb";
 
+// Then, import the custom error classes
 import {
   VectronError,
   AuthenticationError,
@@ -18,6 +10,18 @@ import {
   AlreadyExistsError,
   InternalServerError,
 } from "./errors";
+
+// Finally, import the generated protobuf classes from the correct path
+import {
+  CreateCollectionRequest,
+  VectronServiceClient,
+  DeleteRequest,
+  GetRequest,
+  ListCollectionsRequest,
+  Point as ProtoPoint,
+  SearchRequest,
+  UpsertRequest,
+} from "../proto/apigateway/apigateway.ts";
 
 /**
  * Represents a single vector point.

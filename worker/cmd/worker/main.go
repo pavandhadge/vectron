@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/lni/dragonboat/v4"
 	"github.com/lni/dragonboat/v4/config"
@@ -18,6 +20,69 @@ import (
 	"github.com/pavandhadge/vectron/worker/proto/worker"
 	"google.golang.org/grpc"
 )
+
+func Start(nodeID uint64, raftAddr, grpcAddr, pdAddr, workerDataDir string) {
+	// Create the top-level directory for the NodeHost.
+	nhDataDir := filepath.Join(workerDataDir, fmt.Sprintf("node-%d", nodeID))
+	if err := os.MkdirAll(nhDataDir, 0750); err != nil {
+		log.Fatalf("failed to create nodehost data dir: %v", err)
+	}
+
+	// Configure and create the NodeHost.
+	nhc := config.NodeHostConfig{
+		DeploymentID:  1,
+		NodeHostDir:   nhDataDir,
+		RaftAddress:   raftAddr,
+		ListenAddress: raftAddr,
+	}
+	nh, err := dragonboat.NewNodeHost(nhc)
+	if err != nil {
+		log.Fatalf("failed to create nodehost: %v", err)
+	}
+	// Note: In a real test, we would need a way to stop this.
+
+	log.Printf("Dragonboat NodeHost created. Node ID: %d, Raft Address: %s", nodeID, raftAddr)
+
+	// Create client for Placement Driver
+	pdClient, err := pd.NewClient(pdAddr, raftAddr)
+	if err != nil {
+		log.Fatalf("failed to create PD client: %v", err)
+	}
+
+	// Register the worker with the PD.
+	for i := 0; i < 5; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		if err := pdClient.Register(ctx); err == nil {
+			break
+		}
+	}
+
+	// Create the shard manager.
+	shardManager := shard.NewManager(nh, workerDataDir, nodeID)
+
+	// Start the heartbeat loop and shard assignment processing.
+	shardUpdateChan := make(chan []*pd.ShardAssignment)
+	go pdClient.StartHeartbeatLoop(shardUpdateChan)
+
+	go func() {
+		for assignments := range shardUpdateChan {
+			shardManager.SyncShards(assignments)
+		}
+	}()
+
+	// Start the gRPC server.
+	lis, err := net.Listen("tcp", grpcAddr)
+	if err != nil {
+		log.Fatalf("failed to listen on %s: %v", grpcAddr, err)
+	}
+	s := grpc.NewServer()
+	worker.RegisterWorkerServiceServer(s, internal.NewGrpcServer(nh))
+	log.Printf("gRPC server listening at %v", lis.Addr())
+	if err := s.Serve(lis); err != nil {
+		log.Fatalf("failed to serve gRPC: %v", err)
+	}
+}
 
 func main() {
 	var (
@@ -33,62 +98,7 @@ func main() {
 		log.Fatalf("node-id must be > 0")
 	}
 
-	// Create the top-level directory for the NodeHost.
-	nhDataDir := filepath.Join(*workerDataDir, fmt.Sprintf("node-%d", *nodeID))
-	if err := os.MkdirAll(nhDataDir, 0750); err != nil {
-		log.Fatalf("failed to create nodehost data dir: %v", err)
-	}
-
-	// Configure and create the NodeHost.
-	nhc := config.NodeHostConfig{
-		DeploymentID:  1,
-		NodeHostDir:   nhDataDir,
-		RaftAddress:   *raftAddr,
-		ListenAddress: *raftAddr,
-	}
-	nh, err := dragonboat.NewNodeHost(nhc)
-	if err != nil {
-		log.Fatalf("failed to create nodehost: %v", err)
-	}
-	defer nh.Stop()
-
-	log.Printf("Dragonboat NodeHost created. Node ID: %d, Raft Address: %s", *nodeID, *raftAddr)
-
-	// Create client for Placement Driver
-	pdClient, err := pd.NewClient(*pdAddr, *raftAddr)
-	if err != nil {
-		log.Fatalf("failed to create PD client: %v", err)
-	}
-	defer pdClient.Close()
-
-	// Register the worker with the PD.
-	// Create the shard manager.
-	shardManager := shard.NewManager(nh, *workerDataDir, *nodeID)
-
-	// Start the heartbeat loop and shard assignment processing.
-	shardUpdateChan := make(chan []*pd.ShardAssignment)
-	go pdClient.StartHeartbeatLoop(shardUpdateChan)
-
-	// Goroutine to listen for shard assignments and manage local replicas.
-	go func() {
-		for assignments := range shardUpdateChan {
-			shardManager.SyncShards(assignments)
-		}
-	}()
-
-	// Start the gRPC server.
-	lis, err := net.Listen("tcp", *grpcAddr)
-	if err != nil {
-		log.Fatalf("failed to listen on %s: %v", *grpcAddr, err)
-	}
-	s := grpc.NewServer()
-	worker.RegisterWorkerServiceServer(s, internal.NewGrpcServer(nh))
-	go func() {
-		log.Printf("gRPC server listening at %v", lis.Addr())
-		if err := s.Serve(lis); err != nil {
-			log.Fatalf("failed to serve gRPC: %v", err)
-		}
-	}()
+	go Start(*nodeID, *raftAddr, *grpcAddr, *pdAddr, *workerDataDir)
 
 	log.Println("Worker started. Waiting for signals.")
 	sig_chan := make(chan os.Signal, 1)
@@ -96,5 +106,4 @@ func main() {
 	<-sig_chan
 
 	log.Println("Shutting down worker.")
-	s.GracefulStop()
 }

@@ -173,20 +173,16 @@ func (s *gatewayServer) ListCollections(ctx context.Context, req *pb.ListCollect
 	return &pb.ListCollectionsResponse{Collections: res.Collections}, nil
 }
 
-// ================ MAIN ================
-
-func main() {
-	middleware.SetJWTSecret(cfg.JWTSecret)
-
+func Start(grpcAddr, httpAddr, placementDriverAddr string) {
 	// Connect to placement driver
-	conn, err := grpc.Dial(cfg.PlacementDriver, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.Dial(placementDriverAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatal("Failed to connect to placement driver:", err)
 	}
 	defer conn.Close()
 	placementClient := placementpb.NewPlacementServiceClient(conn)
 
-	// gRPC Server — primary path (fast SDKs)
+	// gRPC Server
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
 			middleware.LoggingInterceptor,
@@ -196,21 +192,32 @@ func main() {
 	)
 	pb.RegisterVectronServiceServer(grpcServer, &gatewayServer{placementClient: placementClient})
 
-	// HTTP Gateway — secondary path (curl, browser)
+	// HTTP Gateway
 	mux := runtime.NewServeMux()
 	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
-	if err := pb.RegisterVectronServiceHandlerFromEndpoint(context.Background(), mux, cfg.GRPCAddr, opts); err != nil {
+	if err := pb.RegisterVectronServiceHandlerFromEndpoint(context.Background(), mux, grpcAddr, opts); err != nil {
 		log.Fatal(err)
 	}
 
 	// Start both
 	go func() {
-		lis, _ := net.Listen("tcp", cfg.GRPCAddr)
-		log.Printf("Vectron gRPC API (SDKs)     → %s", cfg.GRPCAddr)
-		log.Fatal(grpcServer.Serve(lis))
+		lis, _ := net.Listen("tcp", grpcAddr)
+		log.Printf("Vectron gRPC API (SDKs)     → %s", grpcAddr)
+		if err := grpcServer.Serve(lis); err != nil {
+			log.Fatal(err)
+		}
 	}()
 
-	log.Printf("Vectron HTTP API (curl)      → %s", cfg.HTTPAddr)
-	log.Printf("Using placement driver           → %s", cfg.PlacementDriver)
-	log.Fatal(http.ListenAndServe(cfg.HTTPAddr, mux))
+	log.Printf("Vectron HTTP API (curl)      → %s", httpAddr)
+	log.Printf("Using placement driver           → %s", placementDriverAddr)
+	if err := http.ListenAndServe(httpAddr, mux); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// ================ MAIN ================
+
+func main() {
+	middleware.SetJWTSecret(cfg.JWTSecret)
+	Start(cfg.GRPCAddr, cfg.HTTPAddr, cfg.PlacementDriver)
 }

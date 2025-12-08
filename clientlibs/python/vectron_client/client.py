@@ -143,7 +143,9 @@ class VectronClient:
         for p in points:
             if not p.id:
                 raise InvalidArgumentError("Point ID cannot be empty.")
-            proto_points.append(apigateway_pb2.Point(id=p.id, vector=p.vector, payload=p.payload))
+
+            proto_payload = {k: str(v) for k, v in p.payload.items()} if p.payload else {}
+            proto_points.append(apigateway_pb2.Point(id=p.id, vector=p.vector, payload=proto_payload))
 
         request = apigateway_pb2.UpsertRequest(
             collection=collection,

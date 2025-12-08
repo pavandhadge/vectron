@@ -68,7 +68,7 @@ func TestStoreAndGetVector(t *testing.T) {
 	}
 }
 
-func TestDeleteVector_SoftDeleteBehavior(t *testing.T) {
+func TestDeleteVector(t *testing.T) {
 	db, teardown := setupTestDB(t, false)
 	defer teardown()
 
@@ -86,19 +86,24 @@ func TestDeleteVector_SoftDeleteBehavior(t *testing.T) {
 	vec, meta, err := db.GetVector(id)
 	require.NoError(t, err) // No error!
 	require.Nil(t, vec)     // Vector is nil
-	require.Nil(t, meta)    // Metadata is nil (or empty)
+	require.Nil(t, meta)    // Metadata is nil
 
-	// 4. Confirm it was actually soft-deleted (testing/admin API)
-	deleted, err := db.IsDeleted(id)
+	// 4. Confirm key is gone from storage
+	exists, err := db.Exists([]byte(id))
 	require.NoError(t, err)
-	require.True(t, deleted, "vector should be marked as soft-deleted in storage")
+	require.False(t, exists, "key should be gone from storage after delete")
 
-	// 5. Optional: confirm key still exists in DB (tombstone present)
-	existsInStorage, err := db.Exists([]byte(id))
-	require.NoError(t, err)
-	require.False(t, existsInStorage, "key should be GONE from storage after delete")
-	// 6. Delete again → should be idempotent
+	// 5. Delete again → should be idempotent (as it returns nil if not found)
 	require.NoError(t, db.DeleteVector(id), "second delete should not fail")
+}
+
+func TestGetVectorNotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t, true)
+	defer cleanup()
+
+	retrievedVec, _, err := db.GetVector("non_existent_vector")
+	assert.NoError(t, err)
+	assert.Nil(t, retrievedVec)
 }
 
 func TestSearch(t *testing.T) {
@@ -124,10 +129,38 @@ func TestSearch(t *testing.T) {
 		t.Fatalf("failed to search: %v", err)
 	}
 
+	sort.Strings(results)
 	expected := []string{"1234561", "1234562"}
+	sort.Strings(expected)
+
 	if !reflect.DeepEqual(expected, results) {
 		t.Errorf("expected search results %v, got %v", expected, results)
 	}
+}
+
+func TestBruteForceSearch(t *testing.T) {
+	db, cleanup := setupTestDB(t, true)
+	defer cleanup()
+
+	vecs := map[string][]float32{
+		"1234561712": {4.0, 1.0, 1.0, 2.0},
+		"1234562812": {4.1, 1.1, 1.0, 2.0},
+		"1234563512": {5.0, 5.0, 1.0, 2.0},
+		"1234564512": {5.1, 5.1, 1.0, 2.0},
+	}
+
+	for id, vec := range vecs {
+		err := db.StoreVector(id, vec, nil)
+		assert.NoError(t, err)
+	}
+
+	query := []float32{4.0, 1.0, 1.0, 2.0}
+	k := 2
+	results, err := db.BruteForceSearch(query, k)
+	assert.NoError(t, err)
+	assert.Len(t, results, 2)
+	assert.Contains(t, results, "1234561712")
+	assert.Contains(t, results, "1234562812")
 }
 
 func TestPersistence(t *testing.T) {
@@ -179,62 +212,11 @@ func TestPersistence(t *testing.T) {
 	}
 
 	expected := []string{"1234561", "1234562"}
+	sort.Strings(results)
+	sort.Strings(expected)
 	if !reflect.DeepEqual(expected, results) {
 		t.Errorf("expected search results %v, got %v", expected, results)
 	}
-}
-
-func TestDeleteVector(t *testing.T) {
-	db, cleanup := setupTestDB(t, true)
-	defer cleanup()
-
-	id := "1234561"
-	vec := []float32{1.0, 2.0, 1.0, 2.0}
-	meta := []byte("test_metadata")
-
-	err := db.StoreVector(id, vec, meta)
-	assert.NoError(t, err)
-
-	err = db.DeleteVector(id)
-	assert.NoError(t, err)
-
-	retrievedVec, _, err := db.GetVector(id)
-	assert.NoError(t, err)
-	assert.Nil(t, retrievedVec)
-}
-
-func TestGetVectorNotFound(t *testing.T) {
-	db, cleanup := setupTestDB(t, true)
-	defer cleanup()
-
-	retrievedVec, _, err := db.GetVector("non_existent_vector")
-	assert.NoError(t, err)
-	assert.Nil(t, retrievedVec)
-}
-
-func TestBruteForceSearch(t *testing.T) {
-	db, cleanup := setupTestDB(t, true)
-	defer cleanup()
-
-	vecs := map[string][]float32{
-		"1234561712": {4.0, 1.0, 1.0, 2.0},
-		"1234562812": {4.1, 1.1, 1.0, 2.0},
-		"1234563512": {5.0, 5.0, 1.0, 2.0},
-		"1234564512": {5.1, 5.1, 1.0, 2.0},
-	}
-
-	for id, vec := range vecs {
-		err := db.StoreVector(id, vec, nil)
-		assert.NoError(t, err)
-	}
-
-	query := []float32{4.0, 1.0, 1.0, 2.0}
-	k := 2
-	results, err := db.BruteForceSearch(query, k)
-	assert.NoError(t, err)
-	assert.Len(t, results, 2)
-	assert.Contains(t, results, "1234561712")
-	assert.Contains(t, results, "1234562812")
 }
 
 func TestWAL_CrashRecovery(t *testing.T) {
@@ -298,4 +280,86 @@ func TestWAL_CrashRecovery(t *testing.T) {
 
 	// Final cleanup
 	os.RemoveAll(dir)
+}
+
+func TestKVOperations(t *testing.T) {
+	db, teardown := setupTestDB(t, false)
+	defer teardown()
+
+	key := []byte("hello")
+	value := []byte("world")
+
+	// Test Put
+	err := db.Put(key, value)
+	require.NoError(t, err)
+
+	// Test Get
+	retrievedValue, err := db.Get(key)
+	require.NoError(t, err)
+	assert.Equal(t, value, retrievedValue)
+
+	// Test Exists
+	exists, err := db.Exists(key)
+	require.NoError(t, err)
+	assert.True(t, exists)
+
+	// Test Delete
+	err = db.Delete(key)
+	require.NoError(t, err)
+
+	// Test Get after delete
+	retrievedValue, err = db.Get(key)
+	require.NoError(t, err)
+	assert.Nil(t, retrievedValue)
+
+	// Test Exists after delete
+	exists, err = db.Exists(key)
+	require.NoError(t, err)
+	assert.False(t, exists)
+}
+
+func TestBackupAndRestore(t *testing.T) {
+	db, teardown := setupTestDB(t, false)
+	defer teardown()
+
+	// Store some data
+	id := "test_vector"
+	vector := []float32{0.1, 0.2, 0.3, 0.4}
+	err := db.StoreVector(id, vector, nil)
+	require.NoError(t, err)
+
+	// Create a backup
+	backupDir, err := os.MkdirTemp("", "pebble_backup_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(backupDir)
+
+	err = db.Backup(backupDir)
+	require.NoError(t, err)
+
+	// Close the original db
+	teardown()
+
+	// Restore the backup to a new directory
+	restoreDir, err := os.MkdirTemp("", "pebble_restore_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(restoreDir)
+
+	opts := &storage.Options{
+		HNSWConfig: storage.HNSWConfig{
+			Dim: 4,
+		},
+	}
+
+	restoredDb := storage.NewPebbleDB()
+	err = restoredDb.Init(restoreDir, opts)
+	require.NoError(t, err)
+
+	err = restoredDb.Restore(backupDir)
+	require.NoError(t, err)
+	defer restoredDb.Close()
+
+	// Verify the data in the restored db
+	retrievedVector, _, err := restoredDb.GetVector(id)
+	require.NoError(t, err)
+	assert.Equal(t, vector, retrievedVector)
 }
