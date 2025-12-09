@@ -73,6 +73,11 @@ func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dime
 	}, nil
 }
 
+// Open is a no-op.
+func (s *StateMachine) Open(stopc <-chan struct{}) (uint64, error) {
+	return 0, nil
+}
+
 // Update applies commands from the Raft log to the state machine.
 func (s *StateMachine) Update(entries []sm.Entry) ([]sm.Entry, error) {
 	for i, entry := range entries {
@@ -106,8 +111,18 @@ func (s *StateMachine) Lookup(query interface{}) (interface{}, error) {
 	}
 }
 
+// Sync is a no-op.
+func (s *StateMachine) Sync() error {
+	return nil
+}
+
+// PrepareSnapshot is a no-op.
+func (s *StateMachine) PrepareSnapshot() (interface{}, error) {
+	return nil, nil
+}
+
 // SaveSnapshot saves a snapshot of the state machine.
-func (s *StateMachine) SaveSnapshot(w io.Writer, fc sm.ISnapshotFileCollection, done <-chan struct{}) error {
+func (s *StateMachine) SaveSnapshot(ctx interface{}, w io.Writer, done <-chan struct{}) error {
 	tmpDir, err := ioutil.TempDir("", "snapshot")
 	if err != nil {
 		return err
@@ -147,7 +162,7 @@ func (s *StateMachine) SaveSnapshot(w io.Writer, fc sm.ISnapshotFileCollection, 
 }
 
 // RecoverFromSnapshot restores the state machine from a snapshot.
-func (s *StateMachine) RecoverFromSnapshot(r io.Reader, files []sm.SnapshotFile, done <-chan struct{}) error {
+func (s *StateMachine) RecoverFromSnapshot(r io.Reader, done <-chan struct{}) error {
 	// Create a temporary file to store the snapshot
 	tmpFile, err := ioutil.TempFile("", "snapshot-*.zip")
 	if err != nil {
@@ -208,4 +223,9 @@ func (s *StateMachine) RecoverFromSnapshot(r io.Reader, files []sm.SnapshotFile,
 // Close closes the state machine.
 func (s *StateMachine) Close() error {
 	return s.PebbleDB.Close()
+}
+
+// GetHash is a no-op.
+func (s *StateMachine) GetHash() (uint64, error) {
+	return 0, nil
 }

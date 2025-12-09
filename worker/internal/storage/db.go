@@ -29,7 +29,7 @@ func (r *PebbleDB) Init(path string, opts *Options) error {
 			dbOpts.MaxOpenFiles = opts.MaxOpenFiles
 		}
 		if opts.WriteBufferSize > 0 {
-			dbOpts.MemTableSize = uint64(opts.WriteBufferSize)
+			dbOpts.MemTableSize = opts.WriteBufferSize
 		}
 		if opts.CacheSize > 0 {
 			cache := pebble.NewCache(opts.CacheSize)
@@ -134,19 +134,19 @@ func (r *PebbleDB) saveHNSW() error {
 	}
 
 	// Clean up old WAL entries
-	iter, err := r.db.NewIter(&pebble.IterOptions{
+	iter := r.db.NewIter(&pebble.IterOptions{
 		LowerBound: []byte(hnswWALPrefix),
 		UpperBound: []byte(fmt.Sprintf("%s%d", hnswWALPrefix, ts)),
 	})
-	if err != nil {
-		return err
-	}
 	defer iter.Close()
 
 	for iter.First(); iter.Valid(); iter.Next() {
 		if err := batch.Delete(iter.Key(), nil); err != nil {
 			return err
 		}
+	}
+	if err := iter.Error(); err != nil {
+		return err
 	}
 
 	return batch.Commit(r.writeOpts)
@@ -168,12 +168,9 @@ func (r *PebbleDB) replayWAL() error {
 		return err
 	}
 
-	iter, err := r.db.NewIter(&pebble.IterOptions{
+	iter := r.db.NewIter(&pebble.IterOptions{
 		LowerBound: []byte(fmt.Sprintf("%s%d", hnswWALPrefix, ts)),
 	})
-	if err != nil {
-		return err
-	}
 	defer iter.Close()
 
 	for iter.First(); iter.Valid(); iter.Next() {
@@ -198,6 +195,9 @@ func (r *PebbleDB) replayWAL() error {
 				log.Printf("failed to replay add from WAL: %v", err)
 			}
 		}
+	}
+	if err := iter.Error(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -234,7 +234,7 @@ func (r *PebbleDB) Compact() error {
 	if r.db == nil {
 		return errors.New("db not initialized")
 	}
-	return r.db.Compact(nil, nil, false)
+	return r.db.Compact(nil, nil)
 }
 
 // Flush flushes the database writes to disk.

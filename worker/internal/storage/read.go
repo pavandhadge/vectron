@@ -74,10 +74,7 @@ func (r *PebbleDB) NewIterator(prefix []byte) (Iterator, error) {
 		}
 	}
 
-	iter, err := r.db.NewIter(&iterOpts)
-	if err != nil {
-		return nil, err
-	}
+	iter := r.db.NewIter(&iterOpts)
 	// Even with LowerBound set, calling SeekGE ensures the iterator is positioned correctly.
 	iter.SeekGE(prefix)
 

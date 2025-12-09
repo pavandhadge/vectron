@@ -22,6 +22,11 @@ func NewPlaceholderFSM(clusterID uint64, nodeID uint64) sm.IOnDiskStateMachine {
 	}
 }
 
+// Open is a no-op.
+func (f *PlaceholderFSM) Open(stopc <-chan struct{}) (uint64, error) {
+	return 0, nil
+}
+
 // Update is a no-op.
 func (f *PlaceholderFSM) Update(entries []sm.Entry) ([]sm.Entry, error) {
 	// In a real implementation, this would apply writes to PebbleDB and HNSW.
@@ -37,17 +42,32 @@ func (f *PlaceholderFSM) Lookup(query interface{}) (interface{}, error) {
 	return query, nil
 }
 
+// Sync is a no-op.
+func (f *PlaceholderFSM) Sync() error {
+	return nil
+}
+
+// PrepareSnapshot is a no-op.
+func (f *PlaceholderFSM) PrepareSnapshot() (interface{}, error) {
+	return nil, nil
+}
+
 // SaveSnapshot is a no-op.
-func (f *PlaceholderFSM) SaveSnapshot(w io.Writer, fc sm.ISnapshotFileCollection, done <-chan struct{}) error {
+func (f *PlaceholderFSM) SaveSnapshot(ctx interface{}, w io.Writer, done <-chan struct{}) error {
 	return nil
 }
 
 // RecoverFromSnapshot is a no-op.
-func (f *PlaceholderFSM) RecoverFromSnapshot(r io.Reader, files []sm.SnapshotFile, done <-chan struct{}) error {
+func (f *PlaceholderFSM) RecoverFromSnapshot(r io.Reader, done <-chan struct{}) error {
 	return nil
 }
 
 // Close is a no-op.
 func (f *PlaceholderFSM) Close() error {
 	return nil
+}
+
+// GetHash is a no-op.
+func (f *PlaceholderFSM) GetHash() (uint64, error) {
+	return 0, nil
 }

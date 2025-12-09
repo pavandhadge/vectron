@@ -19,7 +19,7 @@ const (
 
 // GrpcServer is the gRPC server for the worker.
 type GrpcServer struct {
-	worker.UnimplementedWorkerServer
+	worker.UnimplementedWorkerServiceServer
 	nodeHost *dragonboat.NodeHost
 }
 
@@ -49,8 +49,9 @@ func (s *GrpcServer) StoreVector(ctx context.Context, req *worker.StoreVectorReq
 		return nil, status.Errorf(codes.Internal, "failed to marshal command: %v", err)
 	}
 
+	cs := s.nodeHost.GetNoOPSession(req.GetShardId())
 	// Propose the command to the shard's Raft group.
-	_, err = s.nodeHost.SyncPropose(ctx, req.GetShardId(), cmdBytes)
+	_, err = s.nodeHost.SyncPropose(ctx, cs, cmdBytes)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to propose command: %v", err)
 	}
@@ -105,8 +106,9 @@ func (s *GrpcServer) DeleteVector(ctx context.Context, req *worker.DeleteVectorR
 		return nil, status.Errorf(codes.Internal, "failed to marshal command: %v", err)
 	}
 
+	cs := s.nodeHost.GetNoOPSession(req.GetShardId())
 	// Propose the command to the shard's Raft group.
-	_, err = s.nodeHost.SyncPropose(ctx, req.GetShardId(), cmdBytes)
+	_, err = s.nodeHost.SyncPropose(ctx, cs, cmdBytes)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to propose command: %v", err)
 	}

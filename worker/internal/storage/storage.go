@@ -120,10 +120,7 @@ func (r *PebbleDB) BruteForceSearch(query []float32, k int) ([]string, error) {
 		return nil, errors.New("db not initialized")
 	}
 
-	iter, err := r.db.NewIter(nil)
-	if err != nil {
-		return nil, err
-	}
+	iter := r.db.NewIter(nil)
 	defer iter.Close()
 
 	h := &resultHeap{}
