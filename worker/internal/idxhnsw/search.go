@@ -4,7 +4,6 @@ package idxhnsw
 import (
 	"container/heap"
 	"sort"
-	"strconv"
 )
 
 // candidate for priority queue
@@ -59,7 +58,7 @@ func (h *HNSW) search(vec []float32, k int) []string {
 
 	ids := make([]string, len(results))
 	for i, c := range results {
-		ids[i] = strconv.FormatUint(uint64(c.id), 10)
+		ids[i] = h.uint32ToID[c.id]
 	}
 	return ids
 }

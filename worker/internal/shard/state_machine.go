@@ -37,6 +37,15 @@ type SearchQuery struct {
 	K      int
 }
 
+type GetVectorQuery struct {
+	ID string
+}
+
+type GetVectorQueryResult struct {
+	Vector   []float32
+	Metadata []byte
+}
+
 // StateMachine is the per-shard state machine that manages a PebbleDB instance
 // and an HNSW index.
 type StateMachine struct {
@@ -106,6 +115,18 @@ func (s *StateMachine) Lookup(query interface{}) (interface{}, error) {
 	switch q := query.(type) {
 	case SearchQuery:
 		return s.Search(q.Vector, q.K)
+	case GetVectorQuery:
+		vec, meta, err := s.GetVector(q.ID)
+		if err != nil {
+			return nil, err
+		}
+		if vec == nil {
+			return nil, nil // Not found
+		}
+		return &GetVectorQueryResult{
+			Vector:   vec,
+			Metadata: meta,
+		}, nil
 	default:
 		return nil, fmt.Errorf("unknown query type: %T", q)
 	}

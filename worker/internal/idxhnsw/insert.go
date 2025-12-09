@@ -6,7 +6,6 @@ import (
 	"math"
 	"math/rand"
 	"sort"
-	"strconv"
 )
 
 func (h *HNSW) selectNeighborsHeuristic(query []float32, candidates []candidate, M int) []uint32 {
@@ -85,12 +84,14 @@ func (h *HNSW) add(id string, vec []float32) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// --- ID handling ---
-	key64, err := strconv.ParseUint(id, 10, 64)
-	if err != nil {
-		key64 = rand.Uint64()
+	var key uint32
+	var ok bool
+	if key, ok = h.idToUint32[id]; !ok {
+		key = h.nextID
+		h.idToUint32[id] = key
+		h.uint32ToID[key] = id
+		h.nextID++
 	}
-	key := uint32(key64)
 
 	if len(vec) != h.dim {
 		return errors.New("invalid vector dimension")

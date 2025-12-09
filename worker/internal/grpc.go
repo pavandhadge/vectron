@@ -97,7 +97,33 @@ func (s *GrpcServer) Search(ctx context.Context, req *worker.SearchRequest) (*wo
 // The existing implementations in the file are incorrect for a multi-shard system.
 
 func (s *GrpcServer) GetVector(ctx context.Context, req *worker.GetVectorRequest) (*worker.GetVectorResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetVector not implemented")
+	log.Printf("Received GetVector request for ID: %s on shard %d", req.GetId(), req.GetShardId())
+
+	if !s.shardManager.IsShardReady(req.GetShardId()) {
+		return nil, status.Errorf(codes.Unavailable, "shard %d not ready", req.GetShardId())
+	}
+
+	res, err := s.nodeHost.SyncRead(ctx, req.GetShardId(), shard.GetVectorQuery{ID: req.GetId()})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to perform GetVector: %v", err)
+	}
+
+	if res == nil {
+		return nil, status.Errorf(codes.NotFound, "vector with id %s not found", req.GetId())
+	}
+
+	getResult, ok := res.(*shard.GetVectorQueryResult)
+	if !ok {
+		return nil, status.Errorf(codes.Internal, "unexpected GetVector result type: %T", res)
+	}
+
+	return &worker.GetVectorResponse{
+		Vector: &worker.Vector{
+			Id:       req.GetId(),
+			Vector:   getResult.Vector,
+			Metadata: getResult.Metadata,
+		},
+	}, nil
 }
 func (s *GrpcServer) DeleteVector(ctx context.Context, req *worker.DeleteVectorRequest) (*worker.DeleteVectorResponse, error) {
 	log.Printf("Received DeleteVector request for ID: %s on shard %d", req.GetId(), req.GetShardId())

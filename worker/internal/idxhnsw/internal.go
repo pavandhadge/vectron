@@ -68,11 +68,10 @@ func (h *HNSW) delete(id string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	key64, err := strconv.ParseUint(id, 10, 64)
-	if err != nil {
-		return err
+	key, ok := h.idToUint32[id]
+	if !ok {
+		return nil
 	}
-	key := uint32(key64)
 
 	node, exists := h.nodes[key]
 	if !exists || node.Vec == nil {
@@ -87,8 +86,11 @@ func (h *HNSW) delete(id string) error {
 func (h *HNSW) item(id string) ([]float32, bool) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	key64, _ := strconv.ParseUint(id, 10, 64)
-	node := h.nodes[uint32(key64)]
+	key, ok := h.idToUint32[id]
+	if !ok {
+		return nil, false
+	}
+	node := h.nodes[key]
 	if node != nil && node.Vec != nil {
 		return append([]float32(nil), node.Vec...), true
 	}

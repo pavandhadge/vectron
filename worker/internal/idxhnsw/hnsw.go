@@ -32,6 +32,9 @@ type HNSW struct {
 	store        NodeStore
 	mu           sync.RWMutex
 	deletedCount int64
+	idToUint32   map[string]uint32
+	uint32ToID   map[uint32]string
+	nextID       uint32
 }
 
 // NewHNSW creates a new index
@@ -59,6 +62,9 @@ func NewHNSW(store NodeStore, dim int, config HNSWConfig) *HNSW {
 		entry:        0,
 		maxLayer:     0,
 		deletedCount: 0,
+		idToUint32:   make(map[string]uint32),
+		uint32ToID:   make(map[uint32]string),
+		nextID:       1,
 	}
 	h.StartCleanup(DefaultCleanupConfig) // auto-start
 	return h

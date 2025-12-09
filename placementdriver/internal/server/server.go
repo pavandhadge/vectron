@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -182,10 +183,12 @@ func (s *Server) GetWorker(ctx context.Context, req *pb.GetWorkerRequest) (*pb.G
 	if req.VectorId == "" {
 		// If no vector ID is provided, return the first shard for now.
 		// In a real scenario, this might route to a default shard or load balance.
-		for _, shard := range collection.Shards {
-			targetShard = shard
-			break
+		keys := make([]uint64, 0, len(collection.Shards))
+		for k := range collection.Shards {
+			keys = append(keys, k)
 		}
+		sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+		targetShard = collection.Shards[keys[0]]
 	} else {
 		hash := fnv.New64a()
 		hash.Write([]byte(req.VectorId))
