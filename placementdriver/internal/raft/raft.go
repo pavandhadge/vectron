@@ -47,7 +47,7 @@ func NewNode(cfg Config) (*Node, error) {
 		RaftAddress:    cfg.RaftAddress,
 		ListenAddress:  cfg.RaftAddress, // Use the same for simplicity.
 		EnableMetrics:  true,
-		RTTMillisecond: 1000,
+		RTTMillisecond: 200,
 		// RaftEventListener: &loggingEventListener{}, // Add a simple logger.
 	}
 
@@ -61,7 +61,7 @@ func NewNode(cfg Config) (*Node, error) {
 	rc := config.Config{
 		NodeID:             cfg.NodeID,
 		ClusterID:          cfg.ClusterID,
-		ElectionRTT:        10,
+		ElectionRTT:        5,
 		HeartbeatRTT:       1,
 		CheckQuorum:        true,
 		SnapshotEntries:    1000,

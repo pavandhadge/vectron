@@ -20,13 +20,15 @@ const (
 // GrpcServer is the gRPC server for the worker.
 type GrpcServer struct {
 	worker.UnimplementedWorkerServiceServer
-	nodeHost *dragonboat.NodeHost
+	nodeHost     *dragonboat.NodeHost
+	shardManager *shard.Manager
 }
 
 // NewGrpcServer creates a new instance of the gRPC server.
-func NewGrpcServer(nh *dragonboat.NodeHost) *GrpcServer {
+func NewGrpcServer(nh *dragonboat.NodeHost, sm *shard.Manager) *GrpcServer {
 	return &GrpcServer{
-		nodeHost: nh,
+		nodeHost:     nh,
+		shardManager: sm,
 	}
 }
 
@@ -35,6 +37,10 @@ func (s *GrpcServer) StoreVector(ctx context.Context, req *worker.StoreVectorReq
 	log.Printf("Received StoreVector request for ID: %s on shard %d", req.GetVector().GetId(), req.GetShardId())
 	if req.GetVector() == nil {
 		return nil, status.Error(codes.InvalidArgument, "vector is nil")
+	}
+
+	if !s.shardManager.IsShardReady(req.GetShardId()) {
+		return nil, status.Errorf(codes.Unavailable, "shard %d not ready", req.GetShardId())
 	}
 
 	cmd := shard.Command{

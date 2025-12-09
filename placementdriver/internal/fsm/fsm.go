@@ -40,7 +40,8 @@ type RegisterPeerPayload struct {
 
 // RegisterWorkerPayload is the payload for the RegisterWorker command.
 type RegisterWorkerPayload struct {
-	Address string `json:"address"`
+	GrpcAddress string `json:"grpc_address"`
+	RaftAddress string `json:"raft_address"`
 }
 
 // CreateCollectionPayload is the payload for the CreateCollection command.
@@ -110,7 +111,8 @@ type PeerInfo struct {
 // WorkerInfo holds information about a worker.
 type WorkerInfo struct {
 	ID            uint64    `json:"id"`
-	Address       string    `json:"address"`
+	GrpcAddress   string    `json:"grpc_address"`
+	RaftAddress   string    `json:"raft_address"`
 	LastHeartbeat time.Time `json:"last_heartbeat"`
 }
 
@@ -160,7 +162,12 @@ func (f *FSM) Update(entries []sm.Entry) ([]sm.Entry, error) {
 			if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
 				appErr = fmt.Errorf("failed to unmarshal CreateCollection payload: %w", err)
 			} else {
-				appErr = f.applyCreateCollection(payload)
+				if err := f.applyCreateCollection(payload); err != nil {
+					appErr = err
+					result = 0 // Explicitly set 0 on failure
+				} else {
+					result = 1 // Set 1 on success
+				}
 			}
 		case UpdateWorkerHeartbeat:
 			var payload UpdateWorkerHeartbeatPayload
@@ -176,7 +183,7 @@ func (f *FSM) Update(entries []sm.Entry) ([]sm.Entry, error) {
 		if appErr != nil {
 			fmt.Printf("Error applying command: %v\n", appErr)
 			// For queries that return a result, 0 or a specific error code would be appropriate.
-			entries[i].Result = sm.Result{Value: 0}
+			entries[i].Result = sm.Result{Value: result}
 		} else {
 			entries[i].Result = sm.Result{Value: result}
 		}
@@ -204,9 +211,11 @@ func (f *FSM) applyRegisterWorker(payload RegisterWorkerPayload) uint64 {
 
 	f.Workers[workerID] = WorkerInfo{
 		ID:            workerID,
-		Address:       payload.Address,
+		GrpcAddress:   payload.GrpcAddress,
+		RaftAddress:   payload.RaftAddress,
 		LastHeartbeat: time.Now(),
 	}
+	fmt.Printf("Registered new worker %d with GRPC address %s and Raft address %s\n", workerID, payload.GrpcAddress, payload.RaftAddress)
 	return workerID
 }
 
@@ -214,13 +223,17 @@ func (f *FSM) applyCreateCollection(payload CreateCollectionPayload) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	fmt.Printf("Attempting to create collection '%s'. Workers available: %d\n", payload.Name, len(f.Workers))
+
 	if _, ok := f.Collections[payload.Name]; ok {
 		return fmt.Errorf("collection %s already exists", payload.Name)
 	}
 
-	const replicationFactor = 3
+	const replicationFactor = 1
 	if len(f.Workers) < replicationFactor {
-		return fmt.Errorf("not enough workers (%d) to meet replication factor (%d)", len(f.Workers), replicationFactor)
+		err := fmt.Errorf("not enough workers (%d) to meet replication factor (%d)", len(f.Workers), replicationFactor)
+		fmt.Printf("Error creating collection: %v\n", err)
+		return err
 	}
 
 	// Create the collection.
@@ -275,7 +288,7 @@ func (f *FSM) applyCreateCollection(payload CreateCollectionPayload) error {
 	}
 
 	f.Collections[collection.Name] = collection
-	fmt.Printf("Created collection '%s' with %d shards\n", collection.Name, numShards)
+	fmt.Printf("FSM: Successfully created collection '%s' with %d shards\n", collection.Name, numShards)
 	return nil
 }
 

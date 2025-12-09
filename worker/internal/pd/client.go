@@ -22,11 +22,12 @@ type Client struct {
 	grpcClient pd.PlacementServiceClient
 	conn       *grpc.ClientConn
 	workerID   uint64
-	workerAddr string
+	grpcAddr   string
+	raftAddr   string
 }
 
 // NewClient creates a new client for the Placement Driver.
-func NewClient(pdAddr string, workerAddr string) (*Client, error) {
+func NewClient(pdAddr, grpcAddr, raftAddr string) (*Client, error) {
 	conn, err := grpc.NewClient(pdAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err
@@ -34,17 +35,18 @@ func NewClient(pdAddr string, workerAddr string) (*Client, error) {
 
 	grpcClient := pd.NewPlacementServiceClient(conn)
 	return &Client{
-			grpcClient: grpcClient,
-			conn:       conn,
-			workerAddr: workerAddr,
-		},
-		nil
+		grpcClient: grpcClient,
+		conn:       conn,
+		grpcAddr:   grpcAddr,
+		raftAddr:   raftAddr,
+	}, nil
 }
 
 // Register registers the worker with the Placement Driver and gets a worker ID.
 func (c *Client) Register(ctx context.Context) error {
 	req := &pd.RegisterWorkerRequest{
-		Address: c.workerAddr,
+		GrpcAddress: c.grpcAddr,
+		RaftAddress: c.raftAddr,
 	}
 
 	res, err := c.grpcClient.RegisterWorker(ctx, req)

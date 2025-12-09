@@ -41,12 +41,16 @@ func NewServer(r *raft.Node, f *fsm.FSM) *Server {
 
 // RegisterWorker handles a worker registration request. The FSM assigns a new unique uint64 ID.
 func (s *Server) RegisterWorker(ctx context.Context, req *pb.RegisterWorkerRequest) (*pb.RegisterWorkerResponse, error) {
-	if req.Address == "" {
-		return nil, status.Error(codes.InvalidArgument, "worker address is required")
+	if req.GetGrpcAddress() == "" {
+		return nil, status.Error(codes.InvalidArgument, "worker grpc_address is required")
+	}
+	if req.GetRaftAddress() == "" {
+		return nil, status.Error(codes.InvalidArgument, "worker raft_address is required")
 	}
 
 	payload := fsm.RegisterWorkerPayload{
-		Address: req.Address,
+		GrpcAddress: req.GetGrpcAddress(),
+		RaftAddress: req.GetRaftAddress(),
 	}
 
 	payloadBytes, err := json.Marshal(payload)
@@ -132,7 +136,7 @@ func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.H
 				initialMembers := make(map[uint64]string)
 				for _, replicaID := range shard.Replicas {
 					if worker, ok := workerMap[replicaID]; ok {
-						initialMembers[replicaID] = worker.Address
+						initialMembers[replicaID] = worker.RaftAddress
 					} else {
 						// This replica's worker is not registered or known. This is an inconsistent state.
 						fmt.Printf("Warning: could not find worker address for replica %d in shard %d\n", replicaID, shard.ShardID)
@@ -211,8 +215,8 @@ func (s *Server) GetWorker(ctx context.Context, req *pb.GetWorkerRequest) (*pb.G
 	}
 
 	return &pb.GetWorkerResponse{
-		Address: worker.Address,
-		ShardId: uint32(targetShard.ShardID),
+		GrpcAddress: worker.GrpcAddress,
+		ShardId:     uint32(targetShard.ShardID),
 	}, nil
 }
 
@@ -224,7 +228,8 @@ func (s *Server) ListWorkers(ctx context.Context, req *pb.ListWorkersRequest) (*
 	for _, w := range workers {
 		workerInfos = append(workerInfos, &pb.WorkerInfo{
 			WorkerId:      strconv.FormatUint(w.ID, 10),
-			Address:       w.Address,
+			GrpcAddress:   w.GrpcAddress,
+			RaftAddress:   w.RaftAddress,
 			LastHeartbeat: w.LastHeartbeat.Unix(),
 		})
 	}
@@ -262,8 +267,13 @@ func (s *Server) CreateCollection(ctx context.Context, req *pb.CreateCollectionR
 		return nil, status.Errorf(codes.Internal, "failed to marshal command: %v", err)
 	}
 
-	if _, err := s.raft.Propose(cmdBytes, raftTimeout); err != nil {
+	res, err := s.raft.Propose(cmdBytes, raftTimeout)
+	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to propose command: %v", err)
+	}
+
+	if res.Value == 0 {
+		return nil, status.Errorf(codes.Internal, "FSM failed to create collection")
 	}
 
 	return &pb.CreateCollectionResponse{Success: true}, nil

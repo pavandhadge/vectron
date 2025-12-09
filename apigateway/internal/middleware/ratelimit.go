@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -22,7 +23,8 @@ var (
 
 func RateLimitInterceptor(rps int) func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		userID, ok := ctx.Value("user_id").(string)
+		fmt.Println("ratelimited started")
+		userID, ok := ctx.Value(UserIDKey).(string)
 		if !ok {
 			return nil, status.Errorf(codes.Unauthenticated, "no user")
 		}
@@ -42,6 +44,7 @@ func RateLimitInterceptor(rps int) func(ctx context.Context, req interface{}, in
 		if remaining < 0 {
 			return nil, status.Errorf(codes.ResourceExhausted, "rate limit exceeded")
 		}
+		fmt.Println("logger ended")
 
 		return handler(ctx, req)
 	}

@@ -99,3 +99,23 @@ func (m *Manager) SyncShards(assignments []*pd.ShardAssignment) {
 		m.runningReplicas[shardID] = true
 	}
 }
+
+func (m *Manager) IsShardReady(shardID uint64) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if !m.runningReplicas[shardID] {
+		log.Printf("IsShardReady: shard %d not in running replicas", shardID)
+		return false
+	}
+	leaderID, _, err := m.nodeHost.GetLeaderID(shardID)
+	if err != nil {
+		log.Printf("IsShardReady: GetLeaderID for shard %d returned error: %v", shardID, err)
+		return false
+	}
+	if leaderID == 0 {
+		log.Printf("IsShardReady: shard %d has no leader", shardID)
+		return false
+	}
+	log.Printf("IsShardReady: shard %d is ready with leader %d", shardID, leaderID)
+	return true
+}

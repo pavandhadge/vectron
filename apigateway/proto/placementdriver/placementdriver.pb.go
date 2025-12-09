@@ -81,7 +81,7 @@ func (x *GetWorkerRequest) GetVectorId() string {
 type GetWorkerResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Full address: "10.0.0.42:6201" or "worker-3.internal:6201"
-	Address string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	GrpcAddress string `protobuf:"bytes,1,opt,name=grpc_address,json=grpcAddress,proto3" json:"grpc_address,omitempty"`
 	// Optional: shard info
 	ShardId       uint32 `protobuf:"varint,2,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -118,9 +118,9 @@ func (*GetWorkerResponse) Descriptor() ([]byte, []int) {
 	return file_placementdriver_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *GetWorkerResponse) GetAddress() string {
+func (x *GetWorkerResponse) GetGrpcAddress() string {
 	if x != nil {
-		return x.Address
+		return x.GrpcAddress
 	}
 	return ""
 }
@@ -134,9 +134,10 @@ func (x *GetWorkerResponse) GetShardId() uint32 {
 
 type RegisterWorkerRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`           // "10.0.0.42:6201"
-	Capabilities  []string               `protobuf:"bytes,2,rep,name=capabilities,proto3" json:"capabilities,omitempty"` // ["gpu", "large-memory"]
-	Timestamp     int64                  `protobuf:"varint,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	GrpcAddress   string                 `protobuf:"bytes,1,opt,name=grpc_address,json=grpcAddress,proto3" json:"grpc_address,omitempty"`
+	RaftAddress   string                 `protobuf:"bytes,2,opt,name=raft_address,json=raftAddress,proto3" json:"raft_address,omitempty"`
+	Capabilities  []string               `protobuf:"bytes,3,rep,name=capabilities,proto3" json:"capabilities,omitempty"` // ["gpu", "large-memory"]
+	Timestamp     int64                  `protobuf:"varint,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -171,9 +172,16 @@ func (*RegisterWorkerRequest) Descriptor() ([]byte, []int) {
 	return file_placementdriver_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *RegisterWorkerRequest) GetAddress() string {
+func (x *RegisterWorkerRequest) GetGrpcAddress() string {
 	if x != nil {
-		return x.Address
+		return x.GrpcAddress
+	}
+	return ""
+}
+
+func (x *RegisterWorkerRequest) GetRaftAddress() string {
+	if x != nil {
+		return x.RaftAddress
 	}
 	return ""
 }
@@ -450,11 +458,12 @@ func (x *ListWorkersResponse) GetWorkers() []*WorkerInfo {
 type WorkerInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkerId      string                 `protobuf:"bytes,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
-	Address       string                 `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
-	Collections   []string               `protobuf:"bytes,3,rep,name=collections,proto3" json:"collections,omitempty"`
-	LastHeartbeat int64                  `protobuf:"varint,4,opt,name=last_heartbeat,json=lastHeartbeat,proto3" json:"last_heartbeat,omitempty"`
-	Healthy       bool                   `protobuf:"varint,5,opt,name=healthy,proto3" json:"healthy,omitempty"`
-	Metadata      map[string]string      `protobuf:"bytes,6,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	GrpcAddress   string                 `protobuf:"bytes,2,opt,name=grpc_address,json=grpcAddress,proto3" json:"grpc_address,omitempty"`
+	RaftAddress   string                 `protobuf:"bytes,3,opt,name=raft_address,json=raftAddress,proto3" json:"raft_address,omitempty"`
+	Collections   []string               `protobuf:"bytes,4,rep,name=collections,proto3" json:"collections,omitempty"`
+	LastHeartbeat int64                  `protobuf:"varint,5,opt,name=last_heartbeat,json=lastHeartbeat,proto3" json:"last_heartbeat,omitempty"`
+	Healthy       bool                   `protobuf:"varint,6,opt,name=healthy,proto3" json:"healthy,omitempty"`
+	Metadata      map[string]string      `protobuf:"bytes,7,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -496,9 +505,16 @@ func (x *WorkerInfo) GetWorkerId() string {
 	return ""
 }
 
-func (x *WorkerInfo) GetAddress() string {
+func (x *WorkerInfo) GetGrpcAddress() string {
 	if x != nil {
-		return x.Address
+		return x.GrpcAddress
+	}
+	return ""
+}
+
+func (x *WorkerInfo) GetRaftAddress() string {
+	if x != nil {
+		return x.RaftAddress
 	}
 	return ""
 }
@@ -892,14 +908,15 @@ const file_placementdriver_proto_rawDesc = "" +
 	"\n" +
 	"collection\x18\x01 \x01(\tR\n" +
 	"collection\x12\x1b\n" +
-	"\tvector_id\x18\x02 \x01(\tR\bvectorId\"H\n" +
-	"\x11GetWorkerResponse\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x19\n" +
-	"\bshard_id\x18\x02 \x01(\rR\ashardId\"s\n" +
-	"\x15RegisterWorkerRequest\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\"\n" +
-	"\fcapabilities\x18\x02 \x03(\tR\fcapabilities\x12\x1c\n" +
-	"\ttimestamp\x18\x03 \x01(\x03R\ttimestamp\"O\n" +
+	"\tvector_id\x18\x02 \x01(\tR\bvectorId\"Q\n" +
+	"\x11GetWorkerResponse\x12!\n" +
+	"\fgrpc_address\x18\x01 \x01(\tR\vgrpcAddress\x12\x19\n" +
+	"\bshard_id\x18\x02 \x01(\rR\ashardId\"\x9f\x01\n" +
+	"\x15RegisterWorkerRequest\x12!\n" +
+	"\fgrpc_address\x18\x01 \x01(\tR\vgrpcAddress\x12!\n" +
+	"\fraft_address\x18\x02 \x01(\tR\vraftAddress\x12\"\n" +
+	"\fcapabilities\x18\x03 \x03(\tR\fcapabilities\x12\x1c\n" +
+	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\"O\n" +
 	"\x16RegisterWorkerResponse\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\tR\bworkerId\x12\x18\n" +
 	"\asuccess\x18\x02 \x01(\bR\asuccess\"\x93\x01\n" +
@@ -913,15 +930,16 @@ const file_placementdriver_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"\x14\n" +
 	"\x12ListWorkersRequest\"W\n" +
 	"\x13ListWorkersResponse\x12@\n" +
-	"\aworkers\x18\x01 \x03(\v2&.vectron.placementdriver.v1.WorkerInfoR\aworkers\"\xb5\x02\n" +
+	"\aworkers\x18\x01 \x03(\v2&.vectron.placementdriver.v1.WorkerInfoR\aworkers\"\xe1\x02\n" +
 	"\n" +
 	"WorkerInfo\x12\x1b\n" +
-	"\tworker_id\x18\x01 \x01(\tR\bworkerId\x12\x18\n" +
-	"\aaddress\x18\x02 \x01(\tR\aaddress\x12 \n" +
-	"\vcollections\x18\x03 \x03(\tR\vcollections\x12%\n" +
-	"\x0elast_heartbeat\x18\x04 \x01(\x03R\rlastHeartbeat\x12\x18\n" +
-	"\ahealthy\x18\x05 \x01(\bR\ahealthy\x12P\n" +
-	"\bmetadata\x18\x06 \x03(\v24.vectron.placementdriver.v1.WorkerInfo.MetadataEntryR\bmetadata\x1a;\n" +
+	"\tworker_id\x18\x01 \x01(\tR\bworkerId\x12!\n" +
+	"\fgrpc_address\x18\x02 \x01(\tR\vgrpcAddress\x12!\n" +
+	"\fraft_address\x18\x03 \x01(\tR\vraftAddress\x12 \n" +
+	"\vcollections\x18\x04 \x03(\tR\vcollections\x12%\n" +
+	"\x0elast_heartbeat\x18\x05 \x01(\x03R\rlastHeartbeat\x12\x18\n" +
+	"\ahealthy\x18\x06 \x01(\bR\ahealthy\x12P\n" +
+	"\bmetadata\x18\a \x03(\v24.vectron.placementdriver.v1.WorkerInfo.MetadataEntryR\bmetadata\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x12\n" +

@@ -37,13 +37,13 @@ func (s *gatewayServer) forwardToWorker(ctx context.Context, collection string, 
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "could not get worker for collection %q: %v", collection, err)
 	}
-	if resp.Address == "" {
+	if resp.GetGrpcAddress() == "" {
 		return nil, status.Errorf(codes.NotFound, "collection %q not found", collection)
 	}
 
-	conn, err := grpc.Dial(resp.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.Dial(resp.GetGrpcAddress(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "worker for collection %q at %s is unreachable: %v", collection, resp.Address, err)
+		return nil, status.Errorf(codes.Internal, "worker for collection %q at %s is unreachable: %v", collection, resp.GetGrpcAddress(), err)
 	}
 	defer conn.Close()
 
@@ -185,8 +185,8 @@ func Start(grpcAddr, httpAddr, placementDriverAddr string) {
 	// gRPC Server
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
-			middleware.LoggingInterceptor,
 			middleware.AuthInterceptor,
+			middleware.LoggingInterceptor,
 			middleware.RateLimitInterceptor(cfg.RateLimitRPS),
 		),
 	)

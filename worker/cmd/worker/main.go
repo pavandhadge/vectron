@@ -34,7 +34,7 @@ func Start(nodeID uint64, raftAddr, grpcAddr, pdAddr, workerDataDir string) {
 		NodeHostDir:    nhDataDir,
 		RaftAddress:    raftAddr,
 		ListenAddress:  raftAddr,
-		RTTMillisecond: 1000,
+		RTTMillisecond: 200,
 	}
 	nh, err := dragonboat.NewNodeHost(nhc)
 	if err != nil {
@@ -45,7 +45,7 @@ func Start(nodeID uint64, raftAddr, grpcAddr, pdAddr, workerDataDir string) {
 	log.Printf("Dragonboat NodeHost created. Node ID: %d, Raft Address: %s", nodeID, raftAddr)
 
 	// Create client for Placement Driver
-	pdClient, err := pd.NewClient(pdAddr, raftAddr)
+	pdClient, err := pd.NewClient(pdAddr, grpcAddr, raftAddr)
 	if err != nil {
 		log.Fatalf("failed to create PD client: %v", err)
 	}
@@ -78,7 +78,7 @@ func Start(nodeID uint64, raftAddr, grpcAddr, pdAddr, workerDataDir string) {
 		log.Fatalf("failed to listen on %s: %v", grpcAddr, err)
 	}
 	s := grpc.NewServer()
-	worker.RegisterWorkerServiceServer(s, internal.NewGrpcServer(nh))
+	worker.RegisterWorkerServiceServer(s, internal.NewGrpcServer(nh, shardManager))
 	log.Printf("gRPC server listening at %v", lis.Addr())
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve gRPC: %v", err)

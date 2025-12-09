@@ -45,16 +45,17 @@ message GetWorkerRequest {
 
 message GetWorkerResponse {
   // Full address: "10.0.0.42:6201" or "worker-3.internal:6201"
-  string address = 1;
+  string grpc_address = 1;
 
   // Optional: shard info
   uint32 shard_id = 2;
 }
 
 message RegisterWorkerRequest {
-  string address = 1;     // "10.0.0.42:6201"
-  repeated string capabilities = 2; // ["gpu", "large-memory"]
-  int64 timestamp = 3;
+  string grpc_address = 1;
+  string raft_address = 2;
+  repeated string capabilities = 3; // ["gpu", "large-memory"]
+  int64 timestamp = 4;
 }
 
 message RegisterWorkerResponse {
@@ -85,11 +86,12 @@ message ListWorkersResponse {
 
 message WorkerInfo {
   string worker_id = 1;
-  string address = 2;
-  repeated string collections = 3;
-  int64 last_heartbeat = 4;
-  bool healthy = 5;
-  map<string, string> metadata = 6;
+  string grpc_address = 2;
+  string raft_address = 3;
+  repeated string collections = 4;
+  int64 last_heartbeat = 5;
+  bool healthy = 6;
+  map<string, string> metadata = 7;
 }
 
 message RebalanceRequest {

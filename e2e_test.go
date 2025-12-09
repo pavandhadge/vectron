@@ -3,6 +3,7 @@ package main_test
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"syscall"
@@ -43,6 +44,34 @@ func generateTestJWT(userID, plan, apiKeyID string) (string, error) {
 	return token.SignedString([]byte(jwtTestSecret))
 }
 
+func waitFor(t *testing.T, out *bytes.Buffer, text string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for text '%s'", text)
+		}
+		if bytes.Contains(out.Bytes(), []byte(text)) {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+func getFreePort() (int, error) {
+	addr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+
+	l, err := net.ListenTCP("tcp", addr)
+	if err != nil {
+		return 0, err
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port, nil
+}
+
 func TestMain(m *testing.M) {
 	// Build the binaries before running the tests
 	cmd := exec.Command("make", "build")
@@ -58,18 +87,37 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	// --- Test Setup ---
 
 	// Create temporary directories
-	pdDataDir, _ := os.MkdirTemp("", "./pd_e2e_test")
+	pdDataDir, err := os.MkdirTemp("", "pd_e2e_test-")
+	require.NoError(t, err)
 	defer os.RemoveAll(pdDataDir)
-	workerDataDir, _ := os.MkdirTemp("", "./worker_e2e_test")
+	workerDataDir, err := os.MkdirTemp("", "worker_e2e_test-")
+	require.NoError(t, err)
 	defer os.RemoveAll(workerDataDir)
 
 	// Network addresses
-	pdGrpcAddr := "localhost:6007"
-	pdRaftAddr := "localhost:7007"
-	workerGrpcAddr := "localhost:9097"
-	workerRaftAddr := "localhost:9197"
-	apiGrpcAddr := "localhost:8087"
-	apiHttpAddr := "localhost:8187"
+	pdGrpcPort, err := getFreePort()
+	require.NoError(t, err)
+	pdGrpcAddr := fmt.Sprintf("127.0.0.1:%d", pdGrpcPort)
+
+	pdRaftPort, err := getFreePort()
+	require.NoError(t, err)
+	pdRaftAddr := fmt.Sprintf("127.0.0.1:%d", pdRaftPort)
+
+	workerGrpcPort, err := getFreePort()
+	require.NoError(t, err)
+	workerGrpcAddr := fmt.Sprintf("127.0.0.1:%d", workerGrpcPort)
+
+	workerRaftPort, err := getFreePort()
+	require.NoError(t, err)
+	workerRaftAddr := fmt.Sprintf("127.0.0.1:%d", workerRaftPort)
+
+	apiGrpcPort, err := getFreePort()
+	require.NoError(t, err)
+	apiGrpcAddr := fmt.Sprintf("127.0.0.1:%d", apiGrpcPort)
+
+	apiHttpPort, err := getFreePort()
+	require.NoError(t, err)
+	apiHttpAddr := fmt.Sprintf("127.0.0.1:%d", apiHttpPort)
 
 	// --- Start Services as Subprocesses ---
 
@@ -94,6 +142,8 @@ func TestE2E_FullLifecycle(t *testing.T) {
 			t.Logf("Placement Driver Output:\n%s", pdOut.String())
 		}
 	})
+	// Wait for PD to be ready before starting other components.
+	waitFor(t, &pdOut, "became leader", 10*time.Second)
 
 	// Worker
 	workerCmd := exec.Command(
@@ -115,6 +165,8 @@ func TestE2E_FullLifecycle(t *testing.T) {
 			t.Logf("Worker Output:\n%s", workerOut.String())
 		}
 	})
+	// Wait for the worker to register with the PD.
+	waitFor(t, &workerOut, "Successfully registered with PD", 10*time.Second)
 
 	// API Gateway
 	gatewayCmd := exec.Command(
@@ -136,8 +188,8 @@ func TestE2E_FullLifecycle(t *testing.T) {
 			t.Logf("API Gateway Output:\n%s", gatewayOut.String())
 		}
 	})
-
-	time.Sleep(3 * time.Second)
+	// Wait for the gateway to be ready.
+	waitFor(t, &gatewayOut, "Vectron gRPC API", 10*time.Second)
 
 	// --- Test Logic using Go Client ---
 	// Generate a test token
@@ -164,7 +216,15 @@ func TestE2E_FullLifecycle(t *testing.T) {
 		{ID: "p1", Vector: []float32{0.1, 0.2, 0.3, 0.4}},
 		{ID: "p2", Vector: []float32{0.5, 0.6, 0.7, 0.8}},
 	}
-	upserted, err := client.Upsert(collectionName, points)
+	var upserted int32
+	// var err error
+	for i := 0; i < 10; i++ {
+		upserted, err = client.Upsert(collectionName, points)
+		if err == nil {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
 	require.NoError(t, err)
 	assert.Equal(t, int32(2), upserted)
 

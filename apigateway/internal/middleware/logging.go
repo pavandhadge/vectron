@@ -3,6 +3,7 @@ package middleware
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -14,6 +15,7 @@ import (
 
 // === gRPC Unary Interceptor (for gRPC requests) ===
 func LoggingInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	fmt.Println("logger started")
 	start := time.Now()
 	userID := extractUserID(ctx)
 
