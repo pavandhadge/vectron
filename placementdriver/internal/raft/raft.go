@@ -42,12 +42,13 @@ func NewNode(cfg Config) (*Node, error) {
 
 	// Configure the NodeHost.
 	nhc := config.NodeHostConfig{
-		DeploymentID:      1, // A unique ID for the deployment.
-		NodeHostDir:       nhDataDir,
-		RaftAddress:       cfg.RaftAddress,
-		ListenAddress:     cfg.RaftAddress, // Use the same for simplicity.
-		EnableMetrics:     true,
-		RaftEventListener: &loggingEventListener{}, // Add a simple logger.
+		DeploymentID:   1, // A unique ID for the deployment.
+		NodeHostDir:    nhDataDir,
+		RaftAddress:    cfg.RaftAddress,
+		ListenAddress:  cfg.RaftAddress, // Use the same for simplicity.
+		EnableMetrics:  true,
+		RTTMillisecond: 1000,
+		// RaftEventListener: &loggingEventListener{}, // Add a simple logger.
 	}
 
 	// Create the NodeHost.
@@ -79,10 +80,11 @@ func NewNode(cfg Config) (*Node, error) {
 	}
 
 	return &Node{
-		NodeHost: nh,
-		config:   cfg,
-		fsm:      fsmInstance,
-	}, nil
+			NodeHost: nh,
+			config:   cfg,
+			fsm:      fsmInstance,
+		},
+		nil
 }
 
 // GetFSM returns a pointer to the FSM instance.
@@ -91,17 +93,25 @@ func (n *Node) GetFSM() *fsm.FSM {
 }
 
 // Propose submits a command to the Raft cluster and waits for it to be committed.
+
 func (n *Node) Propose(cmd []byte, timeout time.Duration) (sm.Result, error) {
+
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+
 	defer cancel()
 
-	// Propose the command to the cluster.
-	res, err := n.SyncPropose(ctx, n.config.ClusterID, cmd)
+	cs := n.GetNoOPSession(n.config.ClusterID)
+
+	res, err := n.NodeHost.SyncPropose(ctx, cs, cmd)
+
 	if err != nil {
+
 		return sm.Result{}, fmt.Errorf("failed to propose command: %w", err)
+
 	}
 
 	return res, nil
+
 }
 
 // Read performs a linearizable read from the state machine.
@@ -119,25 +129,43 @@ func (n *Node) Read(query interface{}, timeout time.Duration) (interface{}, erro
 }
 
 // loggingEventListener is a simple implementation of the RaftEventListener for debugging.
-type loggingEventListener struct{}
 
-func (l *loggingEventListener) LeaderUpdated(info dragonboat.LeaderInfo) {
-	fmt.Printf("[Raft] Leader updated: ClusterID=%d, NodeID=%d, Term=%d\n",
-		info.ClusterID, info.NodeID, info.Term)
-}
+// type loggingEventListener struct{}
 
-func (l *loggingEventListener) NodeHostShuttingDown()                                  {}
-func (l *loggingEventListener) NodeUnreachable(info dragonboat.NodeInfo)               {}
-func (l *loggingEventListener) NodeReady(info dragonboat.NodeInfo)                     {}
-func (l *loggingEventListener) MembershipChanged(info dragonboat.MembershipInfo)       {}
-func (l *loggingEventListener) ConnectionEstablished(info dragonboat.ConnectionInfo)   {}
-func (l *loggingEventListener) ConnectionFailed(info dragonboat.ConnectionInfo)        {}
-func (l *loggingEventListener) SendSnapshotStarted(info dragonboat.SendSnapshotInfo)   {}
-func (l *loggingEventListener) SendSnapshotCompleted(info dragonboat.SendSnapshotInfo) {}
-func (l *loggingEventListener) SendSnapshotAborted(info dragonboat.SendSnapshotInfo)   {}
-func (l *loggingEventListener) SnapshotReceived(info dragonboat.SnapshotInfo)          {}
-func (l *loggingEventListener) SnapshotRecovered(info dragonboat.SnapshotInfo)         {}
-func (l *loggingEventListener) SnapshotSaved(info dragonboat.SnapshotInfo)             {}
-func (l *loggingEventListener) SnapshotCompacted(info dragonboat.SnapshotInfo)         {}
-func (l *loggingEventListener) LogCompacted(info dragonboat.LogInfo)                   {}
-func (l *loggingEventListener) LogDBCompacted(info dragonboat.LogInfo)                 {}
+// func (l *loggingEventListener) LeaderUpdated(info events.LeaderInfo) {
+
+// 	fmt.Printf("[Raft] Leader updated: ClusterID=%d, NodeID=%d, Term=%d\n",
+
+// 		info.ClusterID, info.NodeID, info.Term)
+
+// }
+
+// func (l *loggingEventListener) NodeHostShuttingDown()                                  {}
+
+// func (l *loggingEventListener) NodeUnreachable(info events.NodeInfo)               {}
+
+// func (l *loggingEventListener) NodeReady(info events.NodeInfo)                     {}
+
+// func (l *loggingEventListener) MembershipChanged(info events.MembershipInfo)       {}
+
+// func (l *loggingEventListener) ConnectionEstablished(info events.ConnectionInfo)   {}
+
+// func (l *loggingEventListener) ConnectionFailed(info events.ConnectionInfo)        {}
+
+// func (l *loggingEventListener) SendSnapshotStarted(info events.SendSnapshotInfo)   {}
+
+// func (l *loggingEventListener) SendSnapshotCompleted(info events.SendSnapshotInfo) {}
+
+// func (l *loggingEventListener) SendSnapshotAborted(info events.SendSnapshotInfo)   {}
+
+// func (l *loggingEventListener) SnapshotReceived(info events.SnapshotInfo)          {}
+
+// func (l *loggingEventListener) SnapshotRecovered(info events.SnapshotInfo)         {}
+
+// func (l *loggingEventListener) SnapshotSaved(info events.SnapshotInfo)             {}
+
+// func (l *loggingEventListener) SnapshotCompacted(info events.SnapshotInfo)         {}
+
+// func (l *loggingEventListener) LogCompacted(info events.LogInfo)                   {}
+
+// func (l *loggingEventListener) LogDBCompacted(info events.LogInfo)                 {}

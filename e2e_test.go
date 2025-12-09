@@ -9,12 +9,39 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	// Client
 	vectron "github.com/pavandhadge/vectron/clientlibs/go"
 )
+
+const jwtTestSecret = "CHANGE_ME_IN_PRODUCTION"
+
+func generateTestJWT(userID, plan, apiKeyID string) (string, error) {
+	claims := struct {
+		UserID   string `json:"user_id"`
+		Plan     string `json:"plan"`
+		APIKeyID string `json:"api_key_id"`
+		jwt.RegisteredClaims
+	}{
+		UserID:   userID,
+		Plan:     plan,
+		APIKeyID: apiKeyID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			NotBefore: jwt.NewNumericDate(time.Now()),
+			Issuer:    "vectron-test",
+			Subject:   userID,
+			ID:        apiKeyID,
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(jwtTestSecret))
+}
 
 func TestMain(m *testing.M) {
 	// Build the binaries before running the tests
@@ -31,9 +58,9 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	// --- Test Setup ---
 
 	// Create temporary directories
-	pdDataDir, _ := os.MkdirTemp("", "pd_e2e_test")
+	pdDataDir, _ := os.MkdirTemp("", "./pd_e2e_test")
 	defer os.RemoveAll(pdDataDir)
-	workerDataDir, _ := os.MkdirTemp("", "worker_e2e_test")
+	workerDataDir, _ := os.MkdirTemp("", "./worker_e2e_test")
 	defer os.RemoveAll(workerDataDir)
 
 	// Network addresses
@@ -97,6 +124,7 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	gatewayCmd.Env = append(gatewayCmd.Env, fmt.Sprintf("GRPC_ADDR=%s", apiGrpcAddr))
 	gatewayCmd.Env = append(gatewayCmd.Env, fmt.Sprintf("HTTP_ADDR=%s", apiHttpAddr))
 	gatewayCmd.Env = append(gatewayCmd.Env, fmt.Sprintf("PLACEMENT_DRIVER=%s", pdGrpcAddr))
+	gatewayCmd.Env = append(gatewayCmd.Env, fmt.Sprintf("JWT_SECRET=%s", jwtTestSecret))
 	gatewayCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	var gatewayOut bytes.Buffer
 	gatewayCmd.Stdout = &gatewayOut
@@ -112,7 +140,11 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	time.Sleep(3 * time.Second)
 
 	// --- Test Logic using Go Client ---
-	client, err := vectron.NewClient(apiGrpcAddr, "")
+	// Generate a test token
+	testToken, err := generateTestJWT("test-user-123", "pro", "test-key-abc")
+	require.NoError(t, err)
+
+	client, err := vectron.NewClient(apiGrpcAddr, testToken)
 	require.NoError(t, err)
 	defer client.Close()
 

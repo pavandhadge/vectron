@@ -125,6 +125,11 @@ func NewFSM() *FSM {
 	}
 }
 
+// Open is a no-op that is required for the IOnDiskStateMachine interface.
+func (f *FSM) Open(stopc <-chan struct{}) (uint64, error) {
+	return 0, nil
+}
+
 // Update applies commands from the Raft log to the FSM.
 func (f *FSM) Update(entries []sm.Entry) ([]sm.Entry, error) {
 	for i, entry := range entries {
@@ -306,8 +311,18 @@ type fsmSnapshot struct {
 	NextWorkerID uint64                 `json:"next_worker_id"`
 }
 
+// Sync is a no-op.
+func (f *FSM) Sync() error {
+	return nil
+}
+
+// PrepareSnapshot is a no-op.
+func (f *FSM) PrepareSnapshot() (interface{}, error) {
+	return nil, nil
+}
+
 // SaveSnapshot saves the FSM state to a snapshot.
-func (f *FSM) SaveSnapshot(w io.Writer, fc sm.ISnapshotFileCollection, done <-chan struct{}) error {
+func (f *FSM) SaveSnapshot(ctx interface{}, w io.Writer, done <-chan struct{}) error {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
@@ -323,7 +338,7 @@ func (f *FSM) SaveSnapshot(w io.Writer, fc sm.ISnapshotFileCollection, done <-ch
 }
 
 // RecoverFromSnapshot restores the FSM state from a snapshot.
-func (f *FSM) RecoverFromSnapshot(r io.Reader, files []sm.SnapshotFile, done <-chan struct{}) error {
+func (f *FSM) RecoverFromSnapshot(r io.Reader, done <-chan struct{}) error {
 	var data fsmSnapshot
 	if err := json.NewDecoder(r).Decode(&data); err != nil {
 		return err
@@ -344,6 +359,11 @@ func (f *FSM) RecoverFromSnapshot(r io.Reader, files []sm.SnapshotFile, done <-c
 // Close closes the FSM.
 func (f *FSM) Close() error {
 	return nil
+}
+
+// GetHash is a no-op.
+func (f *FSM) GetHash() (uint64, error) {
+	return 0, nil
 }
 
 // ======================================================================================

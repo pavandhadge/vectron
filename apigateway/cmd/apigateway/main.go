@@ -186,8 +186,8 @@ func Start(grpcAddr, httpAddr, placementDriverAddr string) {
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
 			middleware.LoggingInterceptor,
-			middleware.RateLimitInterceptor(cfg.RateLimitRPS),
 			middleware.AuthInterceptor,
+			middleware.RateLimitInterceptor(cfg.RateLimitRPS),
 		),
 	)
 	pb.RegisterVectronServiceServer(grpcServer, &gatewayServer{placementClient: placementClient})

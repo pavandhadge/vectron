@@ -65,6 +65,7 @@ func handleError(err error) error {
 	}
 	switch st.Code() {
 	case codes.Unauthenticated:
+		fmt.Println(err)
 		return fmt.Errorf("%w: %s", ErrAuthentication, st.Message())
 	case codes.NotFound:
 		return fmt.Errorf("%w: %s", ErrNotFound, st.Message())

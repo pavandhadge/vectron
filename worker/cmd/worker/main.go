@@ -30,10 +30,11 @@ func Start(nodeID uint64, raftAddr, grpcAddr, pdAddr, workerDataDir string) {
 
 	// Configure and create the NodeHost.
 	nhc := config.NodeHostConfig{
-		DeploymentID:  1,
-		NodeHostDir:   nhDataDir,
-		RaftAddress:   raftAddr,
-		ListenAddress: raftAddr,
+		DeploymentID:   1,
+		NodeHostDir:    nhDataDir,
+		RaftAddress:    raftAddr,
+		ListenAddress:  raftAddr,
+		RTTMillisecond: 1000,
 	}
 	nh, err := dragonboat.NewNodeHost(nhc)
 	if err != nil {

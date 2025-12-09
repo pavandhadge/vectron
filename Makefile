@@ -1,6 +1,6 @@
-.PHONY: build
+.PHONY: build clean
 
-build:
+build: clean
 	mkdir -p ./bin
 	go build -o ./bin/placementdriver ./placementdriver/cmd/placementdriver
 	go build -o ./bin/worker ./worker/cmd/worker
@@ -17,3 +17,6 @@ build-worker:
 build-apigateway:
 	mkdir -p ./bin
 	go build -o ./bin/apigateway ./apigateway/cmd/apigateway
+
+clean:
+	rm -rf ./bin
