@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	sm "github.com/lni/dragonboat/v4/statemachine"
+	sm "github.com/lni/dragonboat/v3/statemachine"
 )
 
 // CommandType is the type of command sent to the Raft log.

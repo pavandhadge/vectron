@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/lni/dragonboat/v4"
-	"github.com/lni/dragonboat/v4/config"
-	sm "github.com/lni/dragonboat/v4/statemachine"
+	"github.com/lni/dragonboat/v3"
+	"github.com/lni/dragonboat/v3/config"
+	sm "github.com/lni/dragonboat/v3/statemachine"
 	"github.com/pavandhadge/vectron/placementdriver/internal/fsm"
 )
 

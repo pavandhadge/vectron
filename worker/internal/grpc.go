@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/lni/dragonboat/v4"
+	"github.com/lni/dragonboat/v3"
 	"github.com/pavandhadge/vectron/worker/internal/shard"
 	"github.com/pavandhadge/vectron/worker/proto/worker"
 	"google.golang.org/grpc/codes"

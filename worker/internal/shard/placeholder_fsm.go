@@ -3,7 +3,7 @@ package shard
 import (
 	"io"
 
-	sm "github.com/lni/dragonboat/v4/statemachine"
+	sm "github.com/lni/dragonboat/v3/statemachine"
 )
 
 // PlaceholderFSM is a no-op implementation of IOnDiskStateMachine used for

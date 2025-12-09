@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/lni/dragonboat/v4"
-	"github.com/lni/dragonboat/v4/config"
+	"github.com/lni/dragonboat/v3"
+	"github.com/lni/dragonboat/v3/config"
 	"github.com/pavandhadge/vectron/worker/internal"
 	"github.com/pavandhadge/vectron/worker/internal/pd"
 	"github.com/pavandhadge/vectron/worker/internal/shard"

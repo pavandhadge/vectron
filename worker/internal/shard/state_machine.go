@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	sm "github.com/lni/dragonboat/v4/statemachine"
+	sm "github.com/lni/dragonboat/v3/statemachine"
 	"github.com/pavandhadge/vectron/worker/internal/storage"
 )
 

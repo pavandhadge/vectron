@@ -11,15 +11,8 @@ require (
 )
 
 require (
-	golang.org/x/net v0.46.1-0.20251013234738-63d1a5100f82 // indirect
-	golang.org/x/sys v0.37.0 // indirect
-	golang.org/x/text v0.30.0 // indirect
+	golang.org/x/net v0.48.0 // indirect
+	golang.org/x/sys v0.39.0 // indirect
+	golang.org/x/text v0.32.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217 // indirect
 )
-
-
-replace google.golang.org/genproto => google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1
-
-replace google.golang.org/genproto/googleapis/api => google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1
-
-replace google.golang.org/genproto/googleapis/rpc => google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1

@@ -4,9 +4,9 @@ import (
 	"log"
 	"sync"
 
-	"github.com/lni/dragonboat/config"
-	"github.com/lni/dragonboat/v4"
-	sm "github.com/lni/dragonboat/v4/statemachine"
+	"github.com/lni/dragonboat/v3"
+	"github.com/lni/dragonboat/v3/config"
+	sm "github.com/lni/dragonboat/v3/statemachine"
 	"github.com/pavandhadge/vectron/worker/internal/pd"
 )
 
