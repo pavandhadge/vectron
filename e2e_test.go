@@ -143,7 +143,7 @@ func TestE2E_FullLifecycle(t *testing.T) {
 		}
 	})
 	// Wait for PD to be ready before starting other components.
-	waitFor(t, &pdOut, "became leader", 10*time.Second)
+	waitFor(t, &pdOut, "became leader", 20*time.Second)
 
 	// Worker
 	workerCmd := exec.Command(

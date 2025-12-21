@@ -1,3 +1,7 @@
+// This file implements the Go client for the Vectron vector database.
+// It provides a user-friendly interface for interacting with the Vectron API,
+// handling gRPC connection, authentication, and error translation.
+
 package vectron
 
 import (
@@ -11,25 +15,25 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	// Assuming the generated protobuf code is in this package
+	// This assumes the generated protobuf code is in this package path.
 	"github.com/pavandhadge/vectron/clientlibs/go/proto/apigateway"
 )
 
-// Point represents a single vector point.
+// Point represents a single vector point for upserting.
 type Point struct {
 	ID      string
 	Vector  []float32
 	Payload map[string]string
 }
 
-// SearchResult represents a single search result.
+// SearchResult represents a single result from a search query.
 type SearchResult struct {
 	ID      string
 	Score   float32
 	Payload map[string]string
 }
 
-// Client is the Go client for the Vectron vector database.
+// Client is the primary entrypoint for interacting with the Vectron API.
 type Client struct {
 	conn   *grpc.ClientConn
 	client apigateway.VectronServiceClient
@@ -37,11 +41,12 @@ type Client struct {
 }
 
 // NewClient creates a new Vectron client.
-// It establishes a gRPC connection to the specified host.
+// It establishes a gRPC connection to the specified host address of the API gateway.
 func NewClient(host string, apiKey string) (*Client, error) {
 	if host == "" {
 		return nil, fmt.Errorf("%w: host cannot be empty", ErrInvalidArgument)
 	}
+	// Establishes a connection without TLS. For production, use secure credentials.
 	conn, err := grpc.Dial(host, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to apigateway: %w", err)
@@ -54,18 +59,18 @@ func NewClient(host string, apiKey string) (*Client, error) {
 	}, nil
 }
 
-// handleError converts a gRPC error into a more specific client error.
+// handleError translates a gRPC status error into a more specific client-side error.
 func handleError(err error) error {
 	if err == nil {
 		return nil
 	}
 	st, ok := status.FromError(err)
 	if !ok {
+		// Not a gRPC status error, return as is.
 		return err
 	}
 	switch st.Code() {
 	case codes.Unauthenticated:
-		fmt.Println(err)
 		return fmt.Errorf("%w: %s", ErrAuthentication, st.Message())
 	case codes.NotFound:
 		return fmt.Errorf("%w: %s", ErrNotFound, st.Message())
@@ -76,20 +81,21 @@ func handleError(err error) error {
 	case codes.Internal:
 		return fmt.Errorf("%w: %s", ErrInternalServer, st.Message())
 	default:
-		return err
+		return err // Return the original gRPC error for unhandled codes.
 	}
 }
 
-// getContext creates a new context with a timeout and authentication metadata.
+// getContext creates a new context with a default timeout and injects the API key for authentication.
 func (c *Client) getContext() (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	if c.apiKey != "" {
+		// Adds "authorization: Bearer <apiKey>" to the outgoing gRPC metadata.
 		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+c.apiKey)
 	}
 	return ctx, cancel
 }
 
-// CreateCollection creates a new collection in Vectron.
+// CreateCollection sends an RPC to create a new collection in Vectron.
 func (c *Client) CreateCollection(name string, dimension int32, distance string) error {
 	if name == "" {
 		return fmt.Errorf("%w: collection name cannot be empty", ErrInvalidArgument)
@@ -111,7 +117,7 @@ func (c *Client) CreateCollection(name string, dimension int32, distance string)
 	return handleError(err)
 }
 
-// ListCollections lists all collection names in Vectron.
+// ListCollections retrieves a list of all collection names in Vectron.
 func (c *Client) ListCollections() ([]string, error) {
 	ctx, cancel := c.getContext()
 	defer cancel()
@@ -124,18 +130,19 @@ func (c *Client) ListCollections() ([]string, error) {
 	return res.Collections, nil
 }
 
-// Upsert inserts or updates vectors in a collection.
+// Upsert inserts or updates one or more vectors in a specified collection.
 func (c *Client) Upsert(collection string, points []*Point) (int32, error) {
 	if collection == "" {
 		return 0, fmt.Errorf("%w: collection name cannot be empty", ErrInvalidArgument)
 	}
 	if len(points) == 0 {
-		return 0, nil
+		return 0, nil // Nothing to do.
 	}
 
 	ctx, cancel := c.getContext()
 	defer cancel()
 
+	// Translate client-side Point structs to the protobuf-generated type.
 	protoPoints := make([]*apigateway.Point, len(points))
 	for i, p := range points {
 		if p.ID == "" {
@@ -160,7 +167,7 @@ func (c *Client) Upsert(collection string, points []*Point) (int32, error) {
 	return res.Upserted, nil
 }
 
-// Search finds the k-nearest neighbors to a query vector.
+// Search finds the k-nearest neighbors to a query vector in a collection.
 func (c *Client) Search(collection string, vector []float32, topK uint32) ([]*SearchResult, error) {
 	if collection == "" {
 		return nil, fmt.Errorf("%w: collection name cannot be empty", ErrInvalidArgument)
@@ -180,6 +187,7 @@ func (c *Client) Search(collection string, vector []float32, topK uint32) ([]*Se
 		return nil, handleError(err)
 	}
 
+	// Translate protobuf-generated SearchResult to the client-side type.
 	results := make([]*SearchResult, len(res.Results))
 	for i, r := range res.Results {
 		results[i] = &SearchResult{
@@ -191,7 +199,7 @@ func (c *Client) Search(collection string, vector []float32, topK uint32) ([]*Se
 	return results, nil
 }
 
-// Get retrieves a point by its ID.
+// Get retrieves a single point by its ID from a collection.
 func (c *Client) Get(collection string, pointID string) (*Point, error) {
 	if collection == "" || pointID == "" {
 		return nil, fmt.Errorf("%w: collection name and point ID cannot be empty", ErrInvalidArgument)
@@ -210,6 +218,7 @@ func (c *Client) Get(collection string, pointID string) (*Point, error) {
 		return nil, handleError(err)
 	}
 
+	// Translate the protobuf response to the client-side Point type.
 	return &Point{
 		ID:      res.Point.Id,
 		Vector:  res.Point.Vector,
@@ -217,7 +226,7 @@ func (c *Client) Get(collection string, pointID string) (*Point, error) {
 	}, nil
 }
 
-// Delete deletes a point by its ID.
+// Delete removes a point by its ID from a collection.
 func (c *Client) Delete(collection string, pointID string) error {
 	if collection == "" || pointID == "" {
 		return fmt.Errorf("%w: collection name and point ID cannot be empty", ErrInvalidArgument)
@@ -235,7 +244,10 @@ func (c *Client) Delete(collection string, pointID string) error {
 	return handleError(err)
 }
 
-// Close closes the underlying gRPC connection.
+// Close terminates the underlying gRPC connection to the server.
 func (c *Client) Close() error {
-	return c.conn.Close()
+	if c.conn != nil {
+		return c.conn.Close()
+	}
+	return nil
 }

@@ -1,0 +1,88 @@
+# Protocol Buffer Compilation Commands
+
+This file contains the `protoc` commands to compile the protocol buffer files for each service and client library.
+
+## Prerequisites
+
+You must have the following tools installed:
+
+*   `protoc`: The protocol buffer compiler.
+*   Go plugins:
+    *   `protoc-gen-go`: `go install google.golang.org/protobuf/cmd/protoc-gen-go`
+    *   `protoc-gen-go-grpc`: `go install google.golang.org/grpc/cmd/protoc-gen-go-grpc`
+    *   `protoc-gen-grpc-gateway`: `go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway`
+*   Python tools:
+    *   `grpcio-tools`: `pip install grpcio-tools`
+*   JavaScript/TypeScript tools:
+    *   `grpc-tools`: `npm install -g grpc-tools`
+    *   `ts-proto`: `npm install -g ts-proto`
+
+You will also need the Google APIs repository for the `google/api/annotations.proto` imports. It is recommended to clone it to a well-known directory.
+
+```bash
+git clone https://github.com/googleapis/googleapis.git /path/to/googleapis
+```
+
+All commands should be run from the root of the `vectron` repository.
+
+## Go
+
+These commands will generate the Go gRPC code (`.pb.go`), gRPC gateway code (`.pb.gw.go`), and OpenAPI specifications (`.swagger.json`).
+
+```bash
+# Define the Google APIs path
+GOOGLE_APIS_DIR=/path/to/googleapis
+
+# --- API Gateway ---
+protoc -I. -I${GOOGLE_APIS_DIR} \
+    --go_out=./apigateway/proto --go_opt=paths=source_relative \
+    --go-grpc_out=./apigateway/proto --go-grpc_opt=paths=source_relative \
+    --grpc-gateway_out=./apigateway/proto --grpc-gateway_opt=paths=source_relative \
+    --openapiv2_out=./apigateway/proto/apigateway/openapi \
+    apigateway/proto/apigateway/apigateway.proto
+
+# --- Placement Driver ---
+protoc -I. -I${GOOGLE_APIS_DIR} \
+    --go_out=./placementdriver/proto --go_opt=paths=source_relative \
+    --go-grpc_out=./placementdriver/proto --go-grpc_opt=paths=source_relative \
+    placementdriver/proto/placementdriver/placementdriver.proto
+
+# --- Worker ---
+protoc -I. -I${GOOGLE_APIS_DIR} \
+    --go_out=./worker/proto --go_opt=paths=source_relative \
+    --go-grpc_out=./worker/proto --go-grpc_opt=paths=source_relative \
+    worker/proto/worker/worker.proto
+```
+
+## Python
+
+This command generates the Python gRPC stubs for the client library.
+
+```bash
+# Define the Google APIs path
+GOOGLE_APIS_DIR=/path/to/googleapis
+
+python -m grpc_tools.protoc \
+    -I. \
+    -I${GOOGLE_APIS_DIR} \
+    --python_out=./clientlibs/python/vectron_client/proto \
+    --grpc_python_out=./clientlibs/python/vectron_client/proto \
+    clientlibs/python/vectron_client/proto/apigateway/apigateway.proto
+```
+
+## JavaScript / TypeScript
+
+This command generates the TypeScript client code using `ts-proto`.
+
+```bash
+# Define the Google APIs path
+GOOGLE_APIS_DIR=/path/to/googleapis
+
+protoc \
+    --plugin="protoc-gen-ts_proto=$(npm root)/.bin/protoc-gen-ts_proto" \
+    --ts_proto_out=./clientlibs/js/src \
+    --ts_proto_opt=outputServices=grpc-js,env=node \
+    -I. \
+    -I${GOOGLE_APIS_DIR} \
+    clientlibs/js/proto/apigateway/apigateway.proto
+```

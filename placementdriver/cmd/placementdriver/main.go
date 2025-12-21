@@ -1,3 +1,8 @@
+// This file is the main entry point for the Placement Driver (PD) service.
+// It parses command-line flags, initializes the Raft node, and starts the gRPC server
+// that exposes the PlacementService. It is responsible for the lifecycle of a single
+// PD node.
+
 package main
 
 import (
@@ -18,15 +23,17 @@ import (
 	"google.golang.org/grpc"
 )
 
+// Command-line flags
 var (
-	grpcAddr          string
-	raftAddr          string
-	nodeID            uint64
-	clusterID         uint64
-	initialMembersStr string
-	dataDir           string
+	grpcAddr          string // gRPC listen address
+	raftAddr          string // Raft listen address
+	nodeID            uint64 // Unique ID for this node in the Raft cluster
+	clusterID         uint64 // Unique ID for the Raft cluster
+	initialMembersStr string // Comma-separated list of initial members for bootstrapping
+	dataDir           string // Directory to store Raft data
 )
 
+// init registers and parses the command-line flags.
 func init() {
 	flag.StringVar(&grpcAddr, "grpc-addr", "localhost:6001", "gRPC listen address")
 	flag.StringVar(&raftAddr, "raft-addr", "localhost:7001", "Raft listen address")
@@ -36,14 +43,15 @@ func init() {
 	flag.StringVar(&dataDir, "data-dir", "pd-data", "Data directory")
 }
 
-func Start(nodeID uint64, clusterID uint64, raftAddr, grpcAddr, dataDir string, initialMembers map[uint64]string) {
-	// Create the data directory.
+// Start configures and runs the core components of the placement driver node.
+func Start(nodeID, clusterID uint64, raftAddr, grpcAddr, dataDir string, initialMembers map[uint64]string) {
+	// Create a dedicated directory for this node's data.
 	nodeDataDir := filepath.Join(dataDir, fmt.Sprintf("node-%d", nodeID))
 	if err := os.MkdirAll(nodeDataDir, 0750); err != nil {
 		log.Fatalf("failed to create data dir: %v", err)
 	}
 
-	// Configure and create the Raft node.
+	// Configure and create the underlying Raft node.
 	raftConfig := pdRaft.Config{
 		NodeID:         nodeID,
 		ClusterID:      clusterID,
@@ -55,16 +63,15 @@ func Start(nodeID uint64, clusterID uint64, raftAddr, grpcAddr, dataDir string, 
 	if err != nil {
 		log.Fatalf("failed to create raft node: %v", err)
 	}
-	// Note: In a real test, we would need a way to stop this.
-	// For now, we assume the test process will be killed.
 
-	// Get the FSM instance from the Raft node.
+	// The FSM (Finite State Machine) holds the application state (workers, collections, etc.).
+	// It is managed by the Raft node.
 	fsm := raftNode.GetFSM()
 	if fsm == nil {
 		log.Fatalf("failed to get FSM from raft node")
 	}
 
-	// Create and start the gRPC server.
+	// Create the gRPC server, which provides the PlacementService API.
 	grpcServer := server.NewServer(raftNode, fsm)
 	lis, err := net.Listen("tcp", grpcAddr)
 	if err != nil {
@@ -72,6 +79,7 @@ func Start(nodeID uint64, clusterID uint64, raftAddr, grpcAddr, dataDir string, 
 	}
 	s := grpc.NewServer()
 	pb.RegisterPlacementServiceServer(s, grpcServer)
+
 	log.Printf("gRPC server listening at %v", lis.Addr())
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve gRPC: %v", err)
@@ -85,22 +93,25 @@ func main() {
 		log.Fatalf("node-id is required and must be > 0")
 	}
 
-	// Parse the initial members flag.
 	initialMembers, err := parseInitialMembers(initialMembersStr)
 	if err != nil {
 		log.Fatalf("failed to parse initial members: %v", err)
 	}
 
+	// Run the Start function in a goroutine so it doesn't block.
 	go Start(nodeID, clusterID, raftAddr, grpcAddr, dataDir, initialMembers)
 
-	// Wait for a signal to shutdown.
+	// Wait for an interrupt signal to gracefully shut down.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	<-quit
 	log.Println("shutting down server...")
+	// Note: A real implementation would need to gracefully stop the Raft node and gRPC server.
 }
 
-// parseInitialMembers parses the -initial-members flag string.
+// parseInitialMembers converts the comma-separated string of initial members
+// into a map of node IDs to their Raft addresses.
+// It expects the string to be in the format: "id1:host1:port1,id2:host2:port2,..."
 func parseInitialMembers(s string) (map[uint64]string, error) {
 	members := make(map[uint64]string)
 	if s == "" {
@@ -109,27 +120,20 @@ func parseInitialMembers(s string) (map[uint64]string, error) {
 
 	parts := strings.Split(s, ",")
 	for _, part := range parts {
-		p := strings.Split(part, ":")
-		if len(p) != 2 && len(p) != 3 { // Allow for host:port or id:host:port
-			return nil, fmt.Errorf("invalid member format: %s", part)
+		p := strings.Split(strings.TrimSpace(part), ":")
+		if len(p) != 3 { // Strictly enforce "id:host:port" format
+			return nil, fmt.Errorf("invalid member format, expected 'id:host:port', got: '%s'", part)
 		}
 
-		var idStr, addr string
-		if len(p) == 2 { // host:port format, assume id is same as what we're running
-			idStr = fmt.Sprintf("%d", nodeID)
-			addr = p[0] + ":" + p[1]
-		} else { // id:host:port
-			idStr = p[0]
-			addr = p[1] + ":" + p[2]
-		}
-
-		id, err := strconv.ParseUint(idStr, 10, 64)
+		id, err := strconv.ParseUint(p[0], 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse node id '%s': %w", idStr, err)
+			return nil, fmt.Errorf("failed to parse node id '%s': %w", p[0], err)
 		}
 		if id == 0 {
 			return nil, fmt.Errorf("node id cannot be 0")
 		}
+
+		addr := p[1] + ":" + p[2]
 		members[id] = addr
 	}
 	return members, nil

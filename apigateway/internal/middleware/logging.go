@@ -1,4 +1,7 @@
-// middleware/logging.go
+// This file implements logging middleware for the API Gateway.
+// It provides a gRPC unary interceptor and an HTTP middleware to log details
+// about incoming requests, including the method, user, client IP, and duration.
+
 package middleware
 
 import (
@@ -13,20 +16,26 @@ import (
 	"google.golang.org/grpc/peer"
 )
 
-// === gRPC Unary Interceptor (for gRPC requests) ===
+// LoggingInterceptor is a gRPC unary interceptor that logs information about each request.
+// It logs the start and end of a request, including the gRPC method, user ID, client IP, and total duration.
 func LoggingInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	fmt.Println("logger started")
 	start := time.Now()
-	userID := extractUserID(ctx)
 
-	// Extract client IP if available
+	// Attempt to get user and client details from the context.
+	userID := GetUserID(ctx) // Use the helper from auth.go
+	if userID == "" {
+		userID = "anonymous"
+	}
+
 	clientIP := "unknown"
 	if p, ok := peer.FromContext(ctx); ok {
 		clientIP = p.Addr.String()
 	}
 
-	log.Printf("[gRPC] START] method=%s user=%s client=%s", info.FullMethod, userID, clientIP)
+	log.Printf("[gRPC][START] method=%s user=%s client=%s", info.FullMethod, userID, clientIP)
 
+	// Call the next handler in the chain.
 	resp, err := handler(ctx, req)
 
 	duration := time.Since(start)
@@ -35,36 +44,42 @@ func LoggingInterceptor(ctx context.Context, req interface{}, info *grpc.UnarySe
 		status = "ERROR"
 	}
 
-	log.Printf("[gRPC] %s] method=%s user=%s duration=%v", status, info.FullMethod, userID, duration)
+	log.Printf("[gRPC][END] status=%s method=%s user=%s duration=%v", status, info.FullMethod, userID, duration)
 	return resp, err
 }
 
-// === HTTP Middleware (for HTTP/JSON gateway) ===
+// Logging is an HTTP middleware that provides request logging for the REST/JSON gateway.
+// It's not used in the current gRPC-only setup but is available for future use.
 func Logging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		userID, _ := r.Context().Value(UserIDKey).(string)
+		userID := GetUserID(r.Context())
 		if userID == "" {
 			userID = "anonymous"
 		}
 
-		log.Printf("[HTTP START] %s %s user=%s client=%s", r.Method, r.URL.Path, userID, r.RemoteAddr)
+		log.Printf("[HTTP][START] method=%s path=%s user=%s client=%s", r.Method, r.URL.Path, userID, r.RemoteAddr)
 
+		// Serve the next handler.
 		next.ServeHTTP(w, r)
 
-		log.Printf("[HTTP DONE] %s %s user=%s duration=%v", r.Method, r.URL.Path, userID, time.Since(start))
+		log.Printf("[HTTP][END] method=%s path=%s user=%s duration=%v", r.Method, r.URL.Path, userID, time.Since(start))
 	})
 }
 
-// Helper: extract user ID from context (set by auth)
+// extractUserID is a helper function to safely retrieve a user ID from the context.
+// It checks both gRPC metadata and the context value set by the auth interceptor.
+// Note: This is somewhat redundant as GetUserID from auth.go is preferred.
 func extractUserID(ctx context.Context) string {
+	// First, try the value injected by the AuthInterceptor.
+	if userID := GetUserID(ctx); userID != "" {
+		return userID
+	}
+	// Fallback for cases where metadata might be used directly.
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		if values := md.Get("user_id"); len(values) > 0 {
 			return values[0]
 		}
-	}
-	if userID := ctx.Value(UserIDKey); userID != nil {
-		return userID.(string)
 	}
 	return "anonymous"
 }

@@ -110,11 +110,20 @@ func (s *StateMachine) Update(entries []sm.Entry) ([]sm.Entry, error) {
 	return entries, nil
 }
 
+type SearchResult struct {
+	IDs    []string
+	Scores []float32
+}
+
 // Lookup performs a read-only query on the state machine.
 func (s *StateMachine) Lookup(query interface{}) (interface{}, error) {
 	switch q := query.(type) {
 	case SearchQuery:
-		return s.Search(q.Vector, q.K)
+		ids, scores, err := s.Search(q.Vector, q.K)
+		if err != nil {
+			return nil, err
+		}
+		return &SearchResult{IDs: ids, Scores: scores}, nil
 	case GetVectorQuery:
 		vec, meta, err := s.GetVector(q.ID)
 		if err != nil {

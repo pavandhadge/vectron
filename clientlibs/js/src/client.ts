@@ -1,7 +1,10 @@
-// First, import the gRPC module
+/**
+ * This file implements the TypeScript client for the Vectron vector database.
+ * It provides a user-friendly, async/await-based interface for interacting
+ * with the Vectron API, handling gRPC connection, authentication, and error translation.
+ */
 import * as grpc from "@grpc/grpc-js";
 
-// Then, import the custom error classes
 import {
   VectronError,
   AuthenticationError,
@@ -11,7 +14,7 @@ import {
   InternalServerError,
 } from "./errors";
 
-// Finally, import the generated protobuf classes from the correct path
+// Import the generated protobuf client and message types.
 import {
   CreateCollectionRequest,
   VectronServiceClient,
@@ -21,10 +24,10 @@ import {
   Point as ProtoPoint,
   SearchRequest,
   UpsertRequest,
-} from "../proto/apigateway/apigateway.ts";
+} from "../proto/apigateway/apigateway";
 
 /**
- * Represents a single vector point.
+ * Represents a single vector point for upsert operations.
  */
 export interface Point {
   id: string;
@@ -33,7 +36,7 @@ export interface Point {
 }
 
 /**
- * Represents a single search result.
+ * Represents a single search result, including its ID, score, and payload.
  */
 export interface SearchResult {
   id: string;
@@ -42,21 +45,22 @@ export interface SearchResult {
 }
 
 /**
- * The TypeScript client for the Vectron vector database.
+ * The main client for interacting with the Vectron vector database.
  */
 export class VectronClient {
-  private client: VectronServiceClient;
-  private apiKey?: string;
+  private readonly client: VectronServiceClient;
+  private readonly apiKey?: string;
 
   /**
    * Initializes the Vectron client.
-   * @param host The address of the apigateway (e.g., 'localhost:8080').
+   * @param host The address of the apigateway gRPC endpoint (e.g., 'localhost:8081').
    * @param apiKey The API key for authentication.
    */
   constructor(host: string, apiKey?: string) {
     if (!host) {
       throw new InvalidArgumentError("Host cannot be empty.");
     }
+    // For production, use grpc.credentials.createSsl()
     this.client = new VectronServiceClient(
       host,
       grpc.credentials.createInsecure(),
@@ -64,6 +68,9 @@ export class VectronClient {
     this.apiKey = apiKey;
   }
 
+  /**
+   * Creates the metadata for a gRPC request, including the authorization header.
+   */
   private getMetadata(): grpc.Metadata {
     const meta = new grpc.Metadata();
     if (this.apiKey) {
@@ -72,6 +79,9 @@ export class VectronClient {
     return meta;
   }
 
+  /**
+   * Translates a gRPC ServiceError into a specific VectronError subclass.
+   */
   private _handleError(err: grpc.ServiceError): Error {
     switch (err.code) {
       case grpc.status.UNAUTHENTICATED:
@@ -85,17 +95,19 @@ export class VectronClient {
       case grpc.status.INTERNAL:
         return new InternalServerError(err.details);
       default:
-        return new VectronError(err.details);
+        return new VectronError(
+          `An unexpected gRPC error occurred: ${err.details}`,
+        );
     }
   }
 
   /**
-   * Creates a new collection.
+   * Creates a new collection in Vectron.
    * @param name The name of the collection. Must be a non-empty string.
-   * @param dimension The dimension of the vectors in the collection. Must be a positive integer.
-   * @param distance The distance metric to use ('euclidean', 'cosine', or 'dot'). Defaults to 'euclidean'.
+   * @param dimension The dimension of the vectors that will be stored in this collection.
+   * @param distance The distance metric to use ('euclidean', 'cosine', or 'dot').
    * @throws {InvalidArgumentError} If parameters are invalid.
-   * @throws {AlreadyExistsError} If the collection already exists.
+   * @throws {AlreadyExistsError} If a collection with the same name already exists.
    * @throws {VectronError} For other server-side or connection errors.
    */
   public async createCollection(
@@ -110,16 +122,17 @@ export class VectronClient {
       throw new InvalidArgumentError("Dimension must be a positive integer.");
     }
 
-    const request = new CreateCollectionRequest();
-    request.setName(name);
-    request.setDimension(dimension);
-    request.setDistance(distance);
+    const request = CreateCollectionRequest.create({
+      name,
+      dimension,
+      distance,
+    });
 
     return new Promise((resolve, reject) => {
       this.client.createCollection(
         request,
         this.getMetadata(),
-        (err, response) => {
+        (err, _response) => {
           if (err) {
             return reject(this._handleError(err));
           }
@@ -130,12 +143,12 @@ export class VectronClient {
   }
 
   /**
-   * Lists all collections.
-   * @returns A list of collection names.
+   * Retrieves a list of all collection names.
+   * @returns A promise that resolves with a list of collection names.
    * @throws {VectronError} For server-side or connection errors.
    */
   public async listCollections(): Promise<string[]> {
-    const request = new ListCollectionsRequest();
+    const request = ListCollectionsRequest.create();
     return new Promise((resolve, reject) => {
       this.client.listCollections(
         request,
@@ -144,19 +157,19 @@ export class VectronClient {
           if (err) {
             return reject(this._handleError(err));
           }
-          resolve(response.getCollectionsList());
+          resolve(response.collections);
         },
       );
     });
   }
 
   /**
-   * Inserts or updates vectors in a collection.
-   * @param collection The name of the collection.
-   * @param points A list of `Point` objects to upsert.
-   * @returns The number of points upserted.
+   * Inserts or updates one or more vectors in a specified collection.
+   * @param collection The name of the collection to upsert into.
+   * @param points An array of `Point` objects.
+   * @returns A promise that resolves with the number of points successfully upserted.
    * @throws {InvalidArgumentError} If parameters are invalid.
-   * @throws {NotFoundError} If the collection does not exist.
+   * @throws {NotFoundError} If the specified collection does not exist.
    * @throws {VectronError} For other server-side or connection errors.
    */
   public async upsert(collection: string, points: Point[]): Promise<number> {
@@ -167,44 +180,37 @@ export class VectronClient {
       return 0;
     }
 
-    const request = new UpsertRequest();
-    request.setCollection(collection);
-    request.setPointsList(
-      points.map((p) => {
-        if (!p.id) {
-          throw new InvalidArgumentError("Point ID cannot be empty.");
-        }
-        const protoPoint = new ProtoPoint();
-        protoPoint.setId(p.id);
-        protoPoint.setVectorList(p.vector);
-        if (p.payload) {
-          const payloadMap = protoPoint.getPayloadMap();
-          for (const [key, value] of Object.entries(p.payload)) {
-            payloadMap.set(key, value);
-          }
-        }
-        return protoPoint;
-      }),
-    );
+    const protoPoints = points.map((p) => {
+      if (!p.id) {
+        throw new InvalidArgumentError("Point ID cannot be empty.");
+      }
+      return ProtoPoint.create({
+        id: p.id,
+        vector: p.vector,
+        payload: p.payload,
+      });
+    });
+
+    const request = UpsertRequest.create({ collection, points: protoPoints });
 
     return new Promise((resolve, reject) => {
       this.client.upsert(request, this.getMetadata(), (err, response) => {
         if (err) {
           return reject(this._handleError(err));
         }
-        resolve(response.getUpserted());
+        resolve(response.upserted);
       });
     });
   }
 
   /**
-   * Searches for the k nearest neighbors to a query vector.
-   * @param collection The name of the collection.
+   * Searches a collection for the k vectors most similar to the query vector.
+   * @param collection The name of the collection to search in.
    * @param vector The query vector.
-   * @param topK The number of results to return.
-   * @returns A list of `SearchResult` objects.
+   * @param topK The number of nearest neighbors to return.
+   * @returns A promise that resolves with a list of `SearchResult` objects.
    * @throws {InvalidArgumentError} If parameters are invalid.
-   * @throws {NotFoundError} If the collection does not exist.
+   * @throws {NotFoundError} If the specified collection does not exist.
    * @throws {VectronError} For other server-side or connection errors.
    */
   public async search(
@@ -216,10 +222,7 @@ export class VectronClient {
       throw new InvalidArgumentError("Collection name cannot be empty.");
     }
 
-    const request = new SearchRequest();
-    request.setCollection(collection);
-    request.setVectorList(vector);
-    request.setTopK(topK);
+    const request = SearchRequest.create({ collection, vector, topK });
 
     return new Promise((resolve, reject) => {
       this.client.search(request, this.getMetadata(), (err, response) => {
@@ -227,10 +230,10 @@ export class VectronClient {
           return reject(this._handleError(err));
         }
         resolve(
-          response.getResultsList().map((r) => ({
-            id: r.getId(),
-            score: r.getScore(),
-            payload: r.getPayloadMap().toObject(),
+          response.results.map((r) => ({
+            id: r.id,
+            score: r.score,
+            payload: r.payload,
           })),
         );
       });
@@ -238,10 +241,10 @@ export class VectronClient {
   }
 
   /**
-   * Retrieves a point by its ID.
+   * Retrieves a single point by its ID from a collection.
    * @param collection The name of the collection.
    * @param pointId The ID of the point to retrieve.
-   * @returns The `Point` object.
+   * @returns A promise that resolves with the requested `Point` object.
    * @throws {InvalidArgumentError} If parameters are invalid.
    * @throws {NotFoundError} If the collection or point does not exist.
    * @throws {VectronError} For other server-side or connection errors.
@@ -253,27 +256,32 @@ export class VectronClient {
       );
     }
 
-    const request = new GetRequest();
-    request.setCollection(collection);
-    request.setId(pointId);
+    const request = GetRequest.create({ collection, id: pointId });
 
     return new Promise((resolve, reject) => {
       this.client.get(request, this.getMetadata(), (err, response) => {
         if (err) {
           return reject(this._handleError(err));
         }
-        const point = response.getPoint();
+        const point = response.point;
+        if (!point) {
+          // This case should ideally be handled by a NOT_FOUND error,
+          // but as a safeguard, we reject here.
+          return reject(
+            new NotFoundError(`Point with id ${pointId} not found.`),
+          );
+        }
         resolve({
-          id: point.getId(),
-          vector: point.getVectorList(),
-          payload: point.getPayloadMap().toObject(),
+          id: point.id,
+          vector: point.vector,
+          payload: point.payload,
         });
       });
     });
   }
 
   /**
-   * Deletes a point by its ID.
+   * Deletes a single point by its ID from a collection.
    * @param collection The name of the collection.
    * @param pointId The ID of the point to delete.
    * @throws {InvalidArgumentError} If parameters are invalid.
@@ -287,12 +295,10 @@ export class VectronClient {
       );
     }
 
-    const request = new DeleteRequest();
-    request.setCollection(collection);
-    request.setId(pointId);
+    const request = DeleteRequest.create({ collection, id: pointId });
 
     return new Promise((resolve, reject) => {
-      this.client.delete(request, this.getMetadata(), (err, response) => {
+      this.client.delete(request, this.getMetadata(), (err, _response) => {
         if (err) {
           return reject(this._handleError(err));
         }
@@ -302,7 +308,7 @@ export class VectronClient {
   }
 
   /**
-   * Closes the gRPC client connection.
+   * Closes the underlying gRPC client connection.
    */
   public close() {
     this.client.close();

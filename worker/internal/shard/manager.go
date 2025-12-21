@@ -1,3 +1,8 @@
+// This file implements the ShardManager, which is responsible for managing the
+// lifecycle of all shard replicas on a single worker node. It communicates with
+// the placement driver to get the desired state of shards and reconciles it
+// with the current state by starting and stopping Raft clusters (shards).
+
 package shard
 
 import (
@@ -12,15 +17,15 @@ import (
 
 // Manager is responsible for managing the lifecycle of shard replicas on a worker node.
 type Manager struct {
-	nodeHost      *dragonboat.NodeHost
-	workerDataDir string
-	nodeID        uint64
+	nodeHost      *dragonboat.NodeHost // The Dragonboat instance that runs all Raft clusters.
+	workerDataDir string               // The root directory for this worker's data.
+	nodeID        uint64               // The ID of this worker node.
 
 	mu              sync.RWMutex
-	runningReplicas map[uint64]bool // Map of shardID -> bool
+	runningReplicas map[uint64]bool // A set of shard IDs for replicas currently running on this node.
 }
 
-// NewManager creates a new ShardManager.
+// NewManager creates a new instance of the ShardManager.
 func NewManager(nh *dragonboat.NodeHost, workerDataDir string, nodeID uint64) *Manager {
 	return &Manager{
 		nodeHost:        nh,
@@ -30,8 +35,9 @@ func NewManager(nh *dragonboat.NodeHost, workerDataDir string, nodeID uint64) *M
 	}
 }
 
-// SyncShards compares the desired shard assignments from the PD with the
-// currently running replicas and starts/stops replicas as needed.
+// SyncShards is the core reconciliation loop. It compares the desired shard
+// assignments from the placement driver with the currently running replicas
+// and starts or stops replicas as needed.
 func (m *Manager) SyncShards(assignments []*pd.ShardAssignment) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -43,7 +49,8 @@ func (m *Manager) SyncShards(assignments []*pd.ShardAssignment) {
 		desiredShards[assignment.ShardInfo.ShardID] = assignment
 	}
 
-	// Identify shards to stop
+	// Phase 1: Identify shards to stop.
+	// These are replicas that are running locally but are no longer in the desired state from the PD.
 	shardsToStop := []uint64{}
 	for shardID := range m.runningReplicas {
 		if _, exists := desiredShards[shardID]; !exists {
@@ -51,7 +58,8 @@ func (m *Manager) SyncShards(assignments []*pd.ShardAssignment) {
 		}
 	}
 
-	// Identify shards to start
+	// Phase 2: Identify shards to start.
+	// These are replicas that are in the desired state but not currently running locally.
 	shardsToStart := []*pd.ShardAssignment{}
 	for shardID, assignment := range desiredShards {
 		if _, running := m.runningReplicas[shardID]; !running {
@@ -59,20 +67,24 @@ func (m *Manager) SyncShards(assignments []*pd.ShardAssignment) {
 		}
 	}
 
-	// Stop old replicas
+	// Phase 3: Execute the changes.
+
+	// Stop old/unwanted replicas.
 	for _, shardID := range shardsToStop {
 		log.Printf("ShardManager: Stopping replica for shard %d", shardID)
 		if err := m.nodeHost.StopCluster(shardID); err != nil {
 			log.Printf("ShardManager: Failed to stop replica for shard %d: %v", shardID, err)
+			// Continue even if stopping fails.
 		}
 		delete(m.runningReplicas, shardID)
 	}
 
-	// Start new replicas
+	// Start new replicas.
 	for _, assignment := range shardsToStart {
 		shardID := assignment.ShardInfo.ShardID
 		log.Printf("ShardManager: Starting replica for shard %d with initial members %v", shardID, assignment.InitialMembers)
 
+		// Configure the new Raft cluster for the shard.
 		rc := config.Config{
 			NodeID:             m.nodeID,
 			ClusterID:          shardID,
@@ -83,14 +95,17 @@ func (m *Manager) SyncShards(assignments []*pd.ShardAssignment) {
 			CompactionOverhead: 50,
 		}
 
+		// The factory function that Dragonboat will call to create the shard's state machine.
 		createFSM := func(clusterID uint64, nodeID uint64) sm.IOnDiskStateMachine {
-			sm, err := NewStateMachine(clusterID, nodeID, m.workerDataDir, assignment.ShardInfo.Dimension, assignment.ShardInfo.Distance)
+			stateMachine, err := NewStateMachine(clusterID, nodeID, m.workerDataDir, assignment.ShardInfo.Dimension, assignment.ShardInfo.Distance)
 			if err != nil {
-				log.Panicf("failed to create state machine: %v", err)
+				// Panicking here because a failure to create a state machine is a fatal error for the worker.
+				log.Panicf("failed to create state machine for shard %d: %v", clusterID, err)
 			}
-			return sm
+			return stateMachine
 		}
 
+		// Start the new Raft cluster.
 		if err := m.nodeHost.StartOnDiskCluster(assignment.InitialMembers, false, createFSM, rc); err != nil {
 			log.Printf("ShardManager: Failed to start replica for shard %d: %v", shardID, err)
 			continue
@@ -100,22 +115,27 @@ func (m *Manager) SyncShards(assignments []*pd.ShardAssignment) {
 	}
 }
 
+// IsShardReady checks if a specific shard is ready to be used on this node.
+// A shard is considered ready if it is running and has a leader.
 func (m *Manager) IsShardReady(shardID uint64) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	if !m.runningReplicas[shardID] {
-		log.Printf("IsShardReady: shard %d not in running replicas", shardID)
+		log.Printf("IsShardReady: Shard %d is not in the set of running replicas.", shardID)
 		return false
 	}
+
 	leaderID, _, err := m.nodeHost.GetLeaderID(shardID)
 	if err != nil {
-		log.Printf("IsShardReady: GetLeaderID for shard %d returned error: %v", shardID, err)
+		log.Printf("IsShardReady: Error getting leader for shard %d: %v", shardID, err)
 		return false
 	}
 	if leaderID == 0 {
-		log.Printf("IsShardReady: shard %d has no leader", shardID)
+		log.Printf("IsShardReady: Shard %d currently has no leader.", shardID)
 		return false
 	}
-	log.Printf("IsShardReady: shard %d is ready with leader %d", shardID, leaderID)
+
+	log.Printf("IsShardReady: Shard %d is ready with leader %d.", shardID, leaderID)
 	return true
 }

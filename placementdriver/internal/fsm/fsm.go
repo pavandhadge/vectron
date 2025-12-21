@@ -1,3 +1,8 @@
+// This file defines the Finite State Machine (FSM) for the placement driver.
+// The FSM is the core of the placement driver's state management. It is a deterministic
+// state machine that processes commands from the Raft log and updates the cluster state.
+// The state includes information about peers, workers, collections, and shards.
+
 package fsm
 
 import (
@@ -11,40 +16,41 @@ import (
 	sm "github.com/lni/dragonboat/v3/statemachine"
 )
 
-// CommandType is the type of command sent to the Raft log.
+// CommandType defines the type of operation to be applied to the FSM.
 type CommandType int
 
 const (
-	// RegisterPeer is the command to register a new peer.
+	// RegisterPeer adds a new peer to the placement driver's Raft cluster.
 	RegisterPeer CommandType = iota
-	// RegisterWorker is the command to register a new worker.
+	// RegisterWorker adds a new worker node to the cluster.
 	RegisterWorker
-	// CreateCollection is the command to create a new collection.
+	// CreateCollection creates a new collection and its initial shards.
 	CreateCollection
-	// UpdateWorkerHeartbeat is the command to update a worker's heartbeat.
+	// UpdateWorkerHeartbeat updates the last heartbeat timestamp for a worker.
 	UpdateWorkerHeartbeat
 )
 
-// Command is the command sent to the Raft log.
+// Command is the structure that is serialized and sent to the Raft log.
+// It contains the type of command and its JSON-encoded payload.
 type Command struct {
 	Type    CommandType     `json:"type"`
 	Payload json.RawMessage `json:"payload"`
 }
 
-// RegisterPeerPayload is the payload for the RegisterPeer command.
+// RegisterPeerPayload is the data for the RegisterPeer command.
 type RegisterPeerPayload struct {
 	ID       string `json:"id"`
 	RaftAddr string `json:"raft_addr"`
 	APIAddr  string `json:"api_addr"`
 }
 
-// RegisterWorkerPayload is the payload for the RegisterWorker command.
+// RegisterWorkerPayload is the data for the RegisterWorker command.
 type RegisterWorkerPayload struct {
 	GrpcAddress string `json:"grpc_address"`
 	RaftAddress string `json:"raft_address"`
 }
 
-// CreateCollectionPayload is the payload for the CreateCollection command.
+// CreateCollectionPayload is the data for the CreateCollection command.
 type CreateCollectionPayload struct {
 	Name          string `json:"name"`
 	Dimension     int32  `json:"dimension"`
@@ -52,29 +58,23 @@ type CreateCollectionPayload struct {
 	InitialShards int    `json:"initial_shards"`
 }
 
-// UpdateWorkerHeartbeatPayload is the payload for the UpdateWorkerHeartbeat command.
+// UpdateWorkerHeartbeatPayload is the data for the UpdateWorkerHeartbeat command.
 type UpdateWorkerHeartbeatPayload struct {
 	WorkerID uint64 `json:"worker_id"`
 }
 
-// Shard and Collection Data Structures
+// ======================================================================================
+// State Machine Data Structures
 // ======================================================================================
 
-// ShardAssignment contains all info a worker needs to manage a shard replica.
-// This is a DTO and is not stored in the FSM state directly.
-type ShardAssignment struct {
-	ShardInfo      *ShardInfo        `json:"shard_info"`
-	InitialMembers map[uint64]string `json:"initial_members"` // map[nodeID]raftAddress
-}
-
-// ShardInfo holds the metadata for a single shard.
+// ShardInfo holds the metadata for a single shard, including its key range and replicas.
 type ShardInfo struct {
 	ShardID       uint64   `json:"shard_id"`
 	Collection    string   `json:"collection"`
 	KeyRangeStart uint64   `json:"key_range_start"`
 	KeyRangeEnd   uint64   `json:"key_range_end"`
-	Replicas      []uint64 `json:"replicas"` // Slice of worker node IDs
-	LeaderID      uint64   `json:"leader_id"`
+	Replicas      []uint64 `json:"replicas"`  // Slice of worker node IDs that host this shard.
+	LeaderID      uint64   `json:"leader_id"` // The current leader of the shard's Raft group.
 	Dimension     int32    `json:"dimension"`
 	Distance      string   `json:"distance"`
 }
@@ -87,28 +87,14 @@ type Collection struct {
 	Shards    map[uint64]*ShardInfo `json:"shards"` // map[shardID]*ShardInfo
 }
 
-// ======================================================================================
-// FSM Implementation
-// ======================================================================================
-
-// FSM is the finite state machine for the placement driver.
-type FSM struct {
-	mu           sync.RWMutex
-	Peers        map[string]PeerInfo    // nodeID -> PeerInfo
-	Workers      map[uint64]WorkerInfo  // workerID -> WorkerInfo
-	Collections  map[string]*Collection // map[collectionName]*Collection
-	NextShardID  uint64
-	NextWorkerID uint64
-}
-
-// PeerInfo holds information about a peer in the raft cluster.
+// PeerInfo holds information about a peer in the placement driver's Raft cluster.
 type PeerInfo struct {
 	ID       string `json:"id"`
 	RaftAddr string `json:"raft_addr"`
 	APIAddr  string `json:"api_addr"`
 }
 
-// WorkerInfo holds information about a worker.
+// WorkerInfo holds information about a registered worker node.
 type WorkerInfo struct {
 	ID            uint64    `json:"id"`
 	GrpcAddress   string    `json:"grpc_address"`
@@ -116,7 +102,27 @@ type WorkerInfo struct {
 	LastHeartbeat time.Time `json:"last_heartbeat"`
 }
 
-// NewFSM creates a new FSM.
+// ======================================================================================
+// FSM Implementation
+// ======================================================================================
+
+// FSM is the placement driver's state machine. It implements the
+// dragonboat.IOnDiskStateMachine interface.
+type FSM struct {
+	mu sync.RWMutex
+	// Peers stores information about the other PD nodes in the Raft cluster.
+	Peers map[string]PeerInfo `json:"peers"`
+	// Workers stores information about all registered worker nodes.
+	Workers map[uint64]WorkerInfo `json:"workers"`
+	// Collections stores all the collections and their shard information.
+	Collections map[string]*Collection `json:"collections"`
+	// NextShardID is a counter for generating unique shard IDs.
+	NextShardID uint64 `json:"next_shard_id"`
+	// NextWorkerID is a counter for generating unique worker IDs.
+	NextWorkerID uint64 `json:"next_worker_id"`
+}
+
+// NewFSM creates a new, empty FSM.
 func NewFSM() *FSM {
 	return &FSM{
 		Peers:        make(map[string]PeerInfo),
@@ -127,12 +133,14 @@ func NewFSM() *FSM {
 	}
 }
 
-// Open is a no-op that is required for the IOnDiskStateMachine interface.
+// Open is called by Dragonboat when the FSM is started.
 func (f *FSM) Open(stopc <-chan struct{}) (uint64, error) {
+	// No-op for this implementation. We recover state from snapshots.
 	return 0, nil
 }
 
-// Update applies commands from the Raft log to the FSM.
+// Update is the core method of the FSM. It is called by Dragonboat to apply
+// committed log entries to the state machine.
 func (f *FSM) Update(entries []sm.Entry) ([]sm.Entry, error) {
 	for i, entry := range entries {
 		var cmd Command
@@ -142,6 +150,7 @@ func (f *FSM) Update(entries []sm.Entry) ([]sm.Entry, error) {
 
 		var appErr error
 		var result uint64
+		// Dispatch the command to the appropriate apply method.
 		switch cmd.Type {
 		case RegisterPeer:
 			var payload RegisterPeerPayload
@@ -164,9 +173,9 @@ func (f *FSM) Update(entries []sm.Entry) ([]sm.Entry, error) {
 			} else {
 				if err := f.applyCreateCollection(payload); err != nil {
 					appErr = err
-					result = 0 // Explicitly set 0 on failure
+					result = 0 // Explicitly set 0 on failure.
 				} else {
-					result = 1 // Set 1 on success
+					result = 1 // Set 1 on success.
 				}
 			}
 		case UpdateWorkerHeartbeat:
@@ -182,19 +191,22 @@ func (f *FSM) Update(entries []sm.Entry) ([]sm.Entry, error) {
 
 		if appErr != nil {
 			fmt.Printf("Error applying command: %v\n", appErr)
-			// For queries that return a result, 0 or a specific error code would be appropriate.
-			entries[i].Result = sm.Result{Value: result}
-		} else {
-			entries[i].Result = sm.Result{Value: result}
 		}
+		// The result of the update is passed back to the proposer.
+		entries[i].Result = sm.Result{Value: result}
 	}
 	return entries, nil
+}
+
+// Sync is called by Dragonboat to synchronize the FSM with the latest state.
+// In this implementation, all state is in memory, so this is a no-op.
+func (f *FSM) Sync() error {
+	return nil
 }
 
 func (f *FSM) applyRegisterPeer(payload RegisterPeerPayload) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-
 	f.Peers[payload.ID] = PeerInfo{
 		ID:       payload.ID,
 		RaftAddr: payload.RaftAddr,
@@ -213,7 +225,7 @@ func (f *FSM) applyRegisterWorker(payload RegisterWorkerPayload) uint64 {
 		ID:            workerID,
 		GrpcAddress:   payload.GrpcAddress,
 		RaftAddress:   payload.RaftAddress,
-		LastHeartbeat: time.Now(),
+		LastHeartbeat: time.Now().UTC(),
 	}
 	fmt.Printf("Registered new worker %d with GRPC address %s and Raft address %s\n", workerID, payload.GrpcAddress, payload.RaftAddress)
 	return workerID
@@ -229,14 +241,13 @@ func (f *FSM) applyCreateCollection(payload CreateCollectionPayload) error {
 		return fmt.Errorf("collection %s already exists", payload.Name)
 	}
 
-	const replicationFactor = 1
+	const replicationFactor = 1 // TODO: Make this configurable per collection.
 	if len(f.Workers) < replicationFactor {
 		err := fmt.Errorf("not enough workers (%d) to meet replication factor (%d)", len(f.Workers), replicationFactor)
 		fmt.Printf("Error creating collection: %v\n", err)
 		return err
 	}
 
-	// Create the collection.
 	collection := &Collection{
 		Name:      payload.Name,
 		Dimension: payload.Dimension,
@@ -244,19 +255,19 @@ func (f *FSM) applyCreateCollection(payload CreateCollectionPayload) error {
 		Shards:    make(map[uint64]*ShardInfo),
 	}
 
-	// Create initial shards.
+	// Create initial shards for the collection.
 	numShards := payload.InitialShards
 	if numShards <= 0 {
-		numShards = 1 // Default to at least one shard
+		numShards = 1 // Default to at least one shard.
 	}
 	shardRangeSize := uint64(math.MaxUint64 / float64(numShards))
 
-	// Get a list of worker IDs to pick replicas from.
 	workerIDs := make([]uint64, 0, len(f.Workers))
-	for _, w := range f.Workers {
-		workerIDs = append(workerIDs, w.ID)
+	for id := range f.Workers {
+		workerIDs = append(workerIDs, id)
 	}
 
+	// Assign replicas to shards in a round-robin fashion.
 	workerIdx := 0
 	for i := 0; i < numShards; i++ {
 		shardID := f.NextShardID
@@ -265,10 +276,9 @@ func (f *FSM) applyCreateCollection(payload CreateCollectionPayload) error {
 		startKey := uint64(i) * shardRangeSize
 		endKey := (uint64(i+1) * shardRangeSize) - 1
 		if i == numShards-1 {
-			endKey = math.MaxUint64
+			endKey = math.MaxUint64 // Ensure the last shard covers the rest of the key space.
 		}
 
-		// Assign replicas.
 		replicas := make([]uint64, 0, replicationFactor)
 		for j := 0; j < replicationFactor; j++ {
 			replicas = append(replicas, workerIDs[workerIdx%len(workerIDs)])
@@ -297,15 +307,20 @@ func (f *FSM) applyUpdateWorkerHeartbeat(payload UpdateWorkerHeartbeatPayload) {
 	defer f.mu.Unlock()
 
 	if worker, ok := f.Workers[payload.WorkerID]; ok {
-		worker.LastHeartbeat = time.Now()
+		worker.LastHeartbeat = time.Now().UTC()
 		f.Workers[payload.WorkerID] = worker
 	}
 }
 
-// Lookup is used for read-only queries of the FSM.
+// Lookup is used for read-only queries of the FSM's state. It is called by
+// Dragonboat for linearizable reads.
 func (f *FSM) Lookup(query interface{}) (interface{}, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
+
+	// The query parameter is not used in this simple implementation.
+	// A more advanced implementation could use it to specify which part of the state to return.
+	// For now, we return a snapshot of the entire FSM state.
 	return &fsmSnapshot{
 		Peers:        f.Peers,
 		Workers:      f.Workers,
@@ -315,7 +330,7 @@ func (f *FSM) Lookup(query interface{}) (interface{}, error) {
 	}, nil
 }
 
-// fsmSnapshot is a struct to hold all the data for snapshotting.
+// fsmSnapshot is a struct used for serializing the FSM state for snapshotting.
 type fsmSnapshot struct {
 	Peers        map[string]PeerInfo    `json:"peers"`
 	Workers      map[uint64]WorkerInfo  `json:"workers"`
@@ -324,22 +339,19 @@ type fsmSnapshot struct {
 	NextWorkerID uint64                 `json:"next_worker_id"`
 }
 
-// Sync is a no-op.
-func (f *FSM) Sync() error {
-	return nil
-}
-
-// PrepareSnapshot is a no-op.
+// PrepareSnapshot is called by Dragonboat to get a snapshot of the current state.
+// In this implementation, we do all the work in SaveSnapshot, so this is a no-op.
 func (f *FSM) PrepareSnapshot() (interface{}, error) {
 	return nil, nil
 }
 
-// SaveSnapshot saves the FSM state to a snapshot.
+// SaveSnapshot is called by Dragonboat to create a snapshot of the FSM's state.
+// It serializes the FSM's data to a writer.
 func (f *FSM) SaveSnapshot(ctx interface{}, w io.Writer, done <-chan struct{}) error {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	data := &fsmSnapshot{
+	data := fsmSnapshot{
 		Peers:        f.Peers,
 		Workers:      f.Workers,
 		Collections:  f.Collections,
@@ -350,7 +362,8 @@ func (f *FSM) SaveSnapshot(ctx interface{}, w io.Writer, done <-chan struct{}) e
 	return json.NewEncoder(w).Encode(data)
 }
 
-// RecoverFromSnapshot restores the FSM state from a snapshot.
+// RecoverFromSnapshot is called by Dragonboat to restore the FSM's state from a snapshot.
+// It deserializes the data from a reader and applies it to the FSM.
 func (f *FSM) RecoverFromSnapshot(r io.Reader, done <-chan struct{}) error {
 	var data fsmSnapshot
 	if err := json.NewDecoder(r).Decode(&data); err != nil {
@@ -369,21 +382,17 @@ func (f *FSM) RecoverFromSnapshot(r io.Reader, done <-chan struct{}) error {
 	return nil
 }
 
-// Close closes the FSM.
-func (f *FSM) Close() error {
-	return nil
-}
+// Close is called by Dragonboat when the FSM is being closed.
+func (f *FSM) Close() error { return nil }
 
-// GetHash is a no-op.
-func (f *FSM) GetHash() (uint64, error) {
-	return 0, nil
-}
+// GetHash is used by Dragonboat to check the consistency of the FSM.
+func (f *FSM) GetHash() (uint64, error) { return 0, nil }
 
 // ======================================================================================
-// Helper methods for accessing state
+// Helper methods for safely accessing FSM state (used by the gRPC server).
 // ======================================================================================
 
-// GetPeer is a helper method for accessing peer info.
+// GetPeer returns information about a specific peer.
 func (f *FSM) GetPeer(id string) (PeerInfo, bool) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -391,7 +400,7 @@ func (f *FSM) GetPeer(id string) (PeerInfo, bool) {
 	return peer, ok
 }
 
-// GetWorker is a helper method for accessing worker info.
+// GetWorker returns information about a specific worker.
 func (f *FSM) GetWorker(id uint64) (WorkerInfo, bool) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -399,18 +408,18 @@ func (f *FSM) GetWorker(id uint64) (WorkerInfo, bool) {
 	return worker, ok
 }
 
-// GetWorkers is a helper method for accessing worker info.
+// GetWorkers returns a slice of all registered workers.
 func (f *FSM) GetWorkers() []WorkerInfo {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	var workers []WorkerInfo
+	workers := make([]WorkerInfo, 0, len(f.Workers))
 	for _, w := range f.Workers {
 		workers = append(workers, w)
 	}
 	return workers
 }
 
-// GetCollection returns a collection from the FSM.
+// GetCollection returns information about a specific collection.
 func (f *FSM) GetCollection(name string) (*Collection, bool) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -422,7 +431,7 @@ func (f *FSM) GetCollection(name string) (*Collection, bool) {
 func (f *FSM) GetCollections() []*Collection {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	var collections []*Collection
+	collections := make([]*Collection, 0, len(f.Collections))
 	for _, c := range f.Collections {
 		collections = append(collections, c)
 	}

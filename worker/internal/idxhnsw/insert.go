@@ -1,26 +1,33 @@
-// idxhnsw/insert.go
+// This file contains the logic for inserting new nodes into the HNSW graph.
+// It includes the main 'add' method and helper functions for selecting neighbors
+// and determining the layer for a new node.
+
 package idxhnsw
 
 import (
 	"errors"
-	"math"
 	"math/rand"
 	"sort"
 )
 
+// selectNeighborsHeuristic implements the neighbor selection strategy during insertion.
+// It aims to select the M best neighbors for a new node from a set of candidates.
+// The heuristic prioritizes closer nodes but also includes a diversity mechanism
+// to avoid selecting neighbors that are too close to each other, which improves graph quality.
 func (h *HNSW) selectNeighborsHeuristic(query []float32, candidates []candidate, M int) []uint32 {
 	if len(candidates) == 0 {
 		return nil
 	}
 
-	// Sort by distance
+	// Sort candidates by distance to the query vector.
 	sort.Slice(candidates, func(i, j int) bool {
 		return candidates[i].dist < candidates[j].dist
 	})
 
 	result := make([]uint32, 0, M)
-	used := make(map[uint32]bool, M)
+	used := make(map[uint32]bool)
 
+	// First pass: Try to select diverse neighbors.
 	for _, cand := range candidates {
 		if len(result) >= M {
 			break
@@ -29,7 +36,8 @@ func (h *HNSW) selectNeighborsHeuristic(query []float32, candidates []candidate,
 			continue
 		}
 
-		// Diversity check: reject if too close to any already selected
+		// Diversity check: reject candidate if it's closer to an already selected neighbor
+		// than the selected neighbor is to the query vector. This helps to spread out the connections.
 		tooClose := false
 		for _, selectedID := range result {
 			selectedNode := h.getNode(selectedID)
@@ -37,6 +45,7 @@ func (h *HNSW) selectNeighborsHeuristic(query []float32, candidates []candidate,
 			if selectedNode == nil || candNode == nil {
 				continue
 			}
+			// This is a simplified diversity check. A more robust implementation might be needed.
 			if h.distance(selectedNode.Vec, candNode.Vec) < cand.dist {
 				tooClose = true
 				break
@@ -49,7 +58,8 @@ func (h *HNSW) selectNeighborsHeuristic(query []float32, candidates []candidate,
 		}
 	}
 
-	// Fallback: fill with closest if not enough diverse ones
+	// Fallback: If not enough diverse neighbors were found, fill the remaining slots
+	// with the closest candidates, regardless of diversity.
 	if len(result) < M {
 		for _, cand := range candidates {
 			if len(result) >= M {
@@ -57,7 +67,6 @@ func (h *HNSW) selectNeighborsHeuristic(query []float32, candidates []candidate,
 			}
 			if !used[cand.id] {
 				result = append(result, cand.id)
-				used[cand.id] = true
 			}
 		}
 	}
@@ -65,7 +74,8 @@ func (h *HNSW) selectNeighborsHeuristic(query []float32, candidates []candidate,
 	return result
 }
 
-// Helper: convert []uint32 neighbor list → []candidate (for pruning)
+// toCandidates converts a list of neighbor IDs into a list of candidate structs,
+// calculating the distance of each to the query vector.
 func toCandidates(ids []uint32, query []float32, h *HNSW) []candidate {
 	cands := make([]candidate, 0, len(ids))
 	for _, id := range ids {
@@ -80,109 +90,119 @@ func toCandidates(ids []uint32, query []float32, h *HNSW) []candidate {
 	return cands
 }
 
+// add is the main entry point for inserting a new vector into the HNSW graph.
 func (h *HNSW) add(id string, vec []float32) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	var key uint32
+	var internalID uint32
 	var ok bool
-	if key, ok = h.idToUint32[id]; !ok {
-		key = h.nextID
-		h.idToUint32[id] = key
-		h.uint32ToID[key] = id
-		h.nextID++
+	if internalID, ok = h.idToUint32[id]; ok {
+		// If the ID already exists, this is an update.
+		// For simplicity, we can treat it as a delete followed by an add.
+		// A more optimized approach would update the vector in place.
+		h.delete(id)
 	}
+
+	// Assign a new internal ID.
+	internalID = h.nextID
+	h.idToUint32[id] = internalID
+	h.uint32ToID[internalID] = id
+	h.nextID++
 
 	if len(vec) != h.dim {
 		return errors.New("invalid vector dimension")
 	}
 
-	// --- Random layer (exponential decay) ---
+	// 1. Determine the random layer for the new node.
 	layer := h.randomLayer()
 
-	// --- Create new node ---
+	// 2. Create the new node.
 	node := &Node{
-		ID:        key,
-		Vec:       append([]float32(nil), vec...), // deep copy
+		ID:        internalID,
+		Vec:       append([]float32(nil), vec...), // Create a deep copy.
 		Layer:     layer,
 		Neighbors: make([][]uint32, layer+1),
 	}
 	for i := range node.Neighbors {
-		node.Neighbors[i] = make([]uint32, 0, h.config.M) // pre-allocate
+		node.Neighbors[i] = make([]uint32, 0, h.config.M)
 	}
 
-	// Persist early (in case of crash)
+	// Persist the node to the store before modifying the graph.
 	if err := h.persistNode(node); err != nil {
 		return err
 	}
-	h.nodes[key] = node
+	h.nodes[internalID] = node
 
-	// --- First node ever? ---
+	// If this is the first node, set it as the entry point.
 	if h.entry == 0 {
-		h.entry = key
+		h.entry = internalID
 		h.maxLayer = layer
 		return nil
 	}
 
-	// --- 1. Greedy descent from top layer down to layer+1 ---
+	// 3. Find the entry point for the insertion layer.
+	// Start from the top layer of the graph and greedily search down to the new node's layer.
 	curr := h.getNode(h.entry)
 	for l := h.maxLayer; l > layer; l-- {
 		curr = h.searchLayerSingle(vec, curr, l)
 	}
 
-	// --- 2. Insert in each layer from new node's max down to 0 ---
+	// 4. Iteratively insert the node into each layer from its layer down to 0.
 	for l := min(layer, h.maxLayer); l >= 0; l-- {
-		// Expanded search with efConstruction
+		// Find the `efConstruction` nearest neighbors to the new node at this layer.
 		candidates := h.searchLayer(vec, curr, h.config.EfConstruction, l)
 
-		// Use the REAL heuristic (diversity-aware)
+		// Select the best `M` neighbors from the candidates using the heuristic.
 		neighbors := h.selectNeighborsHeuristic(vec, candidates, h.config.M)
 
-		// --- Connect bidirectionally with pruning ---
+		// Connect the new node to its selected neighbors and vice-versa.
+		node.Neighbors[l] = neighbors
 		for _, nid := range neighbors {
-			// New node → neighbor
-			node.Neighbors[l] = append(node.Neighbors[l], nid)
-
-			// Neighbor → new node (with pruning!)
 			neighbor := h.getNode(nid)
 			if neighbor == nil {
 				continue
 			}
 
-			neighbor.Neighbors[l] = append(neighbor.Neighbors[l], key)
+			// Add the new node to the neighbor's connection list.
+			neighbor.Neighbors[l] = append(neighbor.Neighbors[l], internalID)
 
-			// CRITICAL: Enforce max M neighbors
+			// Prune the neighbor's connections if they exceed the max (M).
 			if len(neighbor.Neighbors[l]) > h.config.M {
-				neighbor.Neighbors[l] = h.selectNeighborsHeuristic(
+				prunedNeighbors := h.selectNeighborsHeuristic(
 					neighbor.Vec,
 					toCandidates(neighbor.Neighbors[l], neighbor.Vec, h),
 					h.config.M,
 				)
-				h.persistNode(neighbor) // only if changed (optional optimization)
+				neighbor.Neighbors[l] = prunedNeighbors
+				h.persistNode(neighbor)
 			}
 		}
 
-		// Use closest found neighbor as entry for next lower layer
-		if len(neighbors) > 0 {
-			closest := neighbors[0]
-			if n := h.getNode(closest); n != nil {
+		// Use the closest neighbor found at this layer as the entry point for the next layer down.
+		if len(candidates) > 0 {
+			if n := h.getNode(candidates[0].id); n != nil {
 				curr = n
 			}
 		}
 	}
 
-	// --- Update entry point if we grew upward ---
+	// 5. Update the global entry point if the new node's layer is the highest.
 	if layer > h.maxLayer {
 		h.maxLayer = layer
-		h.entry = key
+		h.entry = internalID
 	}
 
 	return nil
 }
 
+// randomLayer determines the layer for a new node using an exponentially decaying probability.
+// This is a core part of the HNSW algorithm.
 func (h *HNSW) randomLayer() int {
 	level := 0
-	for rand.Float64() < 1/math.Ln2 && level < h.config.MaxLevel {
+	// This is the standard way to generate a random level in HNSW.
+	// The probability of increasing the level is 1/M.
+	for rand.Float64() < (1.0/float64(h.config.M)) && level < h.config.MaxLevel {
 		level++
 	}
 	return level

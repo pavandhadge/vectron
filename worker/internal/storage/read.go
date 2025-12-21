@@ -1,3 +1,7 @@
+// This file implements the read operations for the PebbleDB storage engine.
+// It provides methods for getting single keys, checking for existence, and iterating
+// over key-value pairs. It also includes vector-specific read operations.
+
 package storage
 
 import (
@@ -8,7 +12,8 @@ import (
 	"github.com/cockroachdb/pebble"
 )
 
-// Get retrieves the value for a given key.
+// Get retrieves the value for a given key from the database.
+// It returns nil if the key is not found.
 func (r *PebbleDB) Get(key []byte) ([]byte, error) {
 	if r.db == nil {
 		return nil, errors.New("db not initialized")
@@ -16,13 +21,12 @@ func (r *PebbleDB) Get(key []byte) ([]byte, error) {
 	value, closer, err := r.db.Get(key)
 	if err != nil {
 		if errors.Is(err, pebble.ErrNotFound) {
-			return nil, nil // Not found
+			return nil, nil // Treat not found as nil, not an error.
 		}
 		return nil, err
 	}
-	if closer != nil {
-		defer closer.Close()
-	}
+	defer closer.Close()
+	// Return a copy of the value to avoid issues with the underlying buffer being reused.
 	data := make([]byte, len(value))
 	copy(data, value)
 	return data, nil
@@ -34,54 +38,35 @@ func (r *PebbleDB) Exists(key []byte) (bool, error) {
 		return false, errors.New("db not initialized")
 	}
 	_, closer, err := r.db.Get(key)
-	if err == nil {
-		if closer != nil {
-			closer.Close()
+	if err != nil {
+		if errors.Is(err, pebble.ErrNotFound) {
+			return false, nil // Not found is not an error here.
 		}
-		return true, nil
+		return false, err
 	}
-	if errors.Is(err, pebble.ErrNotFound) {
-		return false, nil
+	if closer != nil {
+		closer.Close()
 	}
-	return false, err
+	return true, nil
 }
 
-// NewIterator creates a new iterator over a given prefix.
+// NewIterator creates a new iterator over a given key prefix.
 func (r *PebbleDB) NewIterator(prefix []byte) (Iterator, error) {
 	if r.db == nil {
-		return &pebbleIterator{iter: nil}, nil
+		return nil, errors.New("db not initialized")
 	}
 
-	var iterOpts pebble.IterOptions
+	iterOpts := &pebble.IterOptions{}
 	if len(prefix) > 0 {
 		iterOpts.LowerBound = prefix
-
-		// Calculate the upper bound for the prefix.
-		// This creates a key that is just past the prefix, ensuring we only iterate within it.
-		// E.g., for prefix "foo", upper bound would be "fop" if "foo" is the last byte.
-		// More robustly: find the first byte from the right that is not 0xFF.
-		// Increment that byte and use the prefix up to that point as the UpperBound.
-		// If all bytes are 0xFF, then there is no upper bound.
-		limit := make([]byte, len(prefix))
-		copy(limit, prefix)
-		i := len(limit) - 1
-		for i >= 0 && limit[i] == 0xFF {
-			i--
-		}
-		if i >= 0 {
-			limit[i]++
-			iterOpts.UpperBound = limit[:i+1]
-		}
+		iterOpts.UpperBound = pebble.DefaultComparer.Successor(nil, prefix)
 	}
 
-	iter := r.db.NewIter(&iterOpts)
-	// Even with LowerBound set, calling SeekGE ensures the iterator is positioned correctly.
-	iter.SeekGE(prefix)
-
+	iter := r.db.NewIter(iterOpts)
 	return &pebbleIterator{iter: iter}, nil
 }
 
-// Scan retrieves a limited number of key-value pairs for a given prefix.
+// Scan retrieves up to `limit` key-value pairs for a given prefix.
 func (r *PebbleDB) Scan(prefix []byte, limit int) ([]KeyValuePair, error) {
 	if r.db == nil {
 		return nil, errors.New("db not initialized")
@@ -97,15 +82,14 @@ func (r *PebbleDB) Scan(prefix []byte, limit int) ([]KeyValuePair, error) {
 		if limit > 0 && len(results) >= limit {
 			break
 		}
-		key := iter.Key()
-		value := iter.Value()
-
-		results = append(results, KeyValuePair{Key: key, Value: value})
+		// The iterator implementation returns copies, so they are safe to use.
+		results = append(results, KeyValuePair{Key: iter.Key(), Value: iter.Value()})
 	}
 	return results, iter.Error()
 }
 
-// Iterate iterates over key-value pairs for a given prefix and calls the provided function.
+// Iterate calls the provided function for each key-value pair in the given prefix range.
+// Iteration stops if the function returns false.
 func (r *PebbleDB) Iterate(prefix []byte, fn func(key, value []byte) bool) error {
 	if r.db == nil {
 		return errors.New("db not initialized")
@@ -124,68 +108,41 @@ func (r *PebbleDB) Iterate(prefix []byte, fn func(key, value []byte) bool) error
 	return iter.Error()
 }
 
-// idxhnsw/pebbledb.go or storage.go
-
-// Public: clean API — never leaks deletion state
+// GetVector retrieves a vector and its metadata by its string ID.
+// It correctly handles soft-deletions, returning nil if the vector is marked as deleted.
 func (r *PebbleDB) GetVector(id string) ([]float32, []byte, error) {
-	val, closer, err := r.db.Get([]byte(id))
+	val, err := r.Get(vectorKey(id))
 	if err != nil {
-		if errors.Is(err, pebble.ErrNotFound) {
-			return nil, nil, nil // key doesn't exist → not deleted
-		}
 		return nil, nil, err
 	}
-	if closer != nil {
-		defer closer.Close()
-	}
-	if len(val) == 0 {
-		return nil, nil, nil
+	if val == nil {
+		return nil, nil, nil // Not found.
 	}
 
-	vec, meta, decodeErr := decodeVectorWithMeta(val)
-	if decodeErr != nil || vec == nil {
-		return nil, nil, nil // malformed or soft-deleted → treat as not found
-	}
-	return vec, meta, nil
+	return decodeVectorWithMeta(val)
 }
 
-// IsDeleted returns true if the vector is unavailable to the user.
-// This includes:
-// - Soft-deleted (tombstone present, vec == nil)
-// - Permanently deleted (key removed by cleanup)
-// - Never existed
+// IsDeleted checks if a vector is considered deleted (either soft or hard deleted).
 func (r *PebbleDB) IsDeleted(id string) (bool, error) {
-	val, closer, err := r.db.Get([]byte(id))
+	val, err := r.Get(vectorKey(id))
 	if err != nil {
-		if errors.Is(err, pebble.ErrNotFound) {
-			return true, nil // key gone → deleted/unavailable
-		}
 		return false, err
 	}
-	if closer != nil {
-		closer.Close()
+	if val == nil {
+		return true, nil // Hard deleted (key does not exist).
 	}
 
-	if len(val) == 0 {
-		return true, nil // explicit tombstone (empty value)
-	}
-
-	vec, _, decodeErr := decodeVectorWithMeta(val)
-	if decodeErr != nil {
-		return false, decodeErr // malformed → error
-	}
-
-	// vec == nil → soft-deleted
-	// vec != nil → alive
-	return vec == nil, nil
+	vec, _, _ := decodeVectorWithMeta(val)
+	return vec == nil, nil // Soft deleted if vector part is nil.
 }
 
-// Size returns the size of the database on disk.
+// Size is not yet implemented for PebbleDB.
 func (r *PebbleDB) Size() (int64, error) {
+	// A proper implementation would need to iterate over disk usage stats.
 	return 0, errors.New("size calculation not implemented")
 }
 
-// EntryCount returns the number of entries for a given prefix.
+// EntryCount counts the number of entries under a given prefix.
 func (r *PebbleDB) EntryCount(prefix []byte) (int64, error) {
 	if r.db == nil {
 		return 0, errors.New("db not initialized")
@@ -198,24 +155,34 @@ func (r *PebbleDB) EntryCount(prefix []byte) (int64, error) {
 	return count, err
 }
 
-// decodeVectorWithMeta deserializes a vector and metadata from a byte slice.
+// decodeVectorWithMeta deserializes a byte slice into a vector and its metadata.
 func decodeVectorWithMeta(data []byte) ([]float32, []byte, error) {
+	if len(data) == 0 {
+		// This indicates a soft-deleted vector.
+		return nil, nil, nil
+	}
 	if len(data) < 4 {
-		return nil, nil, errors.New("data too short for vector length")
+		return nil, nil, errors.New("data too short to contain vector length")
 	}
 
-	vecLen := int(binary.LittleEndian.Uint32(data[:4]))
+	vecLen32 := binary.LittleEndian.Uint32(data[:4])
+	vecLen := int(vecLen32)
 	expectedLen := 4 + vecLen*4
-	if expectedLen > len(data) {
-		return nil, nil, errors.New("data too short for vector")
+
+	if len(data) < expectedLen {
+		return nil, nil, errors.New("data too short for declared vector length")
 	}
 
 	vector := make([]float32, vecLen)
 	for i := 0; i < vecLen; i++ {
-		vector[i] = math.Float32frombits(binary.LittleEndian.Uint32(data[4+i*4 : 8+i*4]))
+		start := 4 + i*4
+		vector[i] = math.Float32frombits(binary.LittleEndian.Uint32(data[start : start+4]))
 	}
 
-	metadata := data[expectedLen:]
+	var metadata []byte
+	if len(data) > expectedLen {
+		metadata = data[expectedLen:]
+	}
 
 	return vector, metadata, nil
 }
@@ -225,6 +192,7 @@ type pebbleIterator struct {
 	iter *pebble.Iterator
 }
 
+// Valid returns true if the iterator is positioned at a valid key-value pair.
 func (pi *pebbleIterator) Valid() bool {
 	if pi.iter == nil {
 		return false
@@ -232,13 +200,14 @@ func (pi *pebbleIterator) Valid() bool {
 	return pi.iter.Valid()
 }
 
+// Seek positions the iterator at the first key greater than or equal to the given key.
 func (pi *pebbleIterator) Seek(key []byte) {
-	if pi.iter == nil {
-		return
+	if pi.iter != nil {
+		pi.iter.SeekGE(key)
 	}
-	pi.iter.SeekGE(key)
 }
 
+// Next moves the iterator to the next key-value pair.
 func (pi *pebbleIterator) Next() bool {
 	if pi.iter == nil {
 		return false
@@ -246,28 +215,25 @@ func (pi *pebbleIterator) Next() bool {
 	return pi.iter.Next()
 }
 
+// Key returns a copy of the current key.
 func (pi *pebbleIterator) Key() []byte {
 	if pi.iter == nil {
 		return nil
 	}
-	// Clone to ensure the slice is safe after Next/Close
-	key := pi.iter.Key()
-	keyCopy := make([]byte, len(key))
-	copy(keyCopy, key)
-	return keyCopy
+	// A copy is returned to ensure the slice is safe after the iterator is advanced.
+	return append([]byte(nil), pi.iter.Key()...)
 }
 
+// Value returns a copy of the current value.
 func (pi *pebbleIterator) Value() []byte {
 	if pi.iter == nil {
 		return nil
 	}
-	// Clone to ensure the slice is safe after Next/Close
-	value := pi.iter.Value()
-	valueCopy := make([]byte, len(value))
-	copy(valueCopy, value)
-	return valueCopy
+	// A copy is returned to ensure the slice is safe after the iterator is advanced.
+	return append([]byte(nil), pi.iter.Value()...)
 }
 
+// Close closes the iterator and releases its resources.
 func (pi *pebbleIterator) Close() error {
 	if pi.iter == nil {
 		return nil
@@ -275,6 +241,7 @@ func (pi *pebbleIterator) Close() error {
 	return pi.iter.Close()
 }
 
+// Error returns any accumulated error.
 func (pi *pebbleIterator) Error() error {
 	if pi.iter == nil {
 		return nil
