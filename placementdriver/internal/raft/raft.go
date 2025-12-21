@@ -8,6 +8,7 @@ import (
 
 	"github.com/lni/dragonboat/v3"
 	"github.com/lni/dragonboat/v3/config"
+	"github.com/lni/dragonboat/v3/raftio"
 	"github.com/lni/dragonboat/v3/statemachine"
 	"github.com/pavandhadge/vectron/placementdriver/internal/fsm"
 )
@@ -40,15 +41,18 @@ func NewNode(cfg Config) (*Node, error) {
 	// Create a dedicated directory for the NodeHost's internal data.
 	nhDataDir := filepath.Join(cfg.DataDir, fmt.Sprintf("nodehost-%d", cfg.NodeID))
 
+	listener := &loggingEventListener{}
+
 	// Configure the NodeHost, which manages the Raft nodes.
 	nhc := config.NodeHostConfig{
-		DeploymentID:   1, // A unique ID for the entire deployment.
-		NodeHostDir:    nhDataDir,
-		RaftAddress:    cfg.RaftAddress,
-		ListenAddress:  cfg.RaftAddress, // Use the same address for simplicity.
-		EnableMetrics:  true,
-		RTTMillisecond: 200,
-		// RaftEventListener: &loggingEventListener{}, // Add a simple logger.
+		DeploymentID:        1, // A unique ID for the entire deployment.
+		NodeHostDir:         nhDataDir,
+		RaftAddress:         cfg.RaftAddress,
+		ListenAddress:       cfg.RaftAddress, // Use the same address for simplicity.
+		EnableMetrics:       true,
+		RTTMillisecond:      200,
+		RaftEventListener:   listener,
+		SystemEventListener: listener,
 	}
 
 	// Create the NodeHost instance.
@@ -125,42 +129,86 @@ func (n *Node) Read(query interface{}, timeout time.Duration) (interface{}, erro
 	return res, nil
 }
 
-/*
 // loggingEventListener is a simple implementation of the RaftEventListener for debugging.
 type loggingEventListener struct{}
 
+// Raft events
 func (l *loggingEventListener) LeaderUpdated(info raftio.LeaderInfo) {
 	fmt.Printf("[Raft Event] Leader updated: ClusterID=%d, NodeID=%d, Term=%d\n",
 		info.ClusterID, info.NodeID, info.Term)
 }
 
-func (l *loggingEventListener) NodeHostShuttingDown() {}
+// System events
+func (l *loggingEventListener) NodeHostShuttingDown() {
+	fmt.Println("[System Event] NodeHost shutting down")
+}
 
-func (l *loggingEventListener) NodeUnreachable(info raftio.NodeInfo) {}
+func (l *loggingEventListener) NodeUnloaded(info raftio.NodeInfo) {
+	fmt.Printf("[System Event] Node unloaded: ClusterID=%d, NodeID=%d\n",
+		info.ClusterID, info.NodeID)
+}
 
-func (l *loggingEventListener) NodeReady(info raftio.NodeInfo) {}
+func (l *loggingEventListener) NodeReady(info raftio.NodeInfo) {
+	fmt.Printf("[System Event] Node ready: ClusterID=%d, NodeID=%d\n",
+		info.ClusterID, info.NodeID)
+}
 
-func (l *loggingEventListener) MembershipChanged(info raftio.MembershipInfo) {}
+func (l *loggingEventListener) MembershipChanged(info raftio.NodeInfo) {
+	fmt.Printf("[System Event] Membership changed: ClusterID=%d, NodeID=%d\n",
+		info.ClusterID, info.NodeID)
+}
 
-func (l *loggingEventListener) ConnectionEstablished(info raftio.ConnectionInfo) {}
+func (l *loggingEventListener) ConnectionEstablished(info raftio.ConnectionInfo) {
+	fmt.Printf("[System Event] Connection established: Address=%s, SnapshotConnection=%v\n",
+		info.Address, info.SnapshotConnection)
+}
 
-func (l *loggingEventListener) ConnectionFailed(info raftio.ConnectionInfo) {}
+func (l *loggingEventListener) ConnectionFailed(info raftio.ConnectionInfo) {
+	fmt.Printf("[System Event] Connection failed: Address=%s, SnapshotConnection=%v\n",
+		info.Address, info.SnapshotConnection)
+}
 
-func (l *loggingEventListener) SendSnapshotStarted(info raftio.SendSnapshotInfo) {}
+func (l *loggingEventListener) SendSnapshotStarted(info raftio.SnapshotInfo) {
+	fmt.Printf("[System Event] Send snapshot started: ClusterID=%d, NodeID=%d, Index=%d\n",
+		info.ClusterID, info.NodeID, info.Index)
+}
 
-func (l *loggingEventListener) SendSnapshotCompleted(info raftio.SendSnapshotInfo) {}
+func (l *loggingEventListener) SendSnapshotCompleted(info raftio.SnapshotInfo) {
+	fmt.Printf("[System Event] Send snapshot completed: ClusterID=%d, NodeID=%d, Index=%d\n",
+		info.ClusterID, info.NodeID, info.Index)
+}
 
-func (l *loggingEventListener) SendSnapshotAborted(info raftio.SendSnapshotInfo) {}
+func (l *loggingEventListener) SendSnapshotAborted(info raftio.SnapshotInfo) {
+	fmt.Printf("[System Event] Send snapshot aborted: ClusterID=%d, NodeID=%d, Index=%d\n",
+		info.ClusterID, info.NodeID, info.Index)
+}
 
-func (l *loggingEventListener) SnapshotReceived(info raftio.SnapshotInfo) {}
+func (l *loggingEventListener) SnapshotReceived(info raftio.SnapshotInfo) {
+	fmt.Printf("[System Event] Snapshot received: ClusterID=%d, NodeID=%d, Index=%d\n",
+		info.ClusterID, info.NodeID, info.Index)
+}
 
-func (l *loggingEventListener) SnapshotRecovered(info raftio.SnapshotInfo) {}
+func (l *loggingEventListener) SnapshotRecovered(info raftio.SnapshotInfo) {
+	fmt.Printf("[System Event] Snapshot recovered: ClusterID=%d, NodeID=%d, Index=%d\n",
+		info.ClusterID, info.NodeID, info.Index)
+}
 
-func (l *loggingEventListener) SnapshotSaved(info raftio.SnapshotInfo) {}
+func (l *loggingEventListener) SnapshotCreated(info raftio.SnapshotInfo) {
+	fmt.Printf("[System Event] Snapshot created: ClusterID=%d, NodeID=%d, Index=%d\n",
+		info.ClusterID, info.NodeID, info.Index)
+}
 
-func (l *loggingEventListener) SnapshotCompacted(info raftio.SnapshotInfo) {}
+func (l *loggingEventListener) SnapshotCompacted(info raftio.SnapshotInfo) {
+	fmt.Printf("[System Event] Snapshot compacted: ClusterID=%d, NodeID=%d, Index=%d\n",
+		info.ClusterID, info.NodeID, info.Index)
+}
 
-func (l *loggingEventListener) LogCompacted(info raftio.LogInfo) {}
+func (l *loggingEventListener) LogCompacted(info raftio.EntryInfo) {
+	fmt.Printf("[System Event] Log compacted: ClusterID=%d, NodeID=%d, Index=%d\n",
+		info.ClusterID, info.NodeID, info.Index)
+}
 
-func (l *loggingEventListener) LogDBCompacted(info raftio.LogInfo) {}
-*/
+func (l *loggingEventListener) LogDBCompacted(info raftio.EntryInfo) {
+	fmt.Printf("[System Event] Log DB compacted: ClusterID=%d, NodeID=%d, Index=%d\n",
+		info.ClusterID, info.NodeID, info.Index)
+}
