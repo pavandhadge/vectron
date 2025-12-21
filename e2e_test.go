@@ -227,21 +227,21 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	require.NoError(t, err)
 
 	// Wait for the collection to be ready.
-	// require.Eventually(t, func() bool {
-	// 	status, err := client.GetCollectionStatus(collectionName)
-	// 	if err != nil {
-	// 		return false
-	// 	}
-	// 	if len(status.Shards) == 0 {
-	// 		return false
-	// 	}
-	// 	for _, shard := range status.Shards {
-	// 		if !shard.Ready {
-	// 			return false
-	// 		}
-	// 	}
-	// 	return true
-	// }, 20*time.Second, 1*time.Second, "timed out waiting for collection to be ready")
+	require.Eventually(t, func() bool {
+		status, err := client.GetCollectionStatus(collectionName)
+		if err != nil {
+			return false
+		}
+		if len(status.Shards) == 0 {
+			return false
+		}
+		for _, shard := range status.Shards {
+			if !shard.Ready {
+				return false
+			}
+		}
+		return true
+	}, 20*time.Second, 1*time.Second, "timed out waiting for collection to be ready")
 
 	// 2. List Collections
 	collections, err := client.ListCollections()

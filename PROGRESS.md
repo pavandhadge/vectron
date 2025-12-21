@@ -28,3 +28,10 @@ This phase focused on refactoring the `worker` node to operate as a stateful, dy
 - **Per-Shard Storage**: For each shard replica it manages, the worker maintains a separate Pebble DB instance and HNSW index, managed by a dedicated Raft state machine.
 - **Multi-Shard gRPC Server**: The worker now runs a gRPC server that can route client requests (e.g., `StoreVector`, `Search`) to the correct shard's Raft group.
 - **Consistent Hashing**: The `placementdriver`'s `GetWorker` RPC has been updated to use consistent hashing on the vector ID to route clients to the correct shard.
+
+pending tasks for today are
+
+compile proto for the clinet of pya dn js
+
+and also get curetn state of system from the ai
+if dragonboat requires disk storage then implemnt

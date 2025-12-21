@@ -23,6 +23,11 @@ const (
 	heartbeatInterval = 5 * time.Second
 )
 
+// ShardManager defines the interface for the shard manager.
+type ShardManager interface {
+	GetShardLeaderInfo() []*pd.ShardLeaderInfo
+}
+
 // LeaderInfo holds the information about the current leader.
 type LeaderInfo struct {
 	grpcClient pd.PlacementServiceClient
@@ -32,12 +37,13 @@ type LeaderInfo struct {
 
 // Client is a gRPC client for the Placement Driver service.
 type Client struct {
-	pdAddrs  []string
-	leader   *LeaderInfo
-	leaderMu sync.RWMutex
-	workerID uint64 // The ID assigned by the PD after registration.
-	grpcAddr string // The gRPC address of this worker.
-	raftAddr string // The Raft address of this worker.
+	pdAddrs      []string
+	leader       *LeaderInfo
+	leaderMu     sync.RWMutex
+	workerID     uint64 // The ID assigned by the PD after registration.
+	grpcAddr     string // The gRPC address of this worker.
+	raftAddr     string // The Raft address of this worker.
+	shardManager ShardManager
 }
 
 func (c *Client) getLeader() (*LeaderInfo, error) {
@@ -88,12 +94,13 @@ func (c *Client) updateLeader(ctx context.Context) error {
 }
 
 // NewClient creates a new client for the Placement Driver.
-func NewClient(pdAddrs []string, grpcAddr, raftAddr string, workerID uint64) (*Client, error) {
+func NewClient(pdAddrs []string, grpcAddr, raftAddr string, workerID uint64, shardManager ShardManager) (*Client, error) {
 	c := &Client{
-		pdAddrs:  pdAddrs,
-		grpcAddr: grpcAddr,
-		raftAddr: raftAddr,
-		workerID: workerID,
+		pdAddrs:      pdAddrs,
+		grpcAddr:     grpcAddr,
+		raftAddr:     raftAddr,
+		workerID:     workerID,
+		shardManager: shardManager,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -176,7 +183,8 @@ func (c *Client) sendHeartbeat(ctx context.Context, shardUpdateChan chan<- []*Sh
 	}
 
 	req := &pd.HeartbeatRequest{
-		WorkerId: strconv.FormatUint(c.workerID, 10),
+		WorkerId:        strconv.FormatUint(c.workerID, 10),
+		ShardLeaderInfo: c.shardManager.GetShardLeaderInfo(),
 	}
 
 	leader, err := c.getLeader()

@@ -53,8 +53,11 @@ func Start(nodeID uint64, raftAddr, grpcAddr string, pdAddrs []string, workerDat
 	}
 	log.Printf("Dragonboat NodeHost created. Node ID: %d, Raft Address: %s", nodeID, raftAddr)
 
+	// Create the shard manager, which is responsible for creating, starting, and stopping shards on this worker.
+	shardManager := shard.NewManager(nh, workerDataDir, nodeID)
+
 	// Create a client to communicate with the placement driver.
-	pdClient, err := pd.NewClient(pdAddrs, grpcAddr, raftAddr, nodeID)
+	pdClient, err := pd.NewClient(pdAddrs, grpcAddr, raftAddr, nodeID, shardManager)
 	if err != nil {
 		log.Fatalf("failed to create PD client: %v", err)
 	}
@@ -74,9 +77,6 @@ func Start(nodeID uint64, raftAddr, grpcAddr string, pdAddrs []string, workerDat
 		}
 		time.Sleep(1 * time.Second)
 	}
-
-	// Create the shard manager, which is responsible for creating, starting, and stopping shards on this worker.
-	shardManager := shard.NewManager(nh, workerDataDir, nodeID)
 
 	// Start the two main background loops for the worker.
 	shardUpdateChan := make(chan []*pd.ShardAssignment)
