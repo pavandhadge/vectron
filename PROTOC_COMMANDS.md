@@ -6,16 +6,16 @@ This file contains the `protoc` commands to compile the protocol buffer files fo
 
 You must have the following tools installed:
 
-*   `protoc`: The protocol buffer compiler.
-*   Go plugins:
-    *   `protoc-gen-go`: `go install google.golang.org/protobuf/cmd/protoc-gen-go`
-    *   `protoc-gen-go-grpc`: `go install google.golang.org/grpc/cmd/protoc-gen-go-grpc`
-    *   `protoc-gen-grpc-gateway`: `go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway`
-*   Python tools:
-    *   `grpcio-tools`: `pip install grpcio-tools`
-*   JavaScript/TypeScript tools:
-    *   `grpc-tools`: `npm install -g grpc-tools`
-    *   `ts-proto`: `npm install -g ts-proto`
+- `protoc`: The protocol buffer compiler.
+- Go plugins:
+  - `protoc-gen-go`: `go install google.golang.org/protobuf/cmd/protoc-gen-go`
+  - `protoc-gen-go-grpc`: `go install google.golang.org/grpc/cmd/protoc-gen-go-grpc`
+  - `protoc-gen-grpc-gateway`: `go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway`
+- Python tools:
+  - `grpcio-tools`: `pip install grpcio-tools`
+- JavaScript/TypeScript tools:
+  - `grpc-tools`: `npm install -g grpc-tools`
+  - `ts-proto`: `npm install -g ts-proto`
 
 You will also need the Google APIs repository for the `google/api/annotations.proto` imports. It is recommended to clone it to a well-known directory.
 
@@ -34,6 +34,10 @@ These commands will generate the Go gRPC code (`.pb.go`), gRPC gateway code (`.p
 GOOGLE_APIS_DIR=/path/to/googleapis
 
 # --- API Gateway ---
+#
+ protoc   -I .   -I $(go env GOMODCACHE)/github.com/googleapis/googleapis@v0.0.0-20251219214406-347b0e45a6ec   -I $(go env GOMODCACHE)/github.com/grpc-ecosystem/grpc-gateway/v2@v2.27.3   --go_out=.  --go_opt=paths=source_relative   --go-grpc_out=. --go-grpc_opt=paths=source_relative   --grpc-gateway_out=. --grpc-gateway_opt=paths=source_relative   --openapiv2_out=openapi   apigateway.proto
+
+
 protoc -I. -I${GOOGLE_APIS_DIR} \
     --go_out=./apigateway/proto --go_opt=paths=source_relative \
     --go-grpc_out=./apigateway/proto --go-grpc_opt=paths=source_relative \

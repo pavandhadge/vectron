@@ -28,6 +28,8 @@ const (
 	CreateCollection
 	// UpdateWorkerHeartbeat updates the last heartbeat timestamp for a worker.
 	UpdateWorkerHeartbeat
+	// UpdateShardLeader updates the leader of a shard.
+	UpdateShardLeader
 )
 
 // Command is the structure that is serialized and sent to the Raft log.
@@ -61,6 +63,12 @@ type CreateCollectionPayload struct {
 // UpdateWorkerHeartbeatPayload is the data for the UpdateWorkerHeartbeat command.
 type UpdateWorkerHeartbeatPayload struct {
 	WorkerID uint64 `json:"worker_id"`
+}
+
+// UpdateShardLeaderPayload is the data for the UpdateShardLeader command.
+type UpdateShardLeaderPayload struct {
+	ShardID  uint64 `json:"shard_id"`
+	LeaderID uint64 `json:"leader_id"`
 }
 
 // ======================================================================================
@@ -184,6 +192,13 @@ func (f *FSM) Update(entries []sm.Entry) ([]sm.Entry, error) {
 				appErr = fmt.Errorf("failed to unmarshal UpdateWorkerHeartbeat payload: %w", err)
 			} else {
 				f.applyUpdateWorkerHeartbeat(payload)
+			}
+		case UpdateShardLeader:
+			var payload UpdateShardLeaderPayload
+			if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
+				appErr = fmt.Errorf("failed to unmarshal UpdateShardLeader payload: %w", err)
+			} else {
+				f.applyUpdateShardLeader(payload)
 			}
 		default:
 			appErr = fmt.Errorf("unknown command type: %d", cmd.Type)
@@ -309,6 +324,18 @@ func (f *FSM) applyUpdateWorkerHeartbeat(payload UpdateWorkerHeartbeatPayload) {
 	if worker, ok := f.Workers[payload.WorkerID]; ok {
 		worker.LastHeartbeat = time.Now().UTC()
 		f.Workers[payload.WorkerID] = worker
+	}
+}
+
+func (f *FSM) applyUpdateShardLeader(payload UpdateShardLeaderPayload) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	for _, collection := range f.Collections {
+		if shard, ok := collection.Shards[payload.ShardID]; ok {
+			shard.LeaderID = payload.LeaderID
+			return
+		}
 	}
 }
 

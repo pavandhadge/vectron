@@ -32,7 +32,7 @@ var (
 // It uses a simple in-memory map to track request counts for each user.
 func RateLimitInterceptor(rps int) func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		fmt.Println("ratelimiter started")
+		// fmt.Println("ratelimiter started")
 		// The user ID should be injected into the context by the AuthInterceptor.
 		userID := GetUserID(ctx)
 		if userID == "" {

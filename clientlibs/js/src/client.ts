@@ -19,6 +19,8 @@ import {
   CreateCollectionRequest,
   VectronServiceClient,
   DeleteRequest,
+  GetCollectionStatusRequest,
+  GetCollectionStatusResponse,
   GetRequest,
   ListCollectionsRequest,
   Point as ProtoPoint,
@@ -158,6 +160,37 @@ export class VectronClient {
             return reject(this._handleError(err));
           }
           resolve(response.collections);
+        },
+      );
+    });
+  }
+
+  /**
+   * Retrieves the status of a collection, including the readiness of its shards.
+   * @param name The name of the collection.
+   * @returns A promise that resolves with the collection status.
+   * @throws {InvalidArgumentError} If the collection name is empty.
+   * @throws {NotFoundError} If the collection does not exist.
+   * @throws {VectronError} For other server-side or connection errors.
+   */
+  public async getCollectionStatus(
+    name: string,
+  ): Promise<GetCollectionStatusResponse> {
+    if (!name) {
+      throw new InvalidArgumentError("Collection name cannot be empty.");
+    }
+
+    const request = GetCollectionStatusRequest.create({ name });
+
+    return new Promise((resolve, reject) => {
+      this.client.getCollectionStatus(
+        request,
+        this.getMetadata(),
+        (err, response) => {
+          if (err) {
+            return reject(this._handleError(err));
+          }
+          resolve(response);
         },
       );
     });

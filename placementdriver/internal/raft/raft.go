@@ -129,6 +129,12 @@ func (n *Node) Read(query interface{}, timeout time.Duration) (interface{}, erro
 	return res, nil
 }
 
+// GetLeaderID returns the leader node ID of the given cluster.
+func (n *Node) GetLeaderID(clusterID uint64) (uint64, bool, error) {
+	leaderID, ok, err := n.NodeHost.GetLeaderID(clusterID)
+	return leaderID, ok, err
+}
+
 // loggingEventListener is a simple implementation of the RaftEventListener for debugging.
 type loggingEventListener struct{}
 

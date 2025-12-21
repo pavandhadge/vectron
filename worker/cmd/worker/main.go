@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -27,20 +28,24 @@ import (
 )
 
 // Start configures and runs the core components of the worker node.
-func Start(nodeID uint64, raftAddr, grpcAddr, pdAddr, workerDataDir string) {
+func Start(nodeID uint64, raftAddr, grpcAddr string, pdAddrs []string, workerDataDir string) {
 	// Create a top-level directory for this worker's Raft data.
 	nhDataDir := filepath.Join(workerDataDir, fmt.Sprintf("node-%d", nodeID))
 	if err := os.MkdirAll(nhDataDir, 0750); err != nil {
 		log.Fatalf("failed to create nodehost data dir: %v", err)
 	}
 
+	// Configure the raft event listener
+	listener := internal.NewLoggingEventListener()
+
 	// Configure and create the Dragonboat NodeHost, which manages all Raft clusters (shards) on this worker.
 	nhc := config.NodeHostConfig{
-		DeploymentID:   1, // A unique ID for the deployment.
-		NodeHostDir:    nhDataDir,
-		RaftAddress:    raftAddr,
-		ListenAddress:  raftAddr,
-		RTTMillisecond: 200,
+		DeploymentID:      1, // A unique ID for the deployment.
+		NodeHostDir:       nhDataDir,
+		RaftAddress:       raftAddr,
+		ListenAddress:     raftAddr,
+		RTTMillisecond:    200,
+		RaftEventListener: listener,
 	}
 	nh, err := dragonboat.NewNodeHost(nhc)
 	if err != nil {
@@ -49,7 +54,7 @@ func Start(nodeID uint64, raftAddr, grpcAddr, pdAddr, workerDataDir string) {
 	log.Printf("Dragonboat NodeHost created. Node ID: %d, Raft Address: %s", nodeID, raftAddr)
 
 	// Create a client to communicate with the placement driver.
-	pdClient, err := pd.NewClient(pdAddr, grpcAddr, raftAddr, nodeID)
+	pdClient, err := pd.NewClient(pdAddrs, grpcAddr, raftAddr, nodeID)
 	if err != nil {
 		log.Fatalf("failed to create PD client: %v", err)
 	}
@@ -103,7 +108,7 @@ func main() {
 	var (
 		grpcAddr      = flag.String("grpc-addr", "localhost:9090", "gRPC server address")
 		raftAddr      = flag.String("raft-addr", "localhost:9191", "Raft communication address")
-		pdAddr        = flag.String("pd-addr", "localhost:6001", "Placement Driver gRPC address")
+		pdAddrs       = flag.String("pd-addrs", "localhost:6001", "Comma-separated list of Placement Driver gRPC addresses")
 		nodeID        = flag.Uint64("node-id", 1, "Worker Node ID (must be > 0)")
 		workerDataDir = flag.String("data-dir", "./worker-data", "Parent directory for all worker data")
 	)
@@ -114,7 +119,8 @@ func main() {
 	}
 
 	// Start the worker in a goroutine.
-	go Start(*nodeID, *raftAddr, *grpcAddr, *pdAddr, *workerDataDir)
+	pdAddrsList := strings.Split(*pdAddrs, ",")
+	go Start(*nodeID, *raftAddr, *grpcAddr, pdAddrsList, *workerDataDir)
 
 	log.Println("Worker started. Waiting for signals.")
 	// Wait for an interrupt signal to gracefully shut down.

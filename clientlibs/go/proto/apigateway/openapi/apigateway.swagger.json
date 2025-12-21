@@ -219,6 +219,37 @@
           "VectronService"
         ]
       }
+    },
+    "/v1/collections/{name}/status": {
+      "get": {
+        "summary": "Get collection status",
+        "operationId": "VectronService_GetCollectionStatus",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetCollectionStatusResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "VectronService"
+        ]
+      }
     }
   },
   "definitions": {
@@ -314,6 +345,28 @@
     "v1DeleteResponse": {
       "type": "object"
     },
+    "v1GetCollectionStatusResponse": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "dimension": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "distance": {
+          "type": "string"
+        },
+        "shards": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1ShardStatus"
+          }
+        }
+      }
+    },
     "v1GetResponse": {
       "type": "object",
       "properties": {
@@ -381,6 +434,29 @@
           "additionalProperties": {
             "type": "string"
           }
+        }
+      }
+    },
+    "v1ShardStatus": {
+      "type": "object",
+      "properties": {
+        "shardId": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "replicas": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uint64"
+          }
+        },
+        "leaderId": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "ready": {
+          "type": "boolean"
         }
       }
     },

@@ -10,6 +10,9 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/pavandhadge/vectron/apigateway/internal/middleware"
 	"github.com/pavandhadge/vectron/apigateway/internal/translator"
@@ -26,24 +29,92 @@ import (
 
 var cfg = LoadConfig()
 
+type LeaderInfo struct {
+	client placementpb.PlacementServiceClient
+	conn   *grpc.ClientConn
+}
+
 // gatewayServer implements the public gRPC VectronService. It acts as a facade,
 // forwarding requests to the appropriate backend services (placement driver or workers).
 type gatewayServer struct {
 	pb.UnimplementedVectronServiceServer
-	placementClient placementpb.PlacementServiceClient
+	pdAddrs  []string
+	leader   *LeaderInfo
+	leaderMu sync.RWMutex
+}
+
+func (s *gatewayServer) getPlacementClient() (placementpb.PlacementServiceClient, error) {
+	s.leaderMu.RLock()
+	if s.leader != nil && s.leader.client != nil {
+		s.leaderMu.RUnlock()
+		return s.leader.client, nil
+	}
+	s.leaderMu.RUnlock()
+	return s.updateLeader()
+}
+
+func (s *gatewayServer) updateLeader() (placementpb.PlacementServiceClient, error) {
+	s.leaderMu.Lock()
+	defer s.leaderMu.Unlock()
+
+	// Close existing connection if any
+	if s.leader != nil && s.leader.conn != nil {
+		s.leader.conn.Close()
+	}
+
+	for _, addr := range s.pdAddrs {
+		conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock(), grpc.WithTimeout(2*time.Second))
+		if err != nil {
+			log.Printf("Failed to connect to PD node %s: %v", addr, err)
+			continue
+		}
+
+		client := placementpb.NewPlacementServiceClient(conn)
+		// Use ListCollections as a way to check for leadership.
+		_, err = client.ListCollections(context.Background(), &placementpb.ListCollectionsRequest{})
+		if err != nil {
+			conn.Close()
+			log.Printf("Failed to get leader from PD node %s: %v", addr, err)
+			continue
+		}
+
+		log.Println("Connected to new PD leader at", conn.Target())
+		s.leader = &LeaderInfo{client: client, conn: conn}
+		return client, nil
+	}
+
+	return nil, status.Error(codes.Unavailable, "no placement driver leader found")
 }
 
 // forwardToWorker is a helper function that encapsulates the logic for service discovery and request forwarding.
 // It queries the placement driver to find the correct worker for a given collection and vector ID,
 // establishes a connection, and then executes a callback function with the worker client.
 func (s *gatewayServer) forwardToWorker(ctx context.Context, collection string, vectorID string, call func(workerpb.WorkerServiceClient, uint64) (interface{}, error)) (interface{}, error) {
+	placementClient, err := s.getPlacementClient()
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
+	}
 	// 1. Ask the placement driver for the worker address.
-	resp, err := s.placementClient.GetWorker(ctx, &placementpb.GetWorkerRequest{
+	resp, err := placementClient.GetWorker(ctx, &placementpb.GetWorkerRequest{
 		Collection: collection,
 		VectorId:   vectorID,
 	})
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "could not get worker for collection %q: %v", collection, err)
+		if st, ok := status.FromError(err); ok && (st.Code() == codes.Unavailable || st.Code() == codes.Internal) {
+			placementClient, err = s.updateLeader()
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "could not update placement driver leader: %v", err)
+			}
+			resp, err = placementClient.GetWorker(ctx, &placementpb.GetWorkerRequest{
+				Collection: collection,
+				VectorId:   vectorID,
+			})
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "could not get worker for collection %q after leader update: %v", collection, err)
+			}
+		} else {
+			return nil, status.Errorf(codes.Internal, "could not get worker for collection %q: %v", collection, err)
+		}
 	}
 	if resp.GetGrpcAddress() == "" {
 		return nil, status.Errorf(codes.NotFound, "collection %q not found", collection)
@@ -73,15 +144,31 @@ func (s *gatewayServer) CreateCollection(ctx context.Context, req *pb.CreateColl
 		return nil, status.Error(codes.InvalidArgument, "dimension must be a positive number")
 	}
 
+	placementClient, err := s.getPlacementClient()
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
+	}
+
 	// This is a metadata operation, so it goes to the placement driver.
 	pdReq := &placementpb.CreateCollectionRequest{
 		Name:      req.Name,
 		Dimension: req.Dimension,
 		Distance:  req.Distance,
 	}
-	res, err := s.placementClient.CreateCollection(ctx, pdReq)
+	res, err := placementClient.CreateCollection(ctx, pdReq)
 	if err != nil {
-		return nil, err
+		if st, ok := status.FromError(err); ok && (st.Code() == codes.Unavailable || st.Code() == codes.Internal) {
+			placementClient, err = s.updateLeader()
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "could not update placement driver leader: %v", err)
+			}
+			res, err = placementClient.CreateCollection(ctx, pdReq)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, err
+		}
 	}
 	return &pb.CreateCollectionResponse{Success: res.Success}, nil
 }
@@ -189,23 +276,83 @@ func (s *gatewayServer) Delete(ctx context.Context, req *pb.DeleteRequest) (*pb.
 // ListCollections handles the RPC for listing all collections.
 // This is a metadata operation, so it goes to the placement driver.
 func (s *gatewayServer) ListCollections(ctx context.Context, req *pb.ListCollectionsRequest) (*pb.ListCollectionsResponse, error) {
-	pdReq := &placementpb.ListCollectionsRequest{}
-	res, err := s.placementClient.ListCollections(ctx, pdReq)
+	placementClient, err := s.getPlacementClient()
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
+	}
+	pdReq := &placementpb.ListCollectionsRequest{}
+	res, err := placementClient.ListCollections(ctx, pdReq)
+	if err != nil {
+		if st, ok := status.FromError(err); ok && (st.Code() == codes.Unavailable || st.Code() == codes.Internal) {
+			placementClient, err = s.updateLeader()
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "could not update placement driver leader: %v", err)
+			}
+			res, err = placementClient.ListCollections(ctx, pdReq)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, err
+		}
 	}
 	return &pb.ListCollectionsResponse{Collections: res.Collections}, nil
 }
 
-// Start initializes and runs the API Gateway's gRPC and HTTP servers.
-func Start(grpcAddr, httpAddr, placementDriverAddr string) {
-	// Connect to the placement driver, which is essential for service discovery.
-	conn, err := grpc.Dial(placementDriverAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+// GetCollectionStatus handles the RPC for getting the status of a collection.
+// This is a metadata operation, so it goes to the placement driver.
+func (s *gatewayServer) GetCollectionStatus(ctx context.Context, req *pb.GetCollectionStatusRequest) (*pb.GetCollectionStatusResponse, error) {
+	placementClient, err := s.getPlacementClient()
 	if err != nil {
-		log.Fatal("Failed to connect to placement driver:", err)
+		return nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
 	}
-	defer conn.Close()
-	placementClient := placementpb.NewPlacementServiceClient(conn)
+	pdReq := &placementpb.GetCollectionStatusRequest{
+		Name: req.Name,
+	}
+	res, err := placementClient.GetCollectionStatus(ctx, pdReq)
+	if err != nil {
+		if st, ok := status.FromError(err); ok && (st.Code() == codes.Unavailable || st.Code() == codes.Internal) {
+			placementClient, err = s.updateLeader()
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "could not update placement driver leader: %v", err)
+			}
+			res, err = placementClient.GetCollectionStatus(ctx, pdReq)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, err
+		}
+	}
+
+	shardStatuses := make([]*pb.ShardStatus, 0, len(res.Shards))
+	for _, shard := range res.Shards {
+		shardStatuses = append(shardStatuses, &pb.ShardStatus{
+			ShardId:  shard.ShardId,
+			Replicas: shard.Replicas,
+			LeaderId: shard.LeaderId,
+			Ready:    shard.Ready,
+		})
+	}
+
+	return &pb.GetCollectionStatusResponse{
+		Name:      res.Name,
+		Dimension: res.Dimension,
+		Distance:  res.Distance,
+		Shards:    shardStatuses,
+	}, nil
+}
+
+// Start initializes and runs the API Gateway's gRPC and HTTP servers.
+func Start(grpcAddr, httpAddr string, placementDriverAddrs []string) {
+	// Create the gateway server with the list of PD addresses
+	server := &gatewayServer{
+		pdAddrs: placementDriverAddrs,
+	}
+	// Initialize the leader connection
+	if _, err := server.updateLeader(); err != nil {
+		log.Fatal("Failed to initialize connection with placement driver leader:", err)
+	}
 
 	// Create the gRPC server with a chain of unary interceptors for middleware.
 	grpcServer := grpc.NewServer(
@@ -215,7 +362,7 @@ func Start(grpcAddr, httpAddr, placementDriverAddr string) {
 			middleware.RateLimitInterceptor(cfg.RateLimitRPS), // Enforces rate limiting.
 		),
 	)
-	pb.RegisterVectronServiceServer(grpcServer, &gatewayServer{placementClient: placementClient})
+	pb.RegisterVectronServiceServer(grpcServer, server)
 
 	// Set up the HTTP/JSON gateway to proxy requests to the gRPC server.
 	mux := runtime.NewServeMux()
@@ -235,7 +382,7 @@ func Start(grpcAddr, httpAddr, placementDriverAddr string) {
 
 	// Start the HTTP server in the main goroutine.
 	log.Printf("Vectron HTTP API (curl)      → %s", httpAddr)
-	log.Printf("Using placement driver           → %s", placementDriverAddr)
+	log.Printf("Using placement driver           → %s", strings.Join(placementDriverAddrs, ","))
 	if err := http.ListenAndServe(httpAddr, mux); err != nil {
 		log.Fatal(err)
 	}
@@ -246,6 +393,7 @@ func Start(grpcAddr, httpAddr, placementDriverAddr string) {
 func main() {
 	// Load configuration and set up middleware.
 	middleware.SetJWTSecret(cfg.JWTSecret)
-	// Start the servers.
-	Start(cfg.GRPCAddr, cfg.HTTPAddr, cfg.PlacementDriver)
+	// Parse PD addresses and start the servers.
+	pdAddrs := strings.Split(cfg.PlacementDriver, ",")
+	Start(cfg.GRPCAddr, cfg.HTTPAddr, pdAddrs)
 }

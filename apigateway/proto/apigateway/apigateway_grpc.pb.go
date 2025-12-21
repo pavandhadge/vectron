@@ -19,12 +19,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	VectronService_CreateCollection_FullMethodName = "/vectron.v1.VectronService/CreateCollection"
-	VectronService_Upsert_FullMethodName           = "/vectron.v1.VectronService/Upsert"
-	VectronService_Search_FullMethodName           = "/vectron.v1.VectronService/Search"
-	VectronService_Get_FullMethodName              = "/vectron.v1.VectronService/Get"
-	VectronService_Delete_FullMethodName           = "/vectron.v1.VectronService/Delete"
-	VectronService_ListCollections_FullMethodName  = "/vectron.v1.VectronService/ListCollections"
+	VectronService_CreateCollection_FullMethodName    = "/vectron.v1.VectronService/CreateCollection"
+	VectronService_Upsert_FullMethodName              = "/vectron.v1.VectronService/Upsert"
+	VectronService_Search_FullMethodName              = "/vectron.v1.VectronService/Search"
+	VectronService_Get_FullMethodName                 = "/vectron.v1.VectronService/Get"
+	VectronService_Delete_FullMethodName              = "/vectron.v1.VectronService/Delete"
+	VectronService_ListCollections_FullMethodName     = "/vectron.v1.VectronService/ListCollections"
+	VectronService_GetCollectionStatus_FullMethodName = "/vectron.v1.VectronService/GetCollectionStatus"
 )
 
 // VectronServiceClient is the client API for VectronService service.
@@ -43,6 +44,8 @@ type VectronServiceClient interface {
 	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*DeleteResponse, error)
 	// List all collections
 	ListCollections(ctx context.Context, in *ListCollectionsRequest, opts ...grpc.CallOption) (*ListCollectionsResponse, error)
+	// Get collection status
+	GetCollectionStatus(ctx context.Context, in *GetCollectionStatusRequest, opts ...grpc.CallOption) (*GetCollectionStatusResponse, error)
 }
 
 type vectronServiceClient struct {
@@ -113,6 +116,16 @@ func (c *vectronServiceClient) ListCollections(ctx context.Context, in *ListColl
 	return out, nil
 }
 
+func (c *vectronServiceClient) GetCollectionStatus(ctx context.Context, in *GetCollectionStatusRequest, opts ...grpc.CallOption) (*GetCollectionStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetCollectionStatusResponse)
+	err := c.cc.Invoke(ctx, VectronService_GetCollectionStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // VectronServiceServer is the server API for VectronService service.
 // All implementations must embed UnimplementedVectronServiceServer
 // for forward compatibility.
@@ -129,6 +142,8 @@ type VectronServiceServer interface {
 	Delete(context.Context, *DeleteRequest) (*DeleteResponse, error)
 	// List all collections
 	ListCollections(context.Context, *ListCollectionsRequest) (*ListCollectionsResponse, error)
+	// Get collection status
+	GetCollectionStatus(context.Context, *GetCollectionStatusRequest) (*GetCollectionStatusResponse, error)
 	mustEmbedUnimplementedVectronServiceServer()
 }
 
@@ -156,6 +171,9 @@ func (UnimplementedVectronServiceServer) Delete(context.Context, *DeleteRequest)
 }
 func (UnimplementedVectronServiceServer) ListCollections(context.Context, *ListCollectionsRequest) (*ListCollectionsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListCollections not implemented")
+}
+func (UnimplementedVectronServiceServer) GetCollectionStatus(context.Context, *GetCollectionStatusRequest) (*GetCollectionStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetCollectionStatus not implemented")
 }
 func (UnimplementedVectronServiceServer) mustEmbedUnimplementedVectronServiceServer() {}
 func (UnimplementedVectronServiceServer) testEmbeddedByValue()                        {}
@@ -286,6 +304,24 @@ func _VectronService_ListCollections_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _VectronService_GetCollectionStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetCollectionStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VectronServiceServer).GetCollectionStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: VectronService_GetCollectionStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VectronServiceServer).GetCollectionStatus(ctx, req.(*GetCollectionStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // VectronService_ServiceDesc is the grpc.ServiceDesc for VectronService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -316,6 +352,10 @@ var VectronService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListCollections",
 			Handler:    _VectronService_ListCollections_Handler,
+		},
+		{
+			MethodName: "GetCollectionStatus",
+			Handler:    _VectronService_GetCollectionStatus_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

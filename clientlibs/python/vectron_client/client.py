@@ -128,6 +128,31 @@ class VectronClient:
         except grpc.RpcError as e:
             self._handle_rpc_error(e)
 
+    def get_collection_status(self, name: str):
+        """
+        Retrieves the status of a collection, including the readiness of its shards.
+
+        Args:
+            name: The name of the collection.
+
+        Returns:
+            The collection status.
+
+        Raises:
+            InvalidArgumentError: If the collection name is empty.
+            NotFoundError: If the collection does not exist.
+            VectronError: For other server-side or connection errors.
+        """
+        if not name:
+            raise InvalidArgumentError("Collection name cannot be empty.")
+
+        request = apigateway_pb2.GetCollectionStatusRequest(name=name)
+        try:
+            response = self._stub.GetCollectionStatus(request, metadata=self._get_metadata())
+            return response
+        except grpc.RpcError as e:
+            self._handle_rpc_error(e)
+
     def upsert(self, collection: str, points: List[Point]) -> int:
         """
         Inserts or updates vectors in a specified collection.

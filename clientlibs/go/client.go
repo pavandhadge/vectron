@@ -130,6 +130,26 @@ func (c *Client) ListCollections() ([]string, error) {
 	return res.Collections, nil
 }
 
+// GetCollectionStatus retrieves the status of a collection, including the readiness of its shards.
+func (c *Client) GetCollectionStatus(collectionName string) (*apigateway.GetCollectionStatusResponse, error) {
+	if collectionName == "" {
+		return nil, fmt.Errorf("%w: collection name cannot be empty", ErrInvalidArgument)
+	}
+
+	ctx, cancel := c.getContext()
+	defer cancel()
+
+	req := &apigateway.GetCollectionStatusRequest{
+		Name: collectionName,
+	}
+
+	res, err := c.client.GetCollectionStatus(ctx, req)
+	if err != nil {
+		return nil, handleError(err)
+	}
+	return res, nil
+}
+
 // Upsert inserts or updates one or more vectors in a specified collection.
 func (c *Client) Upsert(collection string, points []*Point) (int32, error) {
 	if collection == "" {

@@ -120,6 +120,28 @@ func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.H
 		fmt.Printf("Warning: failed to propose heartbeat for worker %d: %v\n", workerID, err)
 	}
 
+	// Propose commands to update shard leader information.
+	for _, leaderInfo := range req.ShardLeaderInfo {
+		leaderPayload := fsm.UpdateShardLeaderPayload{
+			ShardID:  leaderInfo.ShardId,
+			LeaderID: leaderInfo.LeaderId,
+		}
+		leaderPayloadBytes, err := json.Marshal(leaderPayload)
+		if err != nil {
+			fmt.Printf("Warning: failed to marshal leader payload: %v\n", err)
+			continue
+		}
+		leaderCmd := fsm.Command{Type: fsm.UpdateShardLeader, Payload: leaderPayloadBytes}
+		leaderCmdBytes, err := json.Marshal(leaderCmd)
+		if err != nil {
+			fmt.Printf("Warning: failed to marshal leader command: %v\n", err)
+			continue
+		}
+		if _, err := s.raft.Propose(leaderCmdBytes, raftTimeout); err != nil {
+			fmt.Printf("Warning: failed to propose leader update for shard %d: %v\n", leaderInfo.ShardId, err)
+		}
+	}
+
 	// Read the current state from the FSM to find all shards assigned to this worker.
 	assignments := make([]*ShardAssignment, 0)
 	allWorkers := s.fsm.GetWorkers()
@@ -297,4 +319,33 @@ func (s *Server) ListCollections(ctx context.Context, req *pb.ListCollectionsReq
 		collectionNames = append(collectionNames, c.Name)
 	}
 	return &pb.ListCollectionsResponse{Collections: collectionNames}, nil
+}
+
+// GetCollectionStatus handles the RPC to get the status of a collection.
+func (s *Server) GetCollectionStatus(ctx context.Context, req *pb.GetCollectionStatusRequest) (*pb.GetCollectionStatusResponse, error) {
+	if req.Name == "" {
+		return nil, status.Error(codes.InvalidArgument, "collection name is required")
+	}
+
+	collection, ok := s.fsm.GetCollection(req.Name)
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "collection '%s' not found", req.Name)
+	}
+
+	shardStatuses := make([]*pb.ShardStatus, 0, len(collection.Shards))
+	for _, shard := range collection.Shards {
+		shardStatuses = append(shardStatuses, &pb.ShardStatus{
+			ShardId:  uint32(shard.ShardID),
+			Replicas: shard.Replicas,
+			LeaderId: shard.LeaderID,
+			Ready:    shard.LeaderID > 0,
+		})
+	}
+
+	return &pb.GetCollectionStatusResponse{
+		Name:      collection.Name,
+		Dimension: collection.Dimension,
+		Distance:  collection.Distance,
+		Shards:    shardStatuses,
+	}, nil
 }

@@ -28,11 +28,19 @@ service PlacementService {
   rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse) {}
   rpc ListCollections(ListCollectionsRequest) returns (ListCollectionsResponse) {}
   rpc DeleteCollection(DeleteCollectionRequest) returns (DeleteCollectionResponse) {}
+  rpc GetCollectionStatus(GetCollectionStatusRequest) returns (GetCollectionStatusResponse) {}
+  rpc GetLeader(GetLeaderRequest) returns (GetLeaderResponse) {}
 }
 
 // ===============================================
 // Messages
 // ===============================================
+
+message GetLeaderRequest {}
+
+message GetLeaderResponse {
+  string leader_address = 1;
+}
 
 message GetWorkerRequest {
   // Collection name (required)
@@ -59,16 +67,29 @@ message RegisterWorkerRequest {
 }
 
 message RegisterWorkerResponse {
-  string worker_id = 1;   // assigned by placement driver
+  string worker_id = 1; // assigned by placement driver
+
   bool success = 2;
+}
+
+message ShardLeaderInfo {
+  uint64 shard_id = 1;
+
+  uint64 leader_id = 2;
 }
 
 message HeartbeatRequest {
   string worker_id = 1;
+
   int64 timestamp = 2;
+
   // Optional metrics
+
   int64 vector_count = 3;
+
   int64 memory_bytes = 4;
+
+  repeated ShardLeaderInfo shard_leader_info = 5;
 }
 
 message HeartbeatResponse {
@@ -124,4 +145,22 @@ message DeleteCollectionRequest {
 
 message DeleteCollectionResponse {
   bool success = 1;
+}
+
+message GetCollectionStatusRequest {
+  string name = 1;
+}
+
+message GetCollectionStatusResponse {
+  string name = 1;
+  int32 dimension = 2;
+  string distance = 3;
+  repeated ShardStatus shards = 4;
+}
+
+message ShardStatus {
+  uint32 shard_id = 1;
+  repeated uint64 replicas = 2;
+  uint64 leader_id = 3;
+  bool ready = 4;
 }

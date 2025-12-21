@@ -21,14 +21,16 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	PlacementService_GetWorker_FullMethodName        = "/vectron.placementdriver.v1.PlacementService/GetWorker"
-	PlacementService_RegisterWorker_FullMethodName   = "/vectron.placementdriver.v1.PlacementService/RegisterWorker"
-	PlacementService_Heartbeat_FullMethodName        = "/vectron.placementdriver.v1.PlacementService/Heartbeat"
-	PlacementService_ListWorkers_FullMethodName      = "/vectron.placementdriver.v1.PlacementService/ListWorkers"
-	PlacementService_Rebalance_FullMethodName        = "/vectron.placementdriver.v1.PlacementService/Rebalance"
-	PlacementService_CreateCollection_FullMethodName = "/vectron.placementdriver.v1.PlacementService/CreateCollection"
-	PlacementService_ListCollections_FullMethodName  = "/vectron.placementdriver.v1.PlacementService/ListCollections"
-	PlacementService_DeleteCollection_FullMethodName = "/vectron.placementdriver.v1.PlacementService/DeleteCollection"
+	PlacementService_GetWorker_FullMethodName           = "/vectron.placementdriver.v1.PlacementService/GetWorker"
+	PlacementService_RegisterWorker_FullMethodName      = "/vectron.placementdriver.v1.PlacementService/RegisterWorker"
+	PlacementService_Heartbeat_FullMethodName           = "/vectron.placementdriver.v1.PlacementService/Heartbeat"
+	PlacementService_ListWorkers_FullMethodName         = "/vectron.placementdriver.v1.PlacementService/ListWorkers"
+	PlacementService_Rebalance_FullMethodName           = "/vectron.placementdriver.v1.PlacementService/Rebalance"
+	PlacementService_CreateCollection_FullMethodName    = "/vectron.placementdriver.v1.PlacementService/CreateCollection"
+	PlacementService_ListCollections_FullMethodName     = "/vectron.placementdriver.v1.PlacementService/ListCollections"
+	PlacementService_DeleteCollection_FullMethodName    = "/vectron.placementdriver.v1.PlacementService/DeleteCollection"
+	PlacementService_GetCollectionStatus_FullMethodName = "/vectron.placementdriver.v1.PlacementService/GetCollectionStatus"
+	PlacementService_GetLeader_FullMethodName           = "/vectron.placementdriver.v1.PlacementService/GetLeader"
 )
 
 // PlacementServiceClient is the client API for PlacementService service.
@@ -49,6 +51,8 @@ type PlacementServiceClient interface {
 	CreateCollection(ctx context.Context, in *CreateCollectionRequest, opts ...grpc.CallOption) (*CreateCollectionResponse, error)
 	ListCollections(ctx context.Context, in *ListCollectionsRequest, opts ...grpc.CallOption) (*ListCollectionsResponse, error)
 	DeleteCollection(ctx context.Context, in *DeleteCollectionRequest, opts ...grpc.CallOption) (*DeleteCollectionResponse, error)
+	GetCollectionStatus(ctx context.Context, in *GetCollectionStatusRequest, opts ...grpc.CallOption) (*GetCollectionStatusResponse, error)
+	GetLeader(ctx context.Context, in *GetLeaderRequest, opts ...grpc.CallOption) (*GetLeaderResponse, error)
 }
 
 type placementServiceClient struct {
@@ -139,6 +143,26 @@ func (c *placementServiceClient) DeleteCollection(ctx context.Context, in *Delet
 	return out, nil
 }
 
+func (c *placementServiceClient) GetCollectionStatus(ctx context.Context, in *GetCollectionStatusRequest, opts ...grpc.CallOption) (*GetCollectionStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetCollectionStatusResponse)
+	err := c.cc.Invoke(ctx, PlacementService_GetCollectionStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *placementServiceClient) GetLeader(ctx context.Context, in *GetLeaderRequest, opts ...grpc.CallOption) (*GetLeaderResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetLeaderResponse)
+	err := c.cc.Invoke(ctx, PlacementService_GetLeader_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PlacementServiceServer is the server API for PlacementService service.
 // All implementations must embed UnimplementedPlacementServiceServer
 // for forward compatibility.
@@ -157,6 +181,8 @@ type PlacementServiceServer interface {
 	CreateCollection(context.Context, *CreateCollectionRequest) (*CreateCollectionResponse, error)
 	ListCollections(context.Context, *ListCollectionsRequest) (*ListCollectionsResponse, error)
 	DeleteCollection(context.Context, *DeleteCollectionRequest) (*DeleteCollectionResponse, error)
+	GetCollectionStatus(context.Context, *GetCollectionStatusRequest) (*GetCollectionStatusResponse, error)
+	GetLeader(context.Context, *GetLeaderRequest) (*GetLeaderResponse, error)
 	mustEmbedUnimplementedPlacementServiceServer()
 }
 
@@ -190,6 +216,12 @@ func (UnimplementedPlacementServiceServer) ListCollections(context.Context, *Lis
 }
 func (UnimplementedPlacementServiceServer) DeleteCollection(context.Context, *DeleteCollectionRequest) (*DeleteCollectionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteCollection not implemented")
+}
+func (UnimplementedPlacementServiceServer) GetCollectionStatus(context.Context, *GetCollectionStatusRequest) (*GetCollectionStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetCollectionStatus not implemented")
+}
+func (UnimplementedPlacementServiceServer) GetLeader(context.Context, *GetLeaderRequest) (*GetLeaderResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetLeader not implemented")
 }
 func (UnimplementedPlacementServiceServer) mustEmbedUnimplementedPlacementServiceServer() {}
 func (UnimplementedPlacementServiceServer) testEmbeddedByValue()                          {}
@@ -356,6 +388,42 @@ func _PlacementService_DeleteCollection_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PlacementService_GetCollectionStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetCollectionStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlacementServiceServer).GetCollectionStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlacementService_GetCollectionStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlacementServiceServer).GetCollectionStatus(ctx, req.(*GetCollectionStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PlacementService_GetLeader_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetLeaderRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlacementServiceServer).GetLeader(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlacementService_GetLeader_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlacementServiceServer).GetLeader(ctx, req.(*GetLeaderRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // PlacementService_ServiceDesc is the grpc.ServiceDesc for PlacementService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -394,6 +462,14 @@ var PlacementService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteCollection",
 			Handler:    _PlacementService_DeleteCollection_Handler,
+		},
+		{
+			MethodName: "GetCollectionStatus",
+			Handler:    _PlacementService_GetCollectionStatus_Handler,
+		},
+		{
+			MethodName: "GetLeader",
+			Handler:    _PlacementService_GetLeader_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

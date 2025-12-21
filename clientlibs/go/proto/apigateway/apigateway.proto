@@ -39,23 +39,22 @@ service VectronService {
 
   // Get point by ID
   rpc Get(GetRequest) returns (GetResponse) {
-    option (google.api.http) = {
-      get: "/v1/collections/{collection}/points/{id}"
-    };
+    option (google.api.http) = {get: "/v1/collections/{collection}/points/{id}"};
   }
 
   // Delete point by ID
   rpc Delete(DeleteRequest) returns (DeleteResponse) {
-    option (google.api.http) = {
-      delete: "/v1/collections/{collection}/points/{id}"
-    };
+    option (google.api.http) = {delete: "/v1/collections/{collection}/points/{id}"};
   }
 
   // List all collections
   rpc ListCollections(ListCollectionsRequest) returns (ListCollectionsResponse) {
-    option (google.api.http) = {
-      get: "/v1/collections"
-    };
+    option (google.api.http) = {get: "/v1/collections"};
+  }
+
+  // Get collection status
+  rpc GetCollectionStatus(GetCollectionStatusRequest) returns (GetCollectionStatusResponse) {
+    option (google.api.http) = {get: "/v1/collections/{name}/status"};
   }
 }
 
@@ -88,13 +87,8 @@ message SearchRequest {
 
   // proto3 has no native defaults — this sets an OpenAPI (Swagger) default
   // so the generated OpenAPI spec will show top_k default = 10.
-  uint32 top_k = 3 [
-    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-      default: "10"
-    }
-  ];
+  uint32 top_k = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {default: "10"}];
 }
-
 
 message SearchResponse {
   repeated SearchResult results = 1;
@@ -126,6 +120,24 @@ message ListCollectionsRequest {}
 
 message ListCollectionsResponse {
   repeated string collections = 1;
+}
+
+message GetCollectionStatusRequest {
+  string name = 1;
+}
+
+message GetCollectionStatusResponse {
+  string name = 1;
+  int32 dimension = 2;
+  string distance = 3;
+  repeated ShardStatus shards = 4;
+}
+
+message ShardStatus {
+  uint32 shard_id = 1;
+  repeated uint64 replicas = 2;
+  uint64 leader_id = 3;
+  bool ready = 4;
 }
 
 message Point {

@@ -13,6 +13,7 @@ import (
 	"github.com/lni/dragonboat/v3/config"
 	sm "github.com/lni/dragonboat/v3/statemachine"
 	"github.com/pavandhadge/vectron/worker/internal/pd"
+	"github.com/pavandhadge/vectron/worker/proto/placementdriver"
 )
 
 // Manager is responsible for managing the lifecycle of shard replicas on a worker node.
@@ -138,4 +139,25 @@ func (m *Manager) IsShardReady(shardID uint64) bool {
 
 	log.Printf("IsShardReady: Shard %d is ready with leader %d.", shardID, leaderID)
 	return true
+}
+
+// GetShardLeaderInfo returns a list of ShardLeaderInfo for all running replicas.
+func (m *Manager) GetShardLeaderInfo() []*placementdriver.ShardLeaderInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	leaderInfo := make([]*placementdriver.ShardLeaderInfo, 0, len(m.runningReplicas))
+	for shardID := range m.runningReplicas {
+		leaderID, _, err := m.nodeHost.GetLeaderID(shardID)
+		if err != nil {
+			// Log the error but don't stop. We can still report the leaders for other shards.
+			log.Printf("Error getting leader for shard %d: %v", shardID, err)
+			continue
+		}
+		leaderInfo = append(leaderInfo, &placementdriver.ShardLeaderInfo{
+			ShardId:  shardID,
+			LeaderId: leaderID,
+		})
+	}
+	return leaderInfo
 }

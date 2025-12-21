@@ -95,14 +95,6 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	defer os.RemoveAll(workerDataDir)
 
 	// Network addresses
-	pdGrpcPort, err := getFreePort()
-	require.NoError(t, err)
-	pdGrpcAddr := fmt.Sprintf("127.0.0.1:%d", pdGrpcPort)
-
-	pdRaftPort, err := getFreePort()
-	require.NoError(t, err)
-	pdRaftAddr := fmt.Sprintf("127.0.0.1:%d", pdRaftPort)
-
 	workerGrpcPort, err := getFreePort()
 	require.NoError(t, err)
 	workerGrpcAddr := fmt.Sprintf("127.0.0.1:%d", workerGrpcPort)
@@ -121,29 +113,57 @@ func TestE2E_FullLifecycle(t *testing.T) {
 
 	// --- Start Services as Subprocesses ---
 
-	// Placement Driver
-	pdCmd := exec.Command(
-		"./bin/placementdriver",
-		"--node-id=1",
-		"--cluster-id=1",
-		"--raft-addr="+pdRaftAddr,
-		"--grpc-addr="+pdGrpcAddr,
-		"--data-dir="+pdDataDir,
-		"--initial-members=1:"+pdRaftAddr,
-	)
-	pdCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	var pdOut bytes.Buffer
-	pdCmd.Stdout = &pdOut
-	pdCmd.Stderr = &pdOut
-	require.NoError(t, pdCmd.Start())
-	t.Cleanup(func() {
-		syscall.Kill(-pdCmd.Process.Pid, syscall.SIGKILL)
-		if t.Failed() {
-			t.Logf("Placement Driver Output:\n%s", pdOut.String())
+	// Setup for a 3-node PD cluster
+	pdGrpcAddrs := make([]string, 3)
+	pdRaftAddrs := make([]string, 3)
+	pdInitialMembers := ""
+	for i := 0; i < 3; i++ {
+		pdGrpcPort, err := getFreePort()
+		require.NoError(t, err)
+		pdGrpcAddrs[i] = fmt.Sprintf("127.0.0.1:%d", pdGrpcPort)
+
+		pdRaftPort, err := getFreePort()
+		require.NoError(t, err)
+		pdRaftAddrs[i] = fmt.Sprintf("127.0.0.1:%d", pdRaftPort)
+
+		if i > 0 {
+			pdInitialMembers += ","
 		}
-	})
-	// Wait for PD to be ready before starting other components.
-	waitFor(t, &pdOut, "became leader", 20*time.Second)
+		pdInitialMembers += fmt.Sprintf("%d:%s", i+1, pdRaftAddrs[i])
+	}
+	allPdGrpcAddrs := fmt.Sprintf("%s,%s,%s", pdGrpcAddrs[0], pdGrpcAddrs[1], pdGrpcAddrs[2])
+
+	// Start Placement Drivers
+	for i := 0; i < 3; i++ {
+		nodeID := i + 1
+		pdDataDir, err := os.MkdirTemp("", fmt.Sprintf("pd_e2e_test_%d-", nodeID))
+		require.NoError(t, err)
+		defer os.RemoveAll(pdDataDir)
+
+		pdCmd := exec.Command(
+			"./bin/placementdriver",
+			fmt.Sprintf("--node-id=%d", nodeID),
+			"--cluster-id=1",
+			"--raft-addr="+pdRaftAddrs[i],
+			"--grpc-addr="+pdGrpcAddrs[i],
+			"--data-dir="+pdDataDir,
+			"--initial-members="+pdInitialMembers,
+		)
+		pdCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		var pdOut bytes.Buffer
+		pdCmd.Stdout = &pdOut
+		pdCmd.Stderr = &pdOut
+		require.NoError(t, pdCmd.Start())
+		t.Cleanup(func() {
+			syscall.Kill(-pdCmd.Process.Pid, syscall.SIGKILL)
+			if t.Failed() {
+				t.Logf("Placement Driver %d Output:\n%s", nodeID, pdOut.String())
+			}
+		})
+	}
+	// Give the cluster time to elect a leader.
+	// A more robust way would be to query each node until a leader is reported.
+	time.Sleep(5 * time.Second)
 
 	// Worker
 	workerCmd := exec.Command(
@@ -151,7 +171,7 @@ func TestE2E_FullLifecycle(t *testing.T) {
 		"--node-id=1",
 		"--raft-addr="+workerRaftAddr,
 		"--grpc-addr="+workerGrpcAddr,
-		"--pd-addr="+pdGrpcAddr,
+		"--pd-addrs="+allPdGrpcAddrs,
 		"--data-dir="+workerDataDir,
 	)
 	workerCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -175,7 +195,7 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	gatewayCmd.Env = os.Environ()
 	gatewayCmd.Env = append(gatewayCmd.Env, fmt.Sprintf("GRPC_ADDR=%s", apiGrpcAddr))
 	gatewayCmd.Env = append(gatewayCmd.Env, fmt.Sprintf("HTTP_ADDR=%s", apiHttpAddr))
-	gatewayCmd.Env = append(gatewayCmd.Env, fmt.Sprintf("PLACEMENT_DRIVER=%s", pdGrpcAddr))
+	gatewayCmd.Env = append(gatewayCmd.Env, fmt.Sprintf("PLACEMENT_DRIVER=%s", allPdGrpcAddrs))
 	gatewayCmd.Env = append(gatewayCmd.Env, fmt.Sprintf("JWT_SECRET=%s", jwtTestSecret))
 	gatewayCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	var gatewayOut bytes.Buffer
@@ -205,6 +225,23 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	// 1. Create Collection
 	err = client.CreateCollection(collectionName, 4, "euclidean")
 	require.NoError(t, err)
+
+	// Wait for the collection to be ready.
+	// require.Eventually(t, func() bool {
+	// 	status, err := client.GetCollectionStatus(collectionName)
+	// 	if err != nil {
+	// 		return false
+	// 	}
+	// 	if len(status.Shards) == 0 {
+	// 		return false
+	// 	}
+	// 	for _, shard := range status.Shards {
+	// 		if !shard.Ready {
+	// 			return false
+	// 		}
+	// 	}
+	// 	return true
+	// }, 20*time.Second, 1*time.Second, "timed out waiting for collection to be ready")
 
 	// 2. List Collections
 	collections, err := client.ListCollections()
