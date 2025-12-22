@@ -20,7 +20,7 @@ You must have the following tools installed:
 You will also need the Google APIs repository for the `google/api/annotations.proto` imports. It is recommended to clone it to a well-known directory.
 
 ```bash
-git clone https://github.com/googleapis/googleapis.git /path/to/googleapis
+go get  https://github.com/googleapis/googleapis.git
 ```
 
 All commands should be run from the root of the `vectron` repository.
@@ -37,25 +37,17 @@ GOOGLE_APIS_DIR=/path/to/googleapis
 #
  protoc   -I .   -I $(go env GOMODCACHE)/github.com/googleapis/googleapis@v0.0.0-20251219214406-347b0e45a6ec   -I $(go env GOMODCACHE)/github.com/grpc-ecosystem/grpc-gateway/v2@v2.27.3   --go_out=.  --go_opt=paths=source_relative   --go-grpc_out=. --go-grpc_opt=paths=source_relative   --grpc-gateway_out=. --grpc-gateway_opt=paths=source_relative   --openapiv2_out=openapi   apigateway.proto
 
-
-protoc -I. -I${GOOGLE_APIS_DIR} \
-    --go_out=./apigateway/proto --go_opt=paths=source_relative \
-    --go-grpc_out=./apigateway/proto --go-grpc_opt=paths=source_relative \
-    --grpc-gateway_out=./apigateway/proto --grpc-gateway_opt=paths=source_relative \
-    --openapiv2_out=./apigateway/proto/apigateway/openapi \
-    apigateway/proto/apigateway/apigateway.proto
-
 # --- Placement Driver ---
 protoc -I. -I${GOOGLE_APIS_DIR} \
-    --go_out=./placementdriver/proto --go_opt=paths=source_relative \
-    --go-grpc_out=./placementdriver/proto --go-grpc_opt=paths=source_relative \
-    placementdriver/proto/placementdriver/placementdriver.proto
+    --go_out=. --go_opt=paths=source_relative \
+    --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+    placementdriver.proto
 
 # --- Worker ---
 protoc -I. -I${GOOGLE_APIS_DIR} \
-    --go_out=./worker/proto --go_opt=paths=source_relative \
-    --go-grpc_out=./worker/proto --go-grpc_opt=paths=source_relative \
-    worker/proto/worker/worker.proto
+    --go_out=. --go_opt=paths=source_relative \
+    --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+    worker.proto
 ```
 
 ## Python
@@ -69,9 +61,9 @@ GOOGLE_APIS_DIR=/path/to/googleapis
 python -m grpc_tools.protoc \
     -I. \
     -I${GOOGLE_APIS_DIR} \
-    --python_out=./clientlibs/python/vectron_client/proto \
-    --grpc_python_out=./clientlibs/python/vectron_client/proto \
-    clientlibs/python/vectron_client/proto/apigateway/apigateway.proto
+    --python_out=. \
+    --grpc_python_out=. \
+    apigateway.proto
 ```
 
 ## JavaScript / TypeScript
@@ -84,9 +76,9 @@ GOOGLE_APIS_DIR=/path/to/googleapis
 
 protoc \
     --plugin="protoc-gen-ts_proto=$(npm root)/.bin/protoc-gen-ts_proto" \
-    --ts_proto_out=./clientlibs/js/src \
+    --ts_proto_out=. \
     --ts_proto_opt=outputServices=grpc-js,env=node \
     -I. \
     -I${GOOGLE_APIS_DIR} \
-    clientlibs/js/proto/apigateway/apigateway.proto
+    apigateway.proto
 ```
