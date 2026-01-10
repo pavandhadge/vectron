@@ -3,6 +3,7 @@ module github.com/pavandhadge/vectron
 go 1.24.0
 
 require (
+	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/pavandhadge/vectron/clientlibs/go v0.0.0
 	github.com/stretchr/testify v1.11.1
 )

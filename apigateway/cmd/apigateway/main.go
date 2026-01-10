@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,8 @@ import (
 	pb "github.com/pavandhadge/vectron/apigateway/proto/apigateway"
 	placementpb "github.com/pavandhadge/vectron/apigateway/proto/placementdriver"
 	workerpb "github.com/pavandhadge/vectron/apigateway/proto/worker"
+
+	authpb "github.com/pavandhadge/vectron/auth/service/proto/auth"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
@@ -344,22 +347,43 @@ func (s *gatewayServer) GetCollectionStatus(ctx context.Context, req *pb.GetColl
 }
 
 // Start initializes and runs the API Gateway's gRPC and HTTP servers.
-func Start(grpcAddr, httpAddr string, placementDriverAddrs []string) {
+// It can optionally take a pre-configured net.Listener for the gRPC server,
+// useful for testing scenarios. It returns the gRPC server instance and the
+// client connection to the auth service.
+func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.ClientConn) {
 	// Create the gateway server with the list of PD addresses
 	server := &gatewayServer{
-		pdAddrs: placementDriverAddrs,
+		pdAddrs: strings.Split(config.PlacementDriver, ","),
 	}
-	// Initialize the leader connection
-	if _, err := server.updateLeader(); err != nil {
-		log.Fatal("Failed to initialize connection with placement driver leader:", err)
+	// Initialize the leader connection with retry logic
+	maxRetries := 5
+	baseBackoff := 1 * time.Second
+	for i := 0; i < maxRetries; i++ {
+		if _, err := server.updateLeader(); err == nil {
+			// Successfully connected to a leader
+			break
+		}
+		if i == maxRetries-1 {
+			log.Fatalf("Failed to initialize connection with placement driver leader after %d attempts", maxRetries)
+		}
+		wait := baseBackoff * time.Duration(1<<i)
+		log.Printf("Failed to connect to placement driver leader, retrying in %v...", wait)
+		time.Sleep(wait)
 	}
+
+	// Establish gRPC connection to Auth service
+	authConn, err := grpc.Dial(config.AuthServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Fatalf("Failed to connect to Auth service: %v", err)
+	}
+	authClient := authpb.NewAuthServiceClient(authConn)
 
 	// Create the gRPC server with a chain of unary interceptors for middleware.
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
-			middleware.AuthInterceptor,                        // Handles JWT authentication.
+			middleware.AuthInterceptor(authClient),            // Handles API Key authentication.
 			middleware.LoggingInterceptor,                     // Logs incoming requests.
-			middleware.RateLimitInterceptor(cfg.RateLimitRPS), // Enforces rate limiting.
+			middleware.RateLimitInterceptor(config.RateLimitRPS), // Enforces rate limiting.
 		),
 	)
 	pb.RegisterVectronServiceServer(grpcServer, server)
@@ -367,33 +391,49 @@ func Start(grpcAddr, httpAddr string, placementDriverAddrs []string) {
 	// Set up the HTTP/JSON gateway to proxy requests to the gRPC server.
 	mux := runtime.NewServeMux()
 	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
-	if err := pb.RegisterVectronServiceHandlerFromEndpoint(context.Background(), mux, grpcAddr, opts); err != nil {
-		log.Fatal(err)
+	if err := pb.RegisterVectronServiceHandlerFromEndpoint(context.Background(), mux, config.GRPCAddr, opts); err != nil {
+		log.Fatalf("Failed to register VectronServiceHandlerFromEndpoint: %v", err)
 	}
 
 	// Start the gRPC server in a separate goroutine.
 	go func() {
-		lis, _ := net.Listen("tcp", grpcAddr)
-		log.Printf("Vectron gRPC API (SDKs)     → %s", grpcAddr)
+		var lis net.Listener
+		if grpcListener != nil {
+			lis = grpcListener
+		} else {
+			var err error
+			log.Printf("DEBUG: API Gateway config.GRPCAddr: %s, GRPC_ADDR env: %s", config.GRPCAddr, os.Getenv("GRPC_ADDR"))
+			lis, err = net.Listen("tcp", config.GRPCAddr)
+			if err != nil {
+				log.Fatalf("Failed to listen for gRPC server: %v", err)
+			}
+		}
+		log.Printf("Vectron gRPC API (SDKs)     → %s", lis.Addr().String())
 		if err := grpcServer.Serve(lis); err != nil {
-			log.Fatal(err)
+			log.Fatalf("gRPC server failed to serve: %v", err)
 		}
 	}()
 
-	// Start the HTTP server in the main goroutine.
-	log.Printf("Vectron HTTP API (curl)      → %s", httpAddr)
-	log.Printf("Using placement driver           → %s", strings.Join(placementDriverAddrs, ","))
-	if err := http.ListenAndServe(httpAddr, mux); err != nil {
-		log.Fatal(err)
-	}
+	// Start the HTTP server in a separate goroutine.
+	go func() {
+		log.Printf("Vectron HTTP API (curl)      → %s", config.HTTPAddr)
+		log.Printf("Using placement driver           → %s", config.PlacementDriver)
+		if err := http.ListenAndServe(config.HTTPAddr, mux); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("HTTP server failed to serve: %v", err)
+		}
+	}()
+
+	return grpcServer, authConn
 }
 
 // ================ MAIN ================
 
 func main() {
-	// Load configuration and set up middleware.
-	middleware.SetJWTSecret(cfg.JWTSecret)
-	// Parse PD addresses and start the servers.
-	pdAddrs := strings.Split(cfg.PlacementDriver, ",")
-	Start(cfg.GRPCAddr, cfg.HTTPAddr, pdAddrs)
+	// Start the servers.
+	// In the main function, we pass nil for grpcListener to let Start create its own.
+	_, authConn := Start(cfg, nil)
+	defer authConn.Close()
+
+	// Block forever to keep the services running.
+	select {}
 }

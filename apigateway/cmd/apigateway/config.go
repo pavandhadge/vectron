@@ -12,6 +12,7 @@ type Config struct {
 	HTTPAddr        string // Address for the HTTP/JSON gateway to listen on.
 	PlacementDriver string // Address of the placement driver service.
 	JWTSecret       string // Secret key for signing and verifying JWT tokens.
+	AuthServiceAddr string // Address of the Auth service.
 	RateLimitRPS    int    // Requests per second for the rate limiter.
 }
 
@@ -22,6 +23,7 @@ func LoadConfig() Config {
 		HTTPAddr:        getEnv("HTTP_ADDR", ":8080"),
 		PlacementDriver: getEnv("PLACEMENT_DRIVER", "placement:6300"),
 		JWTSecret:       getEnv("JWT_SECRET", "CHANGE_ME_IN_PRODUCTION"),
+		AuthServiceAddr: getEnv("AUTH_SERVICE_ADDR", "auth:50051"), // Default Auth service address
 		RateLimitRPS:    100,
 	}
 }

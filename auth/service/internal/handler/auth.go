@@ -178,8 +178,9 @@ func (s *AuthServer) ValidateAPIKey(ctx context.Context, req *authpb.ValidateAPI
 	}
 
 	return &authpb.ValidateAPIKeyResponse{
-		Valid:  true,
-		UserId: keyData.UserID,
-		Plan:   keyData.Plan,
+		Valid:      true,
+		UserId:     keyData.UserID,
+		Plan:       keyData.Plan,
+		ApiKeyId:   keyData.KeyPrefix,
 	}, nil
 }

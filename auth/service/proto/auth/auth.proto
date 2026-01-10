@@ -96,7 +96,7 @@ message LoginRequest {
 }
 
 message LoginResponse {
-  string jwt_token = 1;
+  string jwt_token = 1 [json_name = "jwtToken"];
   User user = 2;
 }
 
@@ -142,4 +142,5 @@ message ValidateAPIKeyResponse {
   bool valid = 1;
   string user_id = 2;
   string plan = 3;
+  string api_key_id = 4;
 }

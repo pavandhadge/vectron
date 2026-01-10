@@ -10,7 +10,7 @@ Thumbs.db
 
 #testing
 pd-data
-
+worker-data
 test-*
 # VSCode
 .vscode/

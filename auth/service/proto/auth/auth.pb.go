@@ -750,6 +750,7 @@ type ValidateAPIKeyResponse struct {
 	Valid         bool                   `protobuf:"varint,1,opt,name=valid,proto3" json:"valid,omitempty"`
 	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	Plan          string                 `protobuf:"bytes,3,opt,name=plan,proto3" json:"plan,omitempty"`
+	ApiKeyId      string                 `protobuf:"bytes,4,opt,name=api_key_id,json=apiKeyId,proto3" json:"api_key_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -805,6 +806,13 @@ func (x *ValidateAPIKeyResponse) GetPlan() string {
 	return ""
 }
 
+func (x *ValidateAPIKeyResponse) GetApiKeyId() string {
+	if x != nil {
+		return x.ApiKeyId
+	}
+	return ""
+}
+
 var File_proto_auth_auth_proto protoreflect.FileDescriptor
 
 const file_proto_auth_auth_proto_rawDesc = "" +
@@ -850,11 +858,13 @@ const file_proto_auth_auth_proto_rawDesc = "" +
 	"\x14DeleteAPIKeyResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\"2\n" +
 	"\x15ValidateAPIKeyRequest\x12\x19\n" +
-	"\bfull_key\x18\x01 \x01(\tR\afullKey\"[\n" +
+	"\bfull_key\x18\x01 \x01(\tR\afullKey\"y\n" +
 	"\x16ValidateAPIKeyResponse\x12\x14\n" +
 	"\x05valid\x18\x01 \x01(\bR\x05valid\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x12\n" +
-	"\x04plan\x18\x03 \x01(\tR\x04plan2\xc5\x06\n" +
+	"\x04plan\x18\x03 \x01(\tR\x04plan\x12\x1c\n" +
+	"\n" +
+	"api_key_id\x18\x04 \x01(\tR\bapiKeyId2\xc5\x06\n" +
 	"\vAuthService\x12z\n" +
 	"\fRegisterUser\x12$.vectron.auth.v1.RegisterUserRequest\x1a%.vectron.auth.v1.RegisterUserResponse\"\x1d\x82\xd3\xe4\x93\x02\x17:\x01*\"\x12/v1/users/register\x12b\n" +
 	"\x05Login\x12\x1d.vectron.auth.v1.LoginRequest\x1a\x1e.vectron.auth.v1.LoginResponse\"\x1a\x82\xd3\xe4\x93\x02\x14:\x01*\"\x0f/v1/users/login\x12{\n" +

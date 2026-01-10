@@ -6,15 +6,14 @@ package middleware
 
 import (
 	"context"
-	"fmt"
 	"strings"
-	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+
+	authpb "github.com/pavandhadge/vectron/auth/service/proto/auth"
 )
 
 // contextKey is a custom type to avoid collisions with other context keys.
@@ -27,70 +26,48 @@ const (
 	APIKeyIDKey contextKey = "api_key_id"
 )
 
-// jwtSecret stores the secret key used to validate JWT signatures.
-var jwtSecret []byte
-
-// SetJWTSecret configures the JWT secret for the authentication middleware.
-// This must be called at startup.
-func SetJWTSecret(secret string) {
-	jwtSecret = []byte(secret)
-}
-
-// Claims defines the custom claims expected in the JWT payload.
-// It includes standard JWT claims and application-specific data like user ID and plan.
-type Claims struct {
-	UserID   string `json:"user_id"`
-	Plan     string `json:"plan"`       // e.g., "free", "pro", "enterprise"
-	APIKeyID string `json:"api_key_id"` // The ID of the API key used for the request.
-	jwt.RegisteredClaims
-}
-
-// AuthInterceptor is a gRPC unary interceptor that performs JWT-based authentication.
-// It extracts the token from the 'authorization' header, validates it,
-// and injects the claims' data into the context for downstream handlers to use.
-func AuthInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	fmt.Print("auth activated")
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return nil, status.Errorf(codes.Unauthenticated, "missing metadata")
-	}
-
-	auths := md.Get("authorization")
-	if len(auths) == 0 {
-		return nil, status.Errorf(codes.Unauthenticated, "missing Authorization header")
-	}
-
-	// Expecting "Bearer <token>"
-	tokenStr := strings.TrimSpace(strings.TrimPrefix(auths[0], "Bearer"))
-	if tokenStr == "" {
-		return nil, status.Errorf(codes.Unauthenticated, "invalid Authorization format")
-	}
-
-	// Parse and validate the token.
-	claims := &Claims{}
-	token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
-		// Check the signing method
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+// AuthInterceptor returns a gRPC unary interceptor that performs API key based authentication
+// by delegating validation to the Auth service.
+func AuthInterceptor(authClient authpb.AuthServiceClient) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		md, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			return nil, status.Errorf(codes.Unauthenticated, "missing metadata")
 		}
-		return jwtSecret, nil
-	}, jwt.WithLeeway(5*time.Second)) // Allow for minor clock skew.
 
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "invalid token: %v", err)
+		auths := md.Get("authorization")
+		if len(auths) == 0 {
+			return nil, status.Errorf(codes.Unauthenticated, "missing Authorization header")
+		}
+
+		// Expecting "Bearer <token>" or raw API key
+		fullAPIKey := strings.TrimSpace(strings.TrimPrefix(auths[0], "Bearer"))
+		if fullAPIKey == "" {
+			fullAPIKey = strings.TrimSpace(auths[0]) // Try raw API key if Bearer prefix not found
+		}
+
+		if fullAPIKey == "" {
+			return nil, status.Errorf(codes.Unauthenticated, "invalid Authorization format or empty API key")
+		}
+
+		// Call Auth service to validate the API key
+		validateResp, err := authClient.ValidateAPIKey(ctx, &authpb.ValidateAPIKeyRequest{FullKey: fullAPIKey})
+		if err != nil {
+			return nil, status.Errorf(codes.Unauthenticated, "API key validation failed: %v", err)
+		}
+
+		if !validateResp.Valid {
+			return nil, status.Errorf(codes.Unauthenticated, "invalid API key")
+		}
+
+		// Inject user and plan info into the context for use in other handlers.
+		ctx = context.WithValue(ctx, UserIDKey, validateResp.UserId)
+		ctx = context.WithValue(ctx, PlanKey, validateResp.Plan)
+		ctx = context.WithValue(ctx, APIKeyIDKey, validateResp.ApiKeyId)
+
+		// Pass control to the next handler.
+		return handler(ctx, req)
 	}
-	if !token.Valid {
-		return nil, status.Errorf(codes.Unauthenticated, "token expired or invalid")
-	}
-	// TODO: Implement additional verification, e.g., checking API key status in a database.
-
-	// Inject user and plan info into the context for use in other handlers.
-	ctx = context.WithValue(ctx, UserIDKey, claims.UserID)
-	ctx = context.WithValue(ctx, PlanKey, claims.Plan)
-	ctx = context.WithValue(ctx, APIKeyIDKey, claims.APIKeyID)
-
-	// Pass control to the next handler.
-	return handler(ctx, req)
 }
 
 // GetUserID is a helper function to safely retrieve the user ID from the context.
