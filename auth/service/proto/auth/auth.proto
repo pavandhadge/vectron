@@ -1,0 +1,145 @@
+syntax = "proto3";
+
+package vectron.auth.v1;
+
+import "google/api/annotations.proto";
+
+option go_package = "github.com/pavandhadge/vectron/auth/service/proto/auth";
+
+// ================== Service Definition ==================
+
+// AuthService provides user account and API key management.
+service AuthService {
+  // --- User Account Management ---
+
+  // Register a new user.
+  rpc RegisterUser(RegisterUserRequest) returns (RegisterUserResponse) {
+    option (google.api.http) = {
+      post: "/v1/users/register"
+      body: "*"
+    };
+  }
+
+  // Login a user and get a session JWT.
+  rpc Login(LoginRequest) returns (LoginResponse) {
+    option (google.api.http) = {
+      post: "/v1/users/login"
+      body: "*"
+    };
+  }
+
+  // Get the current user's profile (requires JWT authentication).
+  rpc GetUserProfile(GetUserProfileRequest) returns (GetUserProfileResponse) {
+    option (google.api.http) = {get: "/v1/user/profile"};
+  }
+
+  // --- API Key Management (requires JWT authentication) ---
+
+  // Create a new API key for the authenticated user.
+  rpc CreateAPIKey(CreateAPIKeyRequest) returns (CreateAPIKeyResponse) {
+    option (google.api.http) = {
+      post: "/v1/keys"
+      body: "*"
+    };
+  }
+
+  // List all API keys for the authenticated user.
+  rpc ListAPIKeys(ListAPIKeysRequest) returns (ListAPIKeysResponse) {
+    option (google.api.http) = {get: "/v1/keys"};
+  }
+
+  // Delete an API key belonging to the authenticated user.
+  rpc DeleteAPIKey(DeleteAPIKeyRequest) returns (DeleteAPIKeyResponse) {
+    option (google.api.http) = {delete: "/v1/keys/{key_prefix}"};
+  }
+
+  // --- For Internal Services (e.g., API Gateway) ---
+
+  // Validate a raw API key.
+  rpc ValidateAPIKey(ValidateAPIKeyRequest) returns (ValidateAPIKeyResponse) {
+    option (google.api.http) = {
+      post: "/v1/keys/validate"
+      body: "*"
+    };
+  }
+}
+
+// ================== Messages ==================
+
+message User {
+  string id = 1;
+  string email = 2;
+  int64 created_at = 3;
+}
+
+message APIKey {
+  string key_prefix = 1;
+  string user_id = 2;
+  int64 created_at = 3;
+  string name = 4;
+}
+
+// --- User Registration ---
+message RegisterUserRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message RegisterUserResponse {
+  User user = 1;
+}
+
+// --- User Login ---
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  string jwt_token = 1;
+  User user = 2;
+}
+
+// --- User Profile ---
+message GetUserProfileRequest {} // User ID is extracted from JWT
+
+message GetUserProfileResponse {
+  User user = 1;
+}
+
+// --- API Key Management ---
+message CreateAPIKeyRequest {
+  // User ID is extracted from JWT
+  string name = 1;
+}
+
+message CreateAPIKeyResponse {
+  string full_key = 1; // The full key is only returned on creation
+  APIKey key_info = 2;
+}
+
+message ListAPIKeysRequest {} // User ID is extracted from JWT
+
+message ListAPIKeysResponse {
+  repeated APIKey keys = 1;
+}
+
+message DeleteAPIKeyRequest {
+  // User ID is extracted from JWT
+  string key_prefix = 1;
+}
+
+message DeleteAPIKeyResponse {
+  bool success = 1;
+}
+
+// --- Internal Validation ---
+message ValidateAPIKeyRequest {
+  string full_key = 1;
+}
+
+message ValidateAPIKeyResponse {
+  bool valid = 1;
+  string user_id = 2;
+  string plan = 3;
+}

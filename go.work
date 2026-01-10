@@ -6,4 +6,5 @@ use (
 	./clientlibs/go
 	./placementdriver
 	./worker
+	./auth/service
 )
