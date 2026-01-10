@@ -17,11 +17,11 @@ import (
 
 	"github.com/pavandhadge/vectron/apigateway/internal/middleware"
 	"github.com/pavandhadge/vectron/apigateway/internal/translator"
-	pb "github.com/pavandhadge/vectron/apigateway/proto/apigateway"
-	placementpb "github.com/pavandhadge/vectron/apigateway/proto/placementdriver"
-	workerpb "github.com/pavandhadge/vectron/apigateway/proto/worker"
+	pb "github.com/pavandhadge/vectron/shared/proto/apigateway"
+	placementpb "github.com/pavandhadge/vectron/shared/proto/placementdriver"
+	workerpb "github.com/pavandhadge/vectron/shared/proto/worker"
 
-	authpb "github.com/pavandhadge/vectron/auth/service/proto/auth"
+	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"

@@ -23,7 +23,7 @@ import (
 	"github.com/pavandhadge/vectron/worker/internal"
 	"github.com/pavandhadge/vectron/worker/internal/pd"
 	"github.com/pavandhadge/vectron/worker/internal/shard"
-	"github.com/pavandhadge/vectron/worker/proto/worker"
+	worker "github.com/pavandhadge/vectron/shared/proto/worker"
 	"google.golang.org/grpc"
 )
 

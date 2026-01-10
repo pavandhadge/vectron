@@ -16,7 +16,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	// This assumes the generated protobuf code is in this package path.
-	"github.com/pavandhadge/vectron/clientlibs/go/proto/apigateway"
+	apigateway "github.com/pavandhadge/vectron/shared/proto/apigateway"
 )
 
 // Point represents a single vector point for upserting.

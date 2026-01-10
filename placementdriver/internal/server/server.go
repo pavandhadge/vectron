@@ -16,7 +16,7 @@ import (
 
 	"github.com/pavandhadge/vectron/placementdriver/internal/fsm"
 	"github.com/pavandhadge/vectron/placementdriver/internal/raft"
-	pb "github.com/pavandhadge/vectron/placementdriver/proto/placementdriver"
+	pb "github.com/pavandhadge/vectron/shared/proto/placementdriver"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

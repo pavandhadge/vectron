@@ -17,7 +17,7 @@ import (
 	etcdclient "github.com/pavandhadge/vectron/auth/service/internal/etcd"
 	authhandler "github.com/pavandhadge/vectron/auth/service/internal/handler"
 	"github.com/pavandhadge/vectron/auth/service/internal/middleware"
-	authpb "github.com/pavandhadge/vectron/auth/service/proto/auth"
+	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
 )
 
 var (

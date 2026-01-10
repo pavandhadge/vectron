@@ -18,7 +18,7 @@ from .exceptions import (
 )
 
 # Assuming the generated protobuf code is in a 'proto' submodule
-from .proto import apigateway_pb2, apigateway_pb2_grpc
+from shared.proto.apigateway import apigateway_pb2, apigateway_pb2_grpc
 
 
 @dataclass
