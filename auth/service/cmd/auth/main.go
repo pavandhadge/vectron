@@ -20,15 +20,25 @@ import (
 	authpb "github.com/pavandhadge/vectron/auth/service/proto/auth"
 )
 
-const (
-	grpcPort      = ":8081"
-	httpPort      = ":8082"
-	etcdEndpoints = "localhost:2379"
+var (
+	grpcPort      string = ":8081"
+	httpPort      string = ":8082"
+	etcdEndpoints string = "localhost:2379"
+	jwtSecret     string
 )
 
-var jwtSecret string
 
 func init() {
+	if os.Getenv("GRPC_PORT") != "" {
+		grpcPort = os.Getenv("GRPC_PORT")
+	}
+	if os.Getenv("HTTP_PORT") != "" {
+		httpPort = os.Getenv("HTTP_PORT")
+	}
+	if os.Getenv("ETCD_ENDPOINTS") != "" {
+		etcdEndpoints = os.Getenv("ETCD_ENDPOINTS")
+	}
+
 	// In a real production environment, this should be loaded from a secure
 	// configuration management system (e.g., Vault, AWS KMS, etc.), not generated on the fly.
 	jwtSecret = os.Getenv("JWT_SECRET")
@@ -71,9 +81,9 @@ func runGrpcServer(store *etcdclient.Client) error {
 
 	// Define which RPCs do not require JWT authentication
 	authInterceptor := middleware.NewAuthInterceptor(jwtSecret, []string{
-		"/auth.v1.AuthService/RegisterUser",
-		"/auth.v1.AuthService/Login",
-		"/auth.v1.AuthService/ValidateAPIKey",
+		"/vectron.auth.v1.AuthService/RegisterUser",
+		"/vectron.auth.v1.AuthService/Login",
+		"/vectron.auth.v1.AuthService/ValidateAPIKey",
 	})
 
 	s := grpc.NewServer(

@@ -26,6 +26,7 @@ import (
 
 	etcdclient "github.com/pavandhadge/vectron/auth/service/internal/etcd"
 	authpb "github.com/pavandhadge/vectron/auth/service/proto/auth"
+	"github.com/pavandhadge/vectron/auth/service/internal/middleware"
 )
 
 const (
@@ -58,7 +59,14 @@ func TestMain(m *testing.M) {
 
 	// Setup: Start an in-process gRPC server
 	lis = bufconn.Listen(bufSize)
-	s := grpc.NewServer()
+	authInterceptor := middleware.NewAuthInterceptor(testJWTSecret, []string{
+		"/vectron.auth.v1.AuthService/RegisterUser",
+		"/vectron.auth.v1.AuthService/Login",
+		"/vectron.auth.v1.AuthService/ValidateAPIKey",
+	})
+	s := grpc.NewServer(
+		grpc.UnaryInterceptor(authInterceptor.Unary()),
+	)
 
 	// Create dependencies for the auth server
 	etcdCli, err := etcdclient.NewClient([]string{etcd.Clients[0].Addr().String()}, 5*time.Second)
