@@ -16,30 +16,30 @@ Vectron is a distributed system built on a microservices architecture. The backe
 
 The key architectural patterns are:
 
-*   **Microservices:** The project is divided into several independent services, each with a specific responsibility. This promotes modularity, scalability, and independent development.
-*   **gRPC for Inter-Service Communication:** All backend services communicate with each other using gRPC, a high-performance RPC framework. The API definitions are specified in `.proto` files located in the `shared/proto` directory.
-*   **API Gateway:** The `apigateway` service acts as an entry point for external clients. It exposes a RESTful JSON API and translates incoming requests into gRPC calls to the appropriate backend services. This provides a single, consistent interface for clients and decouples them from the internal microservice architecture.
-*   **Multi-Module Go Workspace:** The project is organized as a Go workspace, which allows for the simultaneous development and management of multiple Go modules within a single repository.
+- **Microservices:** The project is divided into several independent services, each with a specific responsibility. This promotes modularity, scalability, and independent development.
+- **gRPC for Inter-Service Communication:** All backend services communicate with each other using gRPC, a high-performance RPC framework. The API definitions are specified in `.proto` files located in the `shared/proto` directory.
+- **API Gateway:** The `apigateway` service acts as an entry point for external clients. It exposes a RESTful JSON API and translates incoming requests into gRPC calls to the appropriate backend services. This provides a single, consistent interface for clients and decouples them from the internal microservice architecture.
+- **Multi-Module Go Workspace:** The project is organized as a Go workspace, which allows for the simultaneous development and management of multiple Go modules within a single repository.
 
 ## 1.2. Components
 
 The project is composed of the following main components:
 
-| Component         | Location                | Description                                                                                                                              |
-| ----------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **Authentication Service** | `auth/service`          | Manages user authentication and authorization. It likely handles API key generation and validation.                                    |
-| **API Gateway**   | `apigateway`            | Exposes a public-facing RESTful API, handles request routing, and communicates with other backend services via gRPC.                       |
-| **Worker**        | `worker`                | The core data processing and storage engine. It likely manages vector embeddings, performs similarity searches, and stores data in shards. |
-| **Placement Driver** | `placementdriver`       | A coordination service that manages the distribution of data and workload across the `worker` nodes. It likely uses Raft for consensus. |
-| **Shared Code**   | `shared`                | Contains common code used by multiple services, most importantly the protobuf definitions for the gRPC APIs.                            |
-| **Client Libraries** | `clientlibs`            | Generated client libraries for JavaScript and Python that allow easy interaction with the Vectron API.                                   |
+| Component                  | Location          | Description                                                                                                                                |
+| -------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Authentication Service** | `auth/service`    | Manages user authentication and authorization. It likely handles API key generation and validation.                                        |
+| **API Gateway**            | `apigateway`      | Exposes a public-facing RESTful API, handles request routing, and communicates with other backend services via gRPC.                       |
+| **Worker**                 | `worker`          | The core data processing and storage engine. It likely manages vector embeddings, performs similarity searches, and stores data in shards. |
+| **Placement Driver**       | `placementdriver` | A coordination service that manages the distribution of data and workload across the `worker` nodes. It likely uses Raft for consensus.    |
+| **Shared Code**            | `shared`          | Contains common code used by multiple services, most importantly the protobuf definitions for the gRPC APIs.                               |
+| **Client Libraries**       | `clientlibs`      | Generated client libraries for JavaScript and Python that allow easy interaction with the Vectron API.                                     |
 
 ## 1.3. Build Process
 
 The project uses a combination of a `Makefile` and a shell script (`generate-all.sh`) to manage the build process.
 
-*   **`generate-all.sh`:** This script is responsible for generating Go, JavaScript, and Python code from the `.proto` files. It uses `protoc` with various plugins to create gRPC server and client code, as well as the gRPC-gateway for the RESTful API.
-*   **`Makefile`:** This file provides simple targets for building the individual Go services and a main `build` target to compile all services. The compiled binaries are placed in the `bin` directory.
+- **`generate-all.sh`:** This script is responsible for generating Go, JavaScript, and Python code from the `.proto` files. It uses `protoc` with various plugins to create gRPC server and client code, as well as the gRPC-gateway for the RESTful API.
+- **`Makefile`:** This file provides simple targets for building the individual Go services and a main `build` target to compile all services. The compiled binaries are placed in the `bin` directory.
 
 <h2> 1.4. How the System Works Together (Initial Hypothesis)</h2>
 
@@ -62,10 +62,10 @@ The `auth` service is a foundational microservice within the Vectron ecosystem r
 
 <h3> 2.1.1. Core Responsibilities</h3>
 
-*   **User Account Management:** Provides RPCs for user registration (`RegisterUser`) and login (`Login`).
-*   **Session Management:** Upon successful login, it generates a JSON Web Token (JWT) that serves as a temporary session token for a user.
-*   **API Key Management:** Provides authenticated RPCs for users to create, list, and delete API keys.
-*   **API Key Validation:** Exposes an internal RPC (`ValidateAPIKey`) used by the `apigateway` to validate API keys from clients.
+- **User Account Management:** Provides RPCs for user registration (`RegisterUser`) and login (`Login`).
+- **Session Management:** Upon successful login, it generates a JSON Web Token (JWT) that serves as a temporary session token for a user.
+- **API Key Management:** Provides authenticated RPCs for users to create, list, and delete API keys.
+- **API Key Validation:** Exposes an internal RPC (`ValidateAPIKey`) used by the `apigateway` to validate API keys from clients.
 
 <h2> 2.2. Architecture</h2>
 
@@ -75,29 +75,29 @@ The service exposes both a gRPC interface for internal service-to-service commun
 
 The service uses `etcd` as its backing data store. All data is serialized to JSON before being stored.
 
-*   **Key Schema:**
-    *   **Users:** Stored under the prefix `vectron/users/`, with the user's email as the key (e.g., `vectron/users/test@example.com`).
-    *   **API Keys:** Stored under the prefix `vectron/apikeys/`, with the key's prefix as the key (e.g., `vectron/apikeys/vkey-xxxxxxxx`).
+- **Key Schema:**
+  - **Users:** Stored under the prefix `vectron/users/`, with the user's email as the key (e.g., `vectron/users/test@example.com`).
+  - **API Keys:** Stored under the prefix `vectron/apikeys/`, with the key's prefix as the key (e.g., `vectron/apikeys/vkey-xxxxxxxx`).
 
-*   **Data Models:**
-    *   `UserData`: Contains the user's ID, email, hashed password, and creation timestamp.
-    *   `APIKeyData`: Contains the hashed full API key, the associated user ID, a descriptive name, the user's plan (e.g., "free"), and the key's prefix.
+- **Data Models:**
+  - `UserData`: Contains the user's ID, email, hashed password, and creation timestamp.
+  - `APIKeyData`: Contains the hashed full API key, the associated user ID, a descriptive name, the user's plan (e.g., "free"), and the key's prefix.
 
 <h3> 2.2.2. Security Model</h3>
 
 Security is a primary design consideration for the auth service.
 
-*   **Password Hashing:** User passwords are never stored in plain text. They are hashed using the `bcrypt` algorithm.
-*   **API Key Hashing & Validation:**
-    *   When a new API key is created, the service immediately hashes it with `bcrypt`.
-    *   The record in `etcd` stores this **hashed key**. The full, plain text key is returned **only once** to the user upon creation.
-    *   The first part of the key serves as a non-secret "key prefix", which is used as the key in `etcd`.
-    *   To validate an API key, the `apigateway` sends the full key to the `ValidateAPIKey` RPC. The auth service uses the prefix to look up the record in `etcd` and then uses `bcrypt.CompareHashAndPassword` to securely verify the full key against the stored hash.
-*   **Authentication Middleware:**
-    *   The service uses a gRPC interceptor to protect its own endpoints.
-    *   Most RPCs require a valid JWT (obtained via the `Login` RPC).
-    *   The interceptor validates the JWT and extracts the `UserID` claim.
-    *   A whitelist exempts `RegisterUser`, `Login`, and the internal `ValidateAPIKey` RPCs from this JWT check.
+- **Password Hashing:** User passwords are never stored in plain text. They are hashed using the `bcrypt` algorithm.
+- **API Key Hashing & Validation:**
+  - When a new API key is created, the service immediately hashes it with `bcrypt`.
+  - The record in `etcd` stores this **hashed key**. The full, plain text key is returned **only once** to the user upon creation.
+  - The first part of the key serves as a non-secret "key prefix", which is used as the key in `etcd`.
+  - To validate an API key, the `apigateway` sends the full key to the `ValidateAPIKey` RPC. The auth service uses the prefix to look up the record in `etcd` and then uses `bcrypt.CompareHashAndPassword` to securely verify the full key against the stored hash.
+- **Authentication Middleware:**
+  - The service uses a gRPC interceptor to protect its own endpoints.
+  - Most RPCs require a valid JWT (obtained via the `Login` RPC).
+  - The interceptor validates the JWT and extracts the `UserID` claim.
+  - A whitelist exempts `RegisterUser`, `Login`, and the internal `ValidateAPIKey` RPCs from this JWT check.
 
 <h2> 2.3. API Definition (from `shared/proto/auth/auth.proto`)</h2>
 
@@ -252,7 +252,6 @@ message ValidateAPIKeyResponse {
 }
 ```
 
-
 <h2> 2.4. Service Entrypoint (`cmd/auth/main.go`)</h2>
 
 The `main.go` file is the entry point for the `auth` service. It is responsible for initializing and running all the components of the service.
@@ -261,11 +260,11 @@ The `main.go` file is the entry point for the `auth` service. It is responsible 
 
 The service is configured through environment variables. Default values are used if the environment variables are not set.
 
-| Environment Variable | Description                                    | Default         |
-| -------------------- | ---------------------------------------------- | --------------- |
-| `GRPC_PORT`          | The port for the gRPC server.                  | `:8081`         |
-| `HTTP_PORT`          | The port for the HTTP/JSON gateway.            | `:8082`         |
-| `ETCD_ENDPOINTS`     | Comma-separated list of etcd endpoints.        | `localhost:2379`|
+| Environment Variable | Description                                    | Default                           |
+| -------------------- | ---------------------------------------------- | --------------------------------- |
+| `GRPC_PORT`          | The port for the gRPC server.                  | `:8081`                           |
+| `HTTP_PORT`          | The port for the HTTP/JSON gateway.            | `:8082`                           |
+| `ETCD_ENDPOINTS`     | Comma-separated list of etcd endpoints.        | `localhost:2379`                  |
 | `JWT_SECRET`         | The secret key for signing and verifying JWTs. | (Generated at runtime if not set) |
 
 A critical detail is the handling of `JWT_SECRET`. If this variable is not set, the application generates a temporary, cryptographically random key at startup. While this allows the service to run out-of-the-box, a warning is logged, as this is insecure and not suitable for production environments.
@@ -284,9 +283,9 @@ This function sets up and runs the gRPC server.
 
 1.  **Listen on TCP Port:** It starts listening on the configured `GRPC_PORT`.
 2.  **Instantiate Middleware:** It creates an instance of `AuthInterceptor` from the `middleware` package. A whitelist of RPC method paths is provided to the interceptor, defining which methods are exempt from JWT authentication. These are the public-facing and internal validation methods:
-    *   `/vectron.auth.v1.AuthService/RegisterUser`
-    *   `/vectron.auth.v1.AuthService/Login`
-    *   `/vectron.auth.v1.AuthService/ValidateAPIKey`
+    - `/vectron.auth.v1.AuthService/RegisterUser`
+    - `/vectron.auth.v1.AuthService/Login`
+    - `/vectron.auth.v1.AuthService/ValidateAPIKey`
 3.  **Create gRPC Server:** A new gRPC server is created with the `AuthInterceptor` configured as a `UnaryInterceptor`. This means the interceptor will be executed for every unary (non-streaming) RPC call.
 4.  **Register Service:** An instance of the `AuthServer` from the `handler` package is created and registered with the gRPC server. This is where the actual business logic of the service resides.
 5.  **Serve:** The server starts accepting and processing incoming gRPC connections.
@@ -298,7 +297,6 @@ This function sets up and runs the gRPC-Gateway, which translates RESTful HTTP/J
 1.  **Create ServeMux:** It creates a new `runtime.NewServeMux()`, which is the gRPC-Gateway's request router.
 2.  **Register Handler:** It calls `authpb.RegisterAuthServiceHandlerFromEndpoint`. This function, generated by `protoc-gen-grpc-gateway`, is the core of the gateway. It registers the HTTP handlers for the `AuthService` and configures them to proxy requests to the gRPC server endpoint (`localhost` on `GRPC_PORT`).
 3.  **Listen and Serve:** It starts a standard Go HTTP server on the configured `HTTP_PORT`, using the gRPC-Gateway's mux as the handler.
-
 
 <h2> 2.5. gRPC Handlers (`internal/handler/auth.go`)</h2>
 
@@ -316,9 +314,9 @@ type AuthServer struct {
 }
 ```
 
-*   `authpb.UnimplementedAuthServiceServer`: It embeds this struct to ensure forward compatibility. If new RPCs are added to the `.proto` file, the service will still compile.
-*   `store`: A pointer to the `etcdclient.Client`, which is used for all database operations.
-*   `jwtSecret`: A byte slice containing the secret key used for signing and verifying JWTs.
+- `authpb.UnimplementedAuthServiceServer`: It embeds this struct to ensure forward compatibility. If new RPCs are added to the `.proto` file, the service will still compile.
+- `store`: A pointer to the `etcdclient.Client`, which is used for all database operations.
+- `jwtSecret`: A byte slice containing the secret key used for signing and verifying JWTs.
 
 A `NewAuthServer` function is used to create a new instance of the `AuthServer`.
 
@@ -361,24 +359,23 @@ This is an internal-facing RPC intended for use by other services like the `apig
 2.  It calls `s.store.ValidateAPIKey()`, which contains the logic to look up the key by its prefix and perform a secure comparison using `bcrypt`.
 3.  If the key is valid, it returns a `ValidateAPIKeyResponse` with `valid` set to `true`, along with the associated `UserID`, `Plan`, and `ApiKeyId` (the key prefix). If invalid, it returns `valid` as `false`.
 
-
 <h2> 2.6. Data Layer (`internal/etcd/client.go`)</h2>
 
 The `etcd/client.go` file provides the data access layer for the `auth` service. It encapsulates all interactions with the `etcd` database, including data serialization, persistence, and the core security operations of hashing and comparison.
 
 <h3> 2.6.1. Client and Data Models</h3>
 
-*   **`Client` Struct:** A simple struct that wraps the official `go-etcd/clientv3.Client`, providing a dedicated namespace for the service's database methods.
-*   **`UserData` and `APIKeyData` Structs:** These are the Go representations of the data stored in `etcd`. They are serialized into JSON before being written to the database.
-    *   `UserData`: `{id, email, hashed_password, created_at}`
-    *   `APIKeyData`: `{hashed_key, user_id, name, plan, created_at, key_prefix}`
+- **`Client` Struct:** A simple struct that wraps the official `go-etcd/clientv3.Client`, providing a dedicated namespace for the service's database methods.
+- **`UserData` and `APIKeyData` Structs:** These are the Go representations of the data stored in `etcd`. They are serialized into JSON before being written to the database.
+  - `UserData`: `{id, email, hashed_password, created_at}`
+  - `APIKeyData`: `{hashed_key, user_id, name, plan, created_at, key_prefix}`
 
 <h3> 2.6.2. Key Schema</h3>
 
 All keys are stored under a common `vectron/` prefix to namespace the application's data within `etcd`.
 
-*   **User Key:** `vectron/users/{email}`
-*   **API Key:** `vectron/apikeys/{key_prefix}`
+- **User Key:** `vectron/users/{email}`
+- **API Key:** `vectron/apikeys/{key_prefix}`
 
 <h3> 2.6.3. User Management Methods</h3>
 
