@@ -1,88 +1,109 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
+import React, { useState, useEffect } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
 
 export const SignupPage = () => {
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [formError, setFormError] = useState<string | null>(null); // Renamed to avoid conflict with auth.error
-    const [loading, setLoading] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-    const navigate = useNavigate();
-    const { signup, error: authError, user } = useAuth();
+  const navigate = useNavigate();
+  const { signup, error: authError, user } = useAuth();
 
-    useEffect(() => {
-        if (user) {
-            navigate("/dashboard", { replace: true });
-        }
-    }, [user, navigate]);
+  useEffect(() => {
+    if (user) {
+      navigate("/dashboard", { replace: true });
+    }
+  }, [user, navigate]);
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setFormError(null); // Clear form-specific errors
-        if (password.length < 8) {
-            setFormError("Password must be at least 8 characters long.");
-            return;
-        }
-        setLoading(true);
-        try {
-            await signup({ email, password });
-            // Navigation handled by useEffect when user state updates
-        } catch (err) {
-            // Error handled by AuthContext and available via authError
-            setLoading(false);
-        }
-    };
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError(null);
+    if (password.length < 8) {
+      setFormError("Password must be at least 8 characters long.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await signup({ email, password });
+    } catch (err) {
+      setLoading(false);
+    }
+  };
 
-    return (
-        <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900">
-            <div className="w-full max-w-md p-8 space-y-6 bg-white dark:bg-gray-800 rounded-lg shadow-md">
-                <h2 className="text-2xl font-bold text-center text-gray-900 dark:text-white">Create your Vectron Account</h2>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    {(formError || authError) && (
-                        <p className="text-red-500 text-center text-sm">
-                            {formError || authError}
-                        </p>
-                    )}
-                    <div>
-                        <label htmlFor="email" className="sr-only">Email</label>
-                        <input
-                            id="email"
-                            type="email"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            placeholder="Email address"
-                            required
-                            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm text-gray-900 dark:text-white bg-white dark:bg-gray-700 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                        />
-                    </div>
-                    <div>
-                        <label htmlFor="password" className="sr-only">Password</label>
-                        <input
-                            id="password"
-                            type="password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            placeholder="Password (min. 8 characters)"
-                            required
-                            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm text-gray-900 dark:text-white bg-white dark:bg-gray-700 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                        />
-                    </div>
-                    <button
-                        type="submit"
-                        disabled={loading}
-                        className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        {loading ? 'Creating Account...' : 'Sign Up'}
-                    </button>
-                </form>
-                <p className="text-center text-sm text-gray-600 dark:text-gray-300">
-                    Already have an account? {' '}
-                    <Link to="/login" className="font-medium text-indigo-600 hover:text-indigo-500">
-                        Login
-                    </Link>
-                </p>
-            </div>
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-black text-white selection:bg-purple-500 selection:text-white">
+      {/* Ambient Background Glow */}
+      <div className="fixed top-0 left-1/2 -translate-x-1/2 w-[500px] h-[300px] bg-purple-900/20 blur-[120px] rounded-full pointer-events-none" />
+
+      <div className="relative w-full max-w-md p-8 space-y-6 bg-neutral-900/30 backdrop-blur-xl rounded-2xl border border-neutral-800 shadow-2xl">
+        <div className="space-y-2 text-center">
+          <h2 className="text-3xl font-bold tracking-tighter">
+            Create your account
+          </h2>
+          <p className="text-sm text-neutral-400">
+            Enter your details to get started with Vectron.
+          </p>
         </div>
-    );
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {(formError || authError) && (
+            <div className="p-3 text-sm text-red-400 bg-red-900/10 border border-red-900/20 rounded-lg text-center">
+              {formError || authError}
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="email" className="sr-only">
+                Email
+              </label>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="name@example.com"
+                required
+                className="w-full bg-black border border-neutral-800 rounded-lg px-4 py-3 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-white focus:ring-1 focus:ring-white transition-all duration-200"
+              />
+            </div>
+            <div>
+              <label htmlFor="password" className="sr-only">
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Password (min. 8 characters)"
+                required
+                className="w-full bg-black border border-neutral-800 rounded-lg px-4 py-3 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-white focus:ring-1 focus:ring-white transition-all duration-200"
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-white text-black font-medium py-3 rounded-lg hover:bg-neutral-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+          >
+            {loading ? "Creating Account..." : "Sign Up"}
+          </button>
+        </form>
+
+        <p className="text-center text-sm text-neutral-500">
+          Already have an account?{" "}
+          <Link
+            to="/login"
+            className="font-medium text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600 hover:opacity-80 transition-opacity"
+          >
+            Log in
+          </Link>
+        </p>
+      </div>
+    </div>
+  );
 };

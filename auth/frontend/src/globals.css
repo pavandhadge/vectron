@@ -1,0 +1,24 @@
+/* 1. Base Variables & Typography */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  --bg-primary: #0a0a0a; /* Deep OLED Black */
+  --bg-secondary: #111111; /* Slightly lighter for cards */
+  --fg-primary: #ffffff;
+  --fg-secondary: #a1a1aa; /* Muted grey text */
+  --border-subtle: #333333;
+  --border-active: #888888;
+  --accent-glow: 0 0 100px -20px rgba(255, 255, 255, 0.1);
+  --gradient-prisma: linear-gradient(90deg, #7928ca, #ff0080); /* Prisma Pink/Purple */
+  --gradient-vercel: linear-gradient(180deg, #fff, #777); /* Text Gradient */
+
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--fg-primary);
+  font-family: var(--font-sans);
+  -webkit-font-
