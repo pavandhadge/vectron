@@ -8,7 +8,7 @@ import { SignupPage } from "./pages/SignupPage";
 import { Dashboard } from "./pages/Dashboard";
 import { ApiKeyManager } from "./components/ApiKeyManager";
 import { ProtectedRoute } from "./components/ProtectedRoute";
-import "./styles.css";
+// import "./styles.css";
 
 function App() {
   return (

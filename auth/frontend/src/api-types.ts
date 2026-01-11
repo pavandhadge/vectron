@@ -6,11 +6,10 @@ export interface User {
   email: string;
   created_at: number;
 }
-
 export interface ApiKey {
-  key_prefix: string;
-  user_id: string;
-  created_at: number;
+  keyPrefix: string;
+  userId: string;
+  createdAt: number;
   name: string;
 }
 
