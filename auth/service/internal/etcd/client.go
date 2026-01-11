@@ -26,10 +26,12 @@ type Client struct {
 
 // UserData is the structure for users stored in etcd.
 type UserData struct {
-	ID             string `json:"id"`
-	Email          string `json:"email"`
-	HashedPassword string `json:"hashed_password"`
-	CreatedAt      int64  `json:"created_at"`
+	ID                 string                  `json:"id"`
+	Email              string                  `json:"email"`
+	HashedPassword     string                  `json:"hashed_password"`
+	CreatedAt          int64                   `json:"created_at"`
+	Plan               authpb.Plan             `json:"plan"`
+	SubscriptionStatus authpb.SubscriptionStatus `json:"subscription_status"`
 }
 
 // APIKeyData is the structure for API keys stored in etcd.
@@ -69,10 +71,12 @@ func (c *Client) CreateUser(ctx context.Context, email, password string) (*UserD
 	}
 
 	userData := &UserData{
-		ID:             "user-" + uuid.New().String(),
-		Email:          email,
-		HashedPassword: string(hashedPassword),
-		CreatedAt:      time.Now().Unix(),
+		ID:                 "user-" + uuid.New().String(),
+		Email:              email,
+		HashedPassword:     string(hashedPassword),
+		CreatedAt:          time.Now().Unix(),
+		Plan:               authpb.Plan_FREE,
+		SubscriptionStatus: authpb.SubscriptionStatus_ACTIVE,
 	}
 
 	data, err := json.Marshal(userData)
@@ -121,6 +125,30 @@ func (c *Client) GetUserByID(ctx context.Context, userID string) (*UserData, err
 		}
 	}
 	return nil, errors.New("user not found")
+}
+
+// UpdateUserPlan updates the user's plan.
+func (c *Client) UpdateUserPlan(ctx context.Context, userID string, plan authpb.Plan) (*UserData, error) {
+	userData, err := c.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	userData.Plan = plan
+	// If the plan is updated, we can assume the subscription is active.
+	// In a real-world scenario, this would be more complex and likely handled by a billing event.
+	if plan == authpb.Plan_PAID {
+		userData.SubscriptionStatus = authpb.SubscriptionStatus_ACTIVE
+	}
+
+	data, err := json.Marshal(userData)
+	if err != nil {
+		return nil, err
+	}
+
+	etcdKey := fmt.Sprintf("%s%s", userPrefix, userData.Email)
+	_, err = c.Put(ctx, etcdKey, string(data))
+	return userData, err
 }
 
 // --- API Key Management ---

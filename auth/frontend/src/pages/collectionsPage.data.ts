@@ -1,0 +1,20 @@
+export const collectionsData = {
+  title: "Collections",
+  subtitle: "Manage your vector indexes and schemas.",
+  createCollectionTitle: "Create Collection",
+  collectionNameLabel: "Collection Name",
+  dimensionLabel: "Vector Dimension",
+  createButtonText: "Create Collection",
+  creatingButtonText: "Creating...",
+  yourCollectionsTitle: "Your Collections",
+  nameColumnHeader: "NAME",
+  statusColumnHeader: "STATUS",
+  dimensionColumnHeader: "DIMENSION",
+  metricColumnHeader: "METRIC",
+  actionsColumnHeader: "ACTIONS",
+  emptyStateTitle: "No collections found",
+  emptyStateDesc: "Get started by creating your first vector index.",
+  searchPlaceholder: "Search collections...",
+  dimensionHelpText:
+    "This must match the output dimension of your embedding model (e.g., 1536 for OpenAI text-embedding-3-small).",
+};

@@ -1,10 +1,25 @@
 // src/api-types.ts
 // This file defines the TypeScript types for our API communication.
 
-export interface User {
+export enum Plan {
+  PLAN_UNSPECIFIED = 0,
+  FREE = 1,
+  PAID = 2,
+}
+
+export enum SubscriptionStatus {
+  SUBSCRIPTION_STATUS_UNSPECIFIED = 0,
+  ACTIVE = 1,
+  CANCELED = 2,
+  PAST_DUE = 3,
+}
+
+export interface UserProfile {
   id: string;
   email: string;
   created_at: number;
+  plan: Plan;
+  subscription_status: SubscriptionStatus;
 }
 export interface ApiKey {
   keyPrefix: string;
@@ -36,7 +51,7 @@ export interface RegisterUserRequest {
 }
 
 export interface RegisterUserResponse {
-  user: User;
+  user: UserProfile;
 }
 
 export interface LoginRequest {
@@ -46,5 +61,5 @@ export interface LoginRequest {
 
 export interface LoginResponse {
   jwt_token: string;
-  user: User;
+  user: UserProfile;
 }

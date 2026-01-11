@@ -6,6 +6,21 @@ import "google/api/annotations.proto";
 
 option go_package = "github.com/pavandhadge/vectron/shared/proto/auth";
 
+// ================== Enums ==================
+
+enum Plan {
+  PLAN_UNSPECIFIED = 0;
+  FREE = 1;
+  PAID = 2;
+}
+
+enum SubscriptionStatus {
+  SUBSCRIPTION_STATUS_UNSPECIFIED = 0;
+  ACTIVE = 1;
+  CANCELED = 2;
+  PAST_DUE = 3;
+}
+
 // ================== Service Definition ==================
 
 // AuthService provides user account and API key management.
@@ -31,6 +46,14 @@ service AuthService {
   // Get the current user's profile (requires JWT authentication).
   rpc GetUserProfile(GetUserProfileRequest) returns (GetUserProfileResponse) {
     option (google.api.http) = {get: "/v1/user/profile"};
+  }
+
+  // Update the current user's profile (requires JWT authentication).
+  rpc UpdateUserProfile(UpdateUserProfileRequest) returns (UpdateUserProfileResponse) {
+    option (google.api.http) = {
+      put: "/v1/user/profile"
+      body: "*"
+    };
   }
 
   // --- API Key Management (requires JWT authentication) ---
@@ -66,10 +89,12 @@ service AuthService {
 
 // ================== Messages ==================
 
-message User {
+message UserProfile {
   string id = 1;
   string email = 2;
   int64 created_at = 3;
+  Plan plan = 4;
+  SubscriptionStatus subscription_status = 5;
 }
 
 message APIKey {
@@ -86,7 +111,7 @@ message RegisterUserRequest {
 }
 
 message RegisterUserResponse {
-  User user = 1;
+  UserProfile user = 1;
 }
 
 // --- User Login ---
@@ -97,14 +122,22 @@ message LoginRequest {
 
 message LoginResponse {
   string jwt_token = 1 [json_name = "jwtToken"];
-  User user = 2;
+  UserProfile user = 2;
 }
 
 // --- User Profile ---
 message GetUserProfileRequest {} // User ID is extracted from JWT
 
 message GetUserProfileResponse {
-  User user = 1;
+  UserProfile user = 1;
+}
+
+message UpdateUserProfileRequest {
+  Plan plan = 1;
+}
+
+message UpdateUserProfileResponse {
+  UserProfile user = 1;
 }
 
 // --- API Key Management ---

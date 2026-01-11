@@ -6,13 +6,21 @@ import {
   useState,
   ReactNode,
 } from "react";
+import {
+  LoginRequest,
+  LoginResponse,
+  RegisterUserRequest,
+  RegisterUserResponse,
+  UserProfile,
+} from "../api-types";
 
 /* =======================
    Types
 ======================= */
 
 interface AuthContextType {
-  user: User | null;
+  user: UserProfile | null;
+  setUser: (user: UserProfile) => void;
   token: string | null;
   isLoading: boolean;
   error: string | null;
@@ -62,7 +70,7 @@ apiClient.interceptors.request.use(
 ======================= */
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<UserProfile | null>(null);
   const [token, setToken] = useState<string | null>(() =>
     localStorage.getItem("jwt_token"),
   );
@@ -135,6 +143,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     <AuthContext.Provider
       value={{
         user,
+        setUser,
         token,
         isLoading,
         error,

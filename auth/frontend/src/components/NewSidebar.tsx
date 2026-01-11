@@ -8,6 +8,7 @@ import {
   Database,
   CreditCard,
   LogOut,
+  Code,
   ChevronRight,
   X,
 } from "lucide-react";
@@ -35,12 +36,12 @@ export const NewSidebar: React.FC<NewSidebarProps> = ({
       end: false,
     },
     { name: "API Keys", to: "/dashboard/keys", icon: Key, end: false },
-    { name: "Profile", to: "/dashboard/profile", icon: Settings, end: false },
+    { name: "SDK", to: "/dashboard/sdk", icon: Code, end: false },
   ];
 
   const secondaryNav = [
     { name: "Billing", to: "/dashboard/billing", icon: CreditCard, end: false },
-    { name: "Settings", to: "/dashboard/settings", icon: Settings, end: false },
+    { name: "Profile", to: "/dashboard/profile", icon: Settings, end: false },
     {
       name: "Documentation",
       to: "/dashboard/documentation",

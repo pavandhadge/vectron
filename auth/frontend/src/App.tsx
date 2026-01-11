@@ -11,6 +11,10 @@ import { ApiKeyManager } from "./components/ApiKeyManager";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { Documentation } from "./pages/Documentation";
 import NotYetImplemented from "./pages/NotYetImplemented";
+import BillingPage from "./pages/BillingPage";
+import ProfilePage from "./pages/ProfilePage";
+import SDKDownloadPage from "./pages/SDKDownloadPage";
+import CollectionsPage from "./pages/CollectionsPage";
 
 function App() {
   return (
@@ -31,9 +35,10 @@ function App() {
             <Route index element={<Dashboard />} />
             <Route path="keys" element={<ApiKeyManager />} />
             <Route path="settings" element={<NotYetImplemented />} />
-            <Route path="profile" element={<NotYetImplemented />} />
-            <Route path="billing" element={<NotYetImplemented />} />
-            <Route path="collections" element={<NotYetImplemented />} />
+            <Route path="profile" element={<ProfilePage />} />
+            <Route path="billing" element={<BillingPage />} />
+            <Route path="collections" element={<CollectionsPage />} />
+            <Route path="sdk" element={<SDKDownloadPage />} />
           </Route>
           <Route
             path="/dashboard/documentation"

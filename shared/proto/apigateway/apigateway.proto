@@ -5,6 +5,7 @@ package vectron.v1;
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
+import "auth/auth.proto";
 
 option go_package = "github.com/pavandhadge/vectron/shared/proto/apigateway";
 
@@ -55,6 +56,14 @@ service VectronService {
   // Get collection status
   rpc GetCollectionStatus(GetCollectionStatusRequest) returns (GetCollectionStatusResponse) {
     option (google.api.http) = {get: "/v1/collections/{name}/status"};
+  }
+
+  // Update user profile
+  rpc UpdateUserProfile(UpdateUserProfileRequest) returns (UpdateUserProfileResponse) {
+    option (google.api.http) = {
+      put: "/v1/user/profile"
+      body: "*"
+    };
   }
 }
 
@@ -144,4 +153,12 @@ message Point {
   string id = 1;
   repeated float vector = 2;
   map<string, string> payload = 3;
+}
+
+message UpdateUserProfileRequest {
+  vectron.auth.v1.Plan plan = 1;
+}
+
+message UpdateUserProfileResponse {
+  vectron.auth.v1.UserProfile user = 1;
 }

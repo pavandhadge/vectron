@@ -42,10 +42,12 @@ func (s *AuthServer) RegisterUser(ctx context.Context, req *authpb.RegisterUserR
 	}
 
 	return &authpb.RegisterUserResponse{
-		User: &authpb.User{
-			Id:        userData.ID,
-			Email:     userData.Email,
-			CreatedAt: userData.CreatedAt,
+		User: &authpb.UserProfile{
+			Id:                 userData.ID,
+			Email:              userData.Email,
+			CreatedAt:          userData.CreatedAt,
+			Plan:               userData.Plan,
+			SubscriptionStatus: userData.SubscriptionStatus,
 		},
 	}, nil
 }
@@ -76,10 +78,12 @@ func (s *AuthServer) Login(ctx context.Context, req *authpb.LoginRequest) (*auth
 
 	return &authpb.LoginResponse{
 		JwtToken: tokenString,
-		User: &authpb.User{
-			Id:        userData.ID,
-			Email:     userData.Email,
-			CreatedAt: userData.CreatedAt,
+		User: &authpb.UserProfile{
+			Id:                 userData.ID,
+			Email:              userData.Email,
+			CreatedAt:          userData.CreatedAt,
+			Plan:               userData.Plan,
+			SubscriptionStatus: userData.SubscriptionStatus,
 		},
 	}, nil
 }
@@ -96,10 +100,34 @@ func (s *AuthServer) GetUserProfile(ctx context.Context, req *authpb.GetUserProf
 	}
 
 	return &authpb.GetUserProfileResponse{
-		User: &authpb.User{
-			Id:        userData.ID,
-			Email:     userData.Email,
-			CreatedAt: userData.CreatedAt,
+		User: &authpb.UserProfile{
+			Id:                 userData.ID,
+			Email:              userData.Email,
+			CreatedAt:          userData.CreatedAt,
+			Plan:               userData.Plan,
+			SubscriptionStatus: userData.SubscriptionStatus,
+		},
+	}, nil
+}
+
+func (s *AuthServer) UpdateUserProfile(ctx context.Context, req *authpb.UpdateUserProfileRequest) (*authpb.UpdateUserProfileResponse, error) {
+	userID, err := middleware.GetUserIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	userData, err := s.store.UpdateUserPlan(ctx, userID, req.Plan)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to update user profile: %v", err)
+	}
+
+	return &authpb.UpdateUserProfileResponse{
+		User: &authpb.UserProfile{
+			Id:                 userData.ID,
+			Email:              userData.Email,
+			CreatedAt:          userData.CreatedAt,
+			Plan:               userData.Plan,
+			SubscriptionStatus: userData.SubscriptionStatus,
 		},
 	}, nil
 }

@@ -27,6 +27,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -41,9 +42,10 @@ type LeaderInfo struct {
 // forwarding requests to the appropriate backend services (placement driver or workers).
 type gatewayServer struct {
 	pb.UnimplementedVectronServiceServer
-	pdAddrs  []string
-	leader   *LeaderInfo
-	leaderMu sync.RWMutex
+	pdAddrs    []string
+	leader     *LeaderInfo
+	leaderMu   sync.RWMutex
+	authClient authpb.AuthServiceClient
 }
 
 func (s *gatewayServer) getPlacementClient() (placementpb.PlacementServiceClient, error) {
@@ -54,6 +56,39 @@ func (s *gatewayServer) getPlacementClient() (placementpb.PlacementServiceClient
 	}
 	s.leaderMu.RUnlock()
 	return s.updateLeader()
+}
+func (s *gatewayServer) UpdateUserProfile(ctx context.Context, req *pb.UpdateUserProfileRequest) (*pb.UpdateUserProfileResponse, error) {
+	// The auth interceptor has already validated the JWT and put the user ID in the context.
+	// We can retrieve it here if needed, but for updating the user's own profile,
+	// the auth service will handle the validation based on the JWT it receives.
+
+	// Forward the request to the auth service.
+	authReq := &authpb.UpdateUserProfileRequest{
+		Plan: req.Plan,
+	}
+
+	// We need to pass the JWT from the incoming request to the auth service.
+	// The easiest way is to extract the token from the metadata and pass it along.
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return nil, status.Errorf(codes.Unauthenticated, "missing metadata")
+	}
+	authHeader := md.Get("authorization")
+	if len(authHeader) == 0 {
+		return nil, status.Errorf(codes.Unauthenticated, "missing authorization header")
+	}
+
+	// Create a new context with the authorization header for the downstream call.
+	authCtx := metadata.AppendToOutgoingContext(context.Background(), "authorization", authHeader[0])
+
+	authResp, err := s.authClient.UpdateUserProfile(authCtx, authReq)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to update user profile: %v", err)
+	}
+
+	return &pb.UpdateUserProfileResponse{
+		User: authResp.User,
+	}, nil
 }
 
 func (s *gatewayServer) updateLeader() (placementpb.PlacementServiceClient, error) {
@@ -351,9 +386,17 @@ func (s *gatewayServer) GetCollectionStatus(ctx context.Context, req *pb.GetColl
 // useful for testing scenarios. It returns the gRPC server instance and the
 // client connection to the auth service.
 func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.ClientConn) {
+	// Establish gRPC connection to Auth service
+	authConn, err := grpc.Dial(config.AuthServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Fatalf("Failed to connect to Auth service: %v", err)
+	}
+	authClient := authpb.NewAuthServiceClient(authConn)
+
 	// Create the gateway server with the list of PD addresses
 	server := &gatewayServer{
-		pdAddrs: strings.Split(config.PlacementDriver, ","),
+		pdAddrs:    strings.Split(config.PlacementDriver, ","),
+		authClient: authClient,
 	}
 	// Initialize the leader connection with retry logic
 	maxRetries := 5
@@ -370,13 +413,6 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 		log.Printf("Failed to connect to placement driver leader, retrying in %v...", wait)
 		time.Sleep(wait)
 	}
-
-	// Establish gRPC connection to Auth service
-	authConn, err := grpc.Dial(config.AuthServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		log.Fatalf("Failed to connect to Auth service: %v", err)
-	}
-	authClient := authpb.NewAuthServiceClient(authConn)
 
 	// Create the gRPC server with a chain of unary interceptors for middleware.
 	grpcServer := grpc.NewServer(
