@@ -4,7 +4,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.0
 // - protoc             v3.19.6
-// source: placementdriver.proto
+// source: placementdriver/placementdriver.proto
 
 package placementdriver
 
@@ -473,5 +473,5 @@ var PlacementService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "placementdriver.proto",
+	Metadata: "placementdriver/placementdriver.proto",
 }

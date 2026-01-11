@@ -11,7 +11,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"golang.org/x/crypto/bcrypt"
 
-	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
+	authpb "github.com/pavandhadge/vectron/auth/service/proto/auth"
 )
 
 const (

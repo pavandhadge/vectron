@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
+	authpb "github.com/pavandhadge/vectron/auth/service/proto/auth"
 	"go.etcd.io/etcd/server/v3/embed"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"

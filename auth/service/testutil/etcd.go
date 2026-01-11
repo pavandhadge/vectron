@@ -15,7 +15,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
+	authpb "github.com/pavandhadge/vectron/auth/service/proto/auth"
 )
 
 // EtcdProcess represents a running embedded etcd process for testing.
@@ -55,7 +55,6 @@ func StartEmbeddedEtcd(ctx context.Context) (*EtcdProcess, error) {
 	cfg.ListenPeerUrls = []url.URL{*peerURL}
 	cfg.AdvertisePeerUrls = []url.URL{*peerURL}
 	cfg.InitialCluster = fmt.Sprintf("default=%s", peerURLStr) // InitialCluster expects a string
-
 
 	// Start etcd
 	e, err := embed.StartEtcd(cfg)

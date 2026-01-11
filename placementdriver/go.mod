@@ -3,13 +3,12 @@ module github.com/pavandhadge/vectron/placementdriver
 go 1.24.0
 
 require (
+	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.4
 	github.com/lni/dragonboat/v3 v3.3.8
-	github.com/pavandhadge/vectron/shared v0.0.0-00010101000000-000000000000
+	google.golang.org/genproto/googleapis/api v0.0.0-20251222181119-0a764e51fe1b
 	google.golang.org/grpc v1.78.0
 	google.golang.org/protobuf v1.36.11
 )
-
-replace github.com/pavandhadge/vectron/shared => ../shared
 
 require (
 	github.com/VictoriaMetrics/metrics v1.6.2 // indirect
@@ -23,7 +22,7 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
-	github.com/google/btree v1.0.0 // indirect
+	github.com/google/btree v1.1.3 // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect
 	github.com/hashicorp/go-immutable-radix v1.0.0 // indirect
 	github.com/hashicorp/go-msgpack v0.5.3 // indirect

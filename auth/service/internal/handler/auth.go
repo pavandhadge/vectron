@@ -11,7 +11,7 @@ import (
 
 	etcdclient "github.com/pavandhadge/vectron/auth/service/internal/etcd"
 	"github.com/pavandhadge/vectron/auth/service/internal/middleware"
-	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
+	authpb "github.com/pavandhadge/vectron/auth/service/proto/auth"
 )
 
 // AuthServer implements the AuthServiceServer interface.

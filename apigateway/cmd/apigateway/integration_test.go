@@ -7,15 +7,15 @@ import (
 	"net"
 	"testing"
 
-	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
+	authpb "github.com/pavandhadge/vectron/apigateway/proto/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	apigatewaypb "github.com/pavandhadge/vectron/shared/proto/apigateway"
-	placementdriverpb "github.com/pavandhadge/vectron/shared/proto/placementdriver"
+	apigatewaypb "github.com/pavandhadge/vectron/apigateway/proto/apigateway"
+	placementdriverpb "github.com/pavandhadge/vectron/apigateway/proto/placementdriver"
 )
 
 // MockAuthService is a mock implementation of the Auth service for testing.
@@ -150,9 +150,9 @@ func TestAPIGatewayAuthentication(t *testing.T) {
 			mockAuthFn: func(ctx context.Context, req *authpb.ValidateAPIKeyRequest) (*authpb.ValidateAPIKeyResponse, error) {
 				if req.FullKey == "valid-key" {
 					return &authpb.ValidateAPIKeyResponse{
-						Valid:      true,
-						UserId:     "test-user-id",
-						Plan:       "pro",
+						Valid:    true,
+						UserId:   "test-user-id",
+						Plan:     "pro",
 						ApiKeyId: "valid-key-id",
 					}, nil
 				}

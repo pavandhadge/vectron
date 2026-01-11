@@ -3,9 +3,8 @@ go 1.24.0
 use (
 	.
 	./apigateway
+	./auth/service
 	./clientlibs/go
 	./placementdriver
 	./worker
-	./auth/service
-	./shared
 )

@@ -17,7 +17,7 @@ import (
 	etcdclient "github.com/pavandhadge/vectron/auth/service/internal/etcd"
 	authhandler "github.com/pavandhadge/vectron/auth/service/internal/handler"
 	"github.com/pavandhadge/vectron/auth/service/internal/middleware"
-	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
+	authpb "github.com/pavandhadge/vectron/auth/service/proto/auth"
 )
 
 var (
@@ -26,7 +26,6 @@ var (
 	etcdEndpoints string = "localhost:2379"
 	jwtSecret     string
 )
-
 
 func init() {
 	if os.Getenv("GRPC_PORT") != "" {

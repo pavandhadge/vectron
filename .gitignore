@@ -28,6 +28,14 @@ yarn-debug.log
 yarn-error.log
 pnpm-debug.log
 
+
+worker/proto
+placementdriver/proto
+auth/service/proto
+apigateway/proto
+*.pb.go
+*.pb.gw.go
+#openapi
 # Dist / build outputs
 dist/
 build/

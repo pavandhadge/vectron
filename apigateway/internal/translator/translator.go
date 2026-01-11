@@ -5,8 +5,8 @@
 package translator
 
 import (
-	apigatewaypb "github.com/pavandhadge/vectron/shared/proto/apigateway"
-	workerpb "github.com/pavandhadge/vectron/shared/proto/worker"
+	apigatewaypb "github.com/pavandhadge/vectron/apigateway/proto/apigateway"
+	workerpb "github.com/pavandhadge/vectron/apigateway/proto/worker"
 )
 
 // ToWorkerStoreVectorRequestFromPoint translates a public API Point to a worker's StoreVectorRequest.

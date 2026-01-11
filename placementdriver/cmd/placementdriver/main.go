@@ -19,7 +19,7 @@ import (
 
 	pdRaft "github.com/pavandhadge/vectron/placementdriver/internal/raft"
 	"github.com/pavandhadge/vectron/placementdriver/internal/server"
-	pb "github.com/pavandhadge/vectron/shared/proto/placementdriver"
+	pb "github.com/pavandhadge/vectron/placementdriver/proto/placementdriver"
 	"google.golang.org/grpc"
 )
 

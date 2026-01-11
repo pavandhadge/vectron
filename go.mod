@@ -5,8 +5,9 @@ go 1.24.0
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
+	//github.com/pavandhadge/vectron/auth/service v0.0.0 // Add this line
 	github.com/pavandhadge/vectron/clientlibs/go v0.0.0
-	github.com/pavandhadge/vectron/shared v0.0.0-00010101000000-000000000000
+	//github.com/pavandhadge/vectron/shared v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.11.1
 	go.etcd.io/etcd/server/v3 v3.6.7
 	google.golang.org/grpc v1.78.0
@@ -42,7 +43,7 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.20.5 // indirect
-	github.com/prometheus/client_model v0.6.1 // indirect
+	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.62.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
@@ -64,7 +65,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.38.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.38.0 // indirect
 	go.opentelemetry.io/otel/trace v1.38.0 // indirect
-	go.opentelemetry.io/proto/otlp v1.5.0 // indirect
+	go.opentelemetry.io/proto/otlp v1.7.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	golang.org/x/crypto v0.46.0 // indirect
@@ -83,4 +84,6 @@ require (
 
 replace github.com/pavandhadge/vectron/clientlibs/go => ./clientlibs/go
 
-replace github.com/pavandhadge/vectron/shared => ./shared
+//replace github.com/pavandhadge/vectron/auth/service => ./auth/service
+
+//replace github.com/pavandhadge/vectron/shared => ./shared

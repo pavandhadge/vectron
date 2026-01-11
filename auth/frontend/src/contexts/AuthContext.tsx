@@ -6,6 +6,7 @@ interface AuthContextType {
     user: User | null;
     token: string | null;
     isLoading: boolean;
+    error: string | null;
     login: (data: LoginRequest) => Promise<void>;
     signup: (data: RegisterUserRequest) => Promise<void>;
     logout: () => void;
@@ -14,58 +15,89 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Create an axios instance for API calls
-const apiClient = axios.create();
+const apiClient = axios.create({
+    baseURL: import.meta.env.VITE_API_BASE_URL || '/api', // Use environment variable for API base URL
+    headers: {
+        'Content-Type': 'application/json',
+    },
+});
 
-export const AuthProvider = ({ children }: { children: ReactNode }) => {
+// Request interceptor for API calls
+apiClient.interceptors.request.use(
+    config => {
+        const token = localStorage.getItem('jwt_token');
+        if (token) {
+            config.headers['Authorization'] = `Bearer ${token}`;
+        }
+        return config;
+    },
+    error => {
+        return Promise.reject(error);
+    }
+);
+
+export const AuthProvider = ({ children }: { ReactNode }) => {
     const [user, setUser] = useState<User | null>(null);
     const [token, setToken] = useState<string | null>(() => localStorage.getItem('jwt_token'));
     const [isLoading, setIsLoading] = useState<boolean>(true);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        if (token) {
-            apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-            // Fetch user profile if we have a token but no user object
-            if (!user) {
-                axios.get('/v1/user/profile')
-                    .then(response => {
-                        setUser(response.data.user);
-                    })
-                    .catch(() => {
-                        // Token is invalid, log out
-                        logout();
-                    })
-                    .finally(() => setIsLoading(false));
-            } else {
-                 setIsLoading(false);
-            }
+        // The interceptor now handles setting the Authorization header.
+        // We only need to fetch user profile if token exists and user is not set.
+        if (token && !user) {
+            apiClient.get('/v1/user/profile')
+                .then(response => {
+                    setUser(response.data.user);
+                })
+                .catch((err) => {
+                    console.error("Error fetching user profile:", err);
+                    setError("Failed to fetch user profile. Please log in again.");
+                    logout(); // Token might be invalid or expired
+                })
+                .finally(() => setIsLoading(false));
         } else {
             setIsLoading(false);
         }
-    }, [token]);
+    }, [token, user]); // Added user to dependencies to re-run if user becomes null for some reason
 
     const login = async (data: LoginRequest) => {
-        const response = await axios.post<LoginResponse>('/v1/users/login', data);
-        const { jwt_token, user } = response.data;
-        localStorage.setItem('jwt_token', jwt_token);
-        setToken(jwt_token);
-        setUser(user);
+        setError(null); // Clear previous errors
+        try {
+            const response = await apiClient.post<LoginResponse>('/v1/users/login', data);
+            const { jwt_token, user } = response.data;
+            localStorage.setItem('jwt_token', jwt_token);
+            setToken(jwt_token);
+            setUser(user);
+        } catch (err: any) {
+            console.error("Login failed:", err);
+            setError(err.response?.data?.message || "Login failed. Please check your credentials.");
+            throw err; // Re-throw to allow components to handle
+        }
     };
 
     const signup = async (data: RegisterUserRequest) => {
-        await axios.post<RegisterUserResponse>('/v1/users/register', data);
-        // After signup, automatically log in
-        await login({ email: data.email, password: data.password });
+        setError(null); // Clear previous errors
+        try {
+            await apiClient.post<RegisterUserResponse>('/v1/users/register', data);
+            // After signup, automatically log in
+            await login({ email: data.email, password: data.password });
+        } catch (err: any) {
+            console.error("Signup failed:", err);
+            setError(err.response?.data?.message || "Signup failed. Please try again.");
+            throw err; // Re-throw to allow components to handle
+        }
     };
 
     const logout = () => {
         localStorage.removeItem('jwt_token');
         setToken(null);
         setUser(null);
-        delete apiClient.defaults.headers.common['Authorization'];
+        setError(null); // Clear any errors on logout
     };
 
     return (
-        <AuthContext.Provider value={{ user, token, isLoading, login, signup, logout }}>
+        <AuthContext.Provider value={{ user, token, isLoading, error, login, signup, logout }}>
             {children}
         </AuthContext.Provider>
     );

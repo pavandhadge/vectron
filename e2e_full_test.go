@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
+	authpb "github.com/pavandhadge/vectron/auth/service/proto/auth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
