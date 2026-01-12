@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v3.19.6
-// source: shared/proto/auth/auth.proto
+// source: auth/auth.proto
 
 package auth
 
@@ -22,30 +22,133 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type User struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Email         string                 `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
-	CreatedAt     int64                  `protobuf:"varint,3,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+type Plan int32
+
+const (
+	Plan_PLAN_UNSPECIFIED Plan = 0
+	Plan_FREE             Plan = 1
+	Plan_PAID             Plan = 2
+)
+
+// Enum value maps for Plan.
+var (
+	Plan_name = map[int32]string{
+		0: "PLAN_UNSPECIFIED",
+		1: "FREE",
+		2: "PAID",
+	}
+	Plan_value = map[string]int32{
+		"PLAN_UNSPECIFIED": 0,
+		"FREE":             1,
+		"PAID":             2,
+	}
+)
+
+func (x Plan) Enum() *Plan {
+	p := new(Plan)
+	*p = x
+	return p
 }
 
-func (x *User) Reset() {
-	*x = User{}
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[0]
+func (x Plan) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Plan) Descriptor() protoreflect.EnumDescriptor {
+	return file_auth_auth_proto_enumTypes[0].Descriptor()
+}
+
+func (Plan) Type() protoreflect.EnumType {
+	return &file_auth_auth_proto_enumTypes[0]
+}
+
+func (x Plan) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Plan.Descriptor instead.
+func (Plan) EnumDescriptor() ([]byte, []int) {
+	return file_auth_auth_proto_rawDescGZIP(), []int{0}
+}
+
+type SubscriptionStatus int32
+
+const (
+	SubscriptionStatus_SUBSCRIPTION_STATUS_UNSPECIFIED SubscriptionStatus = 0
+	SubscriptionStatus_ACTIVE                          SubscriptionStatus = 1
+	SubscriptionStatus_CANCELED                        SubscriptionStatus = 2
+	SubscriptionStatus_PAST_DUE                        SubscriptionStatus = 3
+)
+
+// Enum value maps for SubscriptionStatus.
+var (
+	SubscriptionStatus_name = map[int32]string{
+		0: "SUBSCRIPTION_STATUS_UNSPECIFIED",
+		1: "ACTIVE",
+		2: "CANCELED",
+		3: "PAST_DUE",
+	}
+	SubscriptionStatus_value = map[string]int32{
+		"SUBSCRIPTION_STATUS_UNSPECIFIED": 0,
+		"ACTIVE":                          1,
+		"CANCELED":                        2,
+		"PAST_DUE":                        3,
+	}
+)
+
+func (x SubscriptionStatus) Enum() *SubscriptionStatus {
+	p := new(SubscriptionStatus)
+	*p = x
+	return p
+}
+
+func (x SubscriptionStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (SubscriptionStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_auth_auth_proto_enumTypes[1].Descriptor()
+}
+
+func (SubscriptionStatus) Type() protoreflect.EnumType {
+	return &file_auth_auth_proto_enumTypes[1]
+}
+
+func (x SubscriptionStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use SubscriptionStatus.Descriptor instead.
+func (SubscriptionStatus) EnumDescriptor() ([]byte, []int) {
+	return file_auth_auth_proto_rawDescGZIP(), []int{1}
+}
+
+type UserProfile struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Id                 string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Email              string                 `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
+	CreatedAt          int64                  `protobuf:"varint,3,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	Plan               Plan                   `protobuf:"varint,4,opt,name=plan,proto3,enum=vectron.auth.v1.Plan" json:"plan,omitempty"`
+	SubscriptionStatus SubscriptionStatus     `protobuf:"varint,5,opt,name=subscription_status,json=subscriptionStatus,proto3,enum=vectron.auth.v1.SubscriptionStatus" json:"subscription_status,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *UserProfile) Reset() {
+	*x = UserProfile{}
+	mi := &file_auth_auth_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *User) String() string {
+func (x *UserProfile) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*User) ProtoMessage() {}
+func (*UserProfile) ProtoMessage() {}
 
-func (x *User) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[0]
+func (x *UserProfile) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_auth_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -56,30 +159,44 @@ func (x *User) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use User.ProtoReflect.Descriptor instead.
-func (*User) Descriptor() ([]byte, []int) {
-	return file_shared_proto_auth_auth_proto_rawDescGZIP(), []int{0}
+// Deprecated: Use UserProfile.ProtoReflect.Descriptor instead.
+func (*UserProfile) Descriptor() ([]byte, []int) {
+	return file_auth_auth_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *User) GetId() string {
+func (x *UserProfile) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-func (x *User) GetEmail() string {
+func (x *UserProfile) GetEmail() string {
 	if x != nil {
 		return x.Email
 	}
 	return ""
 }
 
-func (x *User) GetCreatedAt() int64 {
+func (x *UserProfile) GetCreatedAt() int64 {
 	if x != nil {
 		return x.CreatedAt
 	}
 	return 0
+}
+
+func (x *UserProfile) GetPlan() Plan {
+	if x != nil {
+		return x.Plan
+	}
+	return Plan_PLAN_UNSPECIFIED
+}
+
+func (x *UserProfile) GetSubscriptionStatus() SubscriptionStatus {
+	if x != nil {
+		return x.SubscriptionStatus
+	}
+	return SubscriptionStatus_SUBSCRIPTION_STATUS_UNSPECIFIED
 }
 
 type APIKey struct {
@@ -94,7 +211,7 @@ type APIKey struct {
 
 func (x *APIKey) Reset() {
 	*x = APIKey{}
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[1]
+	mi := &file_auth_auth_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -106,7 +223,7 @@ func (x *APIKey) String() string {
 func (*APIKey) ProtoMessage() {}
 
 func (x *APIKey) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[1]
+	mi := &file_auth_auth_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -119,7 +236,7 @@ func (x *APIKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use APIKey.ProtoReflect.Descriptor instead.
 func (*APIKey) Descriptor() ([]byte, []int) {
-	return file_shared_proto_auth_auth_proto_rawDescGZIP(), []int{1}
+	return file_auth_auth_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *APIKey) GetKeyPrefix() string {
@@ -161,7 +278,7 @@ type RegisterUserRequest struct {
 
 func (x *RegisterUserRequest) Reset() {
 	*x = RegisterUserRequest{}
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[2]
+	mi := &file_auth_auth_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -173,7 +290,7 @@ func (x *RegisterUserRequest) String() string {
 func (*RegisterUserRequest) ProtoMessage() {}
 
 func (x *RegisterUserRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[2]
+	mi := &file_auth_auth_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -186,7 +303,7 @@ func (x *RegisterUserRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterUserRequest.ProtoReflect.Descriptor instead.
 func (*RegisterUserRequest) Descriptor() ([]byte, []int) {
-	return file_shared_proto_auth_auth_proto_rawDescGZIP(), []int{2}
+	return file_auth_auth_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *RegisterUserRequest) GetEmail() string {
@@ -205,14 +322,14 @@ func (x *RegisterUserRequest) GetPassword() string {
 
 type RegisterUserResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	User          *User                  `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	User          *UserProfile           `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RegisterUserResponse) Reset() {
 	*x = RegisterUserResponse{}
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[3]
+	mi := &file_auth_auth_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -224,7 +341,7 @@ func (x *RegisterUserResponse) String() string {
 func (*RegisterUserResponse) ProtoMessage() {}
 
 func (x *RegisterUserResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[3]
+	mi := &file_auth_auth_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -237,10 +354,10 @@ func (x *RegisterUserResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterUserResponse.ProtoReflect.Descriptor instead.
 func (*RegisterUserResponse) Descriptor() ([]byte, []int) {
-	return file_shared_proto_auth_auth_proto_rawDescGZIP(), []int{3}
+	return file_auth_auth_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *RegisterUserResponse) GetUser() *User {
+func (x *RegisterUserResponse) GetUser() *UserProfile {
 	if x != nil {
 		return x.User
 	}
@@ -258,7 +375,7 @@ type LoginRequest struct {
 
 func (x *LoginRequest) Reset() {
 	*x = LoginRequest{}
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[4]
+	mi := &file_auth_auth_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -270,7 +387,7 @@ func (x *LoginRequest) String() string {
 func (*LoginRequest) ProtoMessage() {}
 
 func (x *LoginRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[4]
+	mi := &file_auth_auth_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -283,7 +400,7 @@ func (x *LoginRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoginRequest.ProtoReflect.Descriptor instead.
 func (*LoginRequest) Descriptor() ([]byte, []int) {
-	return file_shared_proto_auth_auth_proto_rawDescGZIP(), []int{4}
+	return file_auth_auth_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *LoginRequest) GetEmail() string {
@@ -303,14 +420,14 @@ func (x *LoginRequest) GetPassword() string {
 type LoginResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	JwtToken      string                 `protobuf:"bytes,1,opt,name=jwt_token,json=jwtToken,proto3" json:"jwt_token,omitempty"`
-	User          *User                  `protobuf:"bytes,2,opt,name=user,proto3" json:"user,omitempty"`
+	User          *UserProfile           `protobuf:"bytes,2,opt,name=user,proto3" json:"user,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *LoginResponse) Reset() {
 	*x = LoginResponse{}
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[5]
+	mi := &file_auth_auth_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -322,7 +439,7 @@ func (x *LoginResponse) String() string {
 func (*LoginResponse) ProtoMessage() {}
 
 func (x *LoginResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[5]
+	mi := &file_auth_auth_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -335,7 +452,7 @@ func (x *LoginResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoginResponse.ProtoReflect.Descriptor instead.
 func (*LoginResponse) Descriptor() ([]byte, []int) {
-	return file_shared_proto_auth_auth_proto_rawDescGZIP(), []int{5}
+	return file_auth_auth_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *LoginResponse) GetJwtToken() string {
@@ -345,7 +462,7 @@ func (x *LoginResponse) GetJwtToken() string {
 	return ""
 }
 
-func (x *LoginResponse) GetUser() *User {
+func (x *LoginResponse) GetUser() *UserProfile {
 	if x != nil {
 		return x.User
 	}
@@ -361,7 +478,7 @@ type GetUserProfileRequest struct {
 
 func (x *GetUserProfileRequest) Reset() {
 	*x = GetUserProfileRequest{}
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[6]
+	mi := &file_auth_auth_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -373,7 +490,7 @@ func (x *GetUserProfileRequest) String() string {
 func (*GetUserProfileRequest) ProtoMessage() {}
 
 func (x *GetUserProfileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[6]
+	mi := &file_auth_auth_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -386,19 +503,19 @@ func (x *GetUserProfileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetUserProfileRequest.ProtoReflect.Descriptor instead.
 func (*GetUserProfileRequest) Descriptor() ([]byte, []int) {
-	return file_shared_proto_auth_auth_proto_rawDescGZIP(), []int{6}
+	return file_auth_auth_proto_rawDescGZIP(), []int{6}
 }
 
 type GetUserProfileResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	User          *User                  `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	User          *UserProfile           `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetUserProfileResponse) Reset() {
 	*x = GetUserProfileResponse{}
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[7]
+	mi := &file_auth_auth_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -410,7 +527,7 @@ func (x *GetUserProfileResponse) String() string {
 func (*GetUserProfileResponse) ProtoMessage() {}
 
 func (x *GetUserProfileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[7]
+	mi := &file_auth_auth_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -423,14 +540,110 @@ func (x *GetUserProfileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetUserProfileResponse.ProtoReflect.Descriptor instead.
 func (*GetUserProfileResponse) Descriptor() ([]byte, []int) {
-	return file_shared_proto_auth_auth_proto_rawDescGZIP(), []int{7}
+	return file_auth_auth_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *GetUserProfileResponse) GetUser() *User {
+func (x *GetUserProfileResponse) GetUser() *UserProfile {
 	if x != nil {
 		return x.User
 	}
 	return nil
+}
+
+type UpdateUserProfileRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Plan          Plan                   `protobuf:"varint,1,opt,name=plan,proto3,enum=vectron.auth.v1.Plan" json:"plan,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateUserProfileRequest) Reset() {
+	*x = UpdateUserProfileRequest{}
+	mi := &file_auth_auth_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateUserProfileRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateUserProfileRequest) ProtoMessage() {}
+
+func (x *UpdateUserProfileRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_auth_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateUserProfileRequest.ProtoReflect.Descriptor instead.
+func (*UpdateUserProfileRequest) Descriptor() ([]byte, []int) {
+	return file_auth_auth_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *UpdateUserProfileRequest) GetPlan() Plan {
+	if x != nil {
+		return x.Plan
+	}
+	return Plan_PLAN_UNSPECIFIED
+}
+
+type UpdateUserProfileResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	User          *UserProfile           `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	JwtToken      string                 `protobuf:"bytes,2,opt,name=jwt_token,json=jwtToken,proto3" json:"jwt_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateUserProfileResponse) Reset() {
+	*x = UpdateUserProfileResponse{}
+	mi := &file_auth_auth_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateUserProfileResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateUserProfileResponse) ProtoMessage() {}
+
+func (x *UpdateUserProfileResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_auth_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateUserProfileResponse.ProtoReflect.Descriptor instead.
+func (*UpdateUserProfileResponse) Descriptor() ([]byte, []int) {
+	return file_auth_auth_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *UpdateUserProfileResponse) GetUser() *UserProfile {
+	if x != nil {
+		return x.User
+	}
+	return nil
+}
+
+func (x *UpdateUserProfileResponse) GetJwtToken() string {
+	if x != nil {
+		return x.JwtToken
+	}
+	return ""
 }
 
 // --- API Key Management ---
@@ -444,7 +657,7 @@ type CreateAPIKeyRequest struct {
 
 func (x *CreateAPIKeyRequest) Reset() {
 	*x = CreateAPIKeyRequest{}
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[8]
+	mi := &file_auth_auth_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -456,7 +669,7 @@ func (x *CreateAPIKeyRequest) String() string {
 func (*CreateAPIKeyRequest) ProtoMessage() {}
 
 func (x *CreateAPIKeyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[8]
+	mi := &file_auth_auth_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -469,7 +682,7 @@ func (x *CreateAPIKeyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateAPIKeyRequest.ProtoReflect.Descriptor instead.
 func (*CreateAPIKeyRequest) Descriptor() ([]byte, []int) {
-	return file_shared_proto_auth_auth_proto_rawDescGZIP(), []int{8}
+	return file_auth_auth_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *CreateAPIKeyRequest) GetName() string {
@@ -489,7 +702,7 @@ type CreateAPIKeyResponse struct {
 
 func (x *CreateAPIKeyResponse) Reset() {
 	*x = CreateAPIKeyResponse{}
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[9]
+	mi := &file_auth_auth_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -501,7 +714,7 @@ func (x *CreateAPIKeyResponse) String() string {
 func (*CreateAPIKeyResponse) ProtoMessage() {}
 
 func (x *CreateAPIKeyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[9]
+	mi := &file_auth_auth_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -514,7 +727,7 @@ func (x *CreateAPIKeyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateAPIKeyResponse.ProtoReflect.Descriptor instead.
 func (*CreateAPIKeyResponse) Descriptor() ([]byte, []int) {
-	return file_shared_proto_auth_auth_proto_rawDescGZIP(), []int{9}
+	return file_auth_auth_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *CreateAPIKeyResponse) GetFullKey() string {
@@ -539,7 +752,7 @@ type ListAPIKeysRequest struct {
 
 func (x *ListAPIKeysRequest) Reset() {
 	*x = ListAPIKeysRequest{}
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[10]
+	mi := &file_auth_auth_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -551,7 +764,7 @@ func (x *ListAPIKeysRequest) String() string {
 func (*ListAPIKeysRequest) ProtoMessage() {}
 
 func (x *ListAPIKeysRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[10]
+	mi := &file_auth_auth_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -564,7 +777,7 @@ func (x *ListAPIKeysRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAPIKeysRequest.ProtoReflect.Descriptor instead.
 func (*ListAPIKeysRequest) Descriptor() ([]byte, []int) {
-	return file_shared_proto_auth_auth_proto_rawDescGZIP(), []int{10}
+	return file_auth_auth_proto_rawDescGZIP(), []int{12}
 }
 
 type ListAPIKeysResponse struct {
@@ -576,7 +789,7 @@ type ListAPIKeysResponse struct {
 
 func (x *ListAPIKeysResponse) Reset() {
 	*x = ListAPIKeysResponse{}
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[11]
+	mi := &file_auth_auth_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -588,7 +801,7 @@ func (x *ListAPIKeysResponse) String() string {
 func (*ListAPIKeysResponse) ProtoMessage() {}
 
 func (x *ListAPIKeysResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[11]
+	mi := &file_auth_auth_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -601,7 +814,7 @@ func (x *ListAPIKeysResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAPIKeysResponse.ProtoReflect.Descriptor instead.
 func (*ListAPIKeysResponse) Descriptor() ([]byte, []int) {
-	return file_shared_proto_auth_auth_proto_rawDescGZIP(), []int{11}
+	return file_auth_auth_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ListAPIKeysResponse) GetKeys() []*APIKey {
@@ -621,7 +834,7 @@ type DeleteAPIKeyRequest struct {
 
 func (x *DeleteAPIKeyRequest) Reset() {
 	*x = DeleteAPIKeyRequest{}
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[12]
+	mi := &file_auth_auth_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -633,7 +846,7 @@ func (x *DeleteAPIKeyRequest) String() string {
 func (*DeleteAPIKeyRequest) ProtoMessage() {}
 
 func (x *DeleteAPIKeyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[12]
+	mi := &file_auth_auth_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -646,7 +859,7 @@ func (x *DeleteAPIKeyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteAPIKeyRequest.ProtoReflect.Descriptor instead.
 func (*DeleteAPIKeyRequest) Descriptor() ([]byte, []int) {
-	return file_shared_proto_auth_auth_proto_rawDescGZIP(), []int{12}
+	return file_auth_auth_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DeleteAPIKeyRequest) GetKeyPrefix() string {
@@ -665,7 +878,7 @@ type DeleteAPIKeyResponse struct {
 
 func (x *DeleteAPIKeyResponse) Reset() {
 	*x = DeleteAPIKeyResponse{}
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[13]
+	mi := &file_auth_auth_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -677,7 +890,7 @@ func (x *DeleteAPIKeyResponse) String() string {
 func (*DeleteAPIKeyResponse) ProtoMessage() {}
 
 func (x *DeleteAPIKeyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[13]
+	mi := &file_auth_auth_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -690,7 +903,7 @@ func (x *DeleteAPIKeyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteAPIKeyResponse.ProtoReflect.Descriptor instead.
 func (*DeleteAPIKeyResponse) Descriptor() ([]byte, []int) {
-	return file_shared_proto_auth_auth_proto_rawDescGZIP(), []int{13}
+	return file_auth_auth_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *DeleteAPIKeyResponse) GetSuccess() bool {
@@ -710,7 +923,7 @@ type ValidateAPIKeyRequest struct {
 
 func (x *ValidateAPIKeyRequest) Reset() {
 	*x = ValidateAPIKeyRequest{}
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[14]
+	mi := &file_auth_auth_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -722,7 +935,7 @@ func (x *ValidateAPIKeyRequest) String() string {
 func (*ValidateAPIKeyRequest) ProtoMessage() {}
 
 func (x *ValidateAPIKeyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[14]
+	mi := &file_auth_auth_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -735,7 +948,7 @@ func (x *ValidateAPIKeyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidateAPIKeyRequest.ProtoReflect.Descriptor instead.
 func (*ValidateAPIKeyRequest) Descriptor() ([]byte, []int) {
-	return file_shared_proto_auth_auth_proto_rawDescGZIP(), []int{14}
+	return file_auth_auth_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ValidateAPIKeyRequest) GetFullKey() string {
@@ -757,7 +970,7 @@ type ValidateAPIKeyResponse struct {
 
 func (x *ValidateAPIKeyResponse) Reset() {
 	*x = ValidateAPIKeyResponse{}
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[15]
+	mi := &file_auth_auth_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -769,7 +982,7 @@ func (x *ValidateAPIKeyResponse) String() string {
 func (*ValidateAPIKeyResponse) ProtoMessage() {}
 
 func (x *ValidateAPIKeyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_auth_auth_proto_msgTypes[15]
+	mi := &file_auth_auth_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -782,7 +995,7 @@ func (x *ValidateAPIKeyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidateAPIKeyResponse.ProtoReflect.Descriptor instead.
 func (*ValidateAPIKeyResponse) Descriptor() ([]byte, []int) {
-	return file_shared_proto_auth_auth_proto_rawDescGZIP(), []int{15}
+	return file_auth_auth_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ValidateAPIKeyResponse) GetValid() bool {
@@ -813,16 +1026,210 @@ func (x *ValidateAPIKeyResponse) GetApiKeyId() string {
 	return ""
 }
 
-var File_shared_proto_auth_auth_proto protoreflect.FileDescriptor
+type CreateSDKJWTRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ApiKeyId      string                 `protobuf:"bytes,1,opt,name=api_key_id,json=apiKeyId,proto3" json:"api_key_id,omitempty"` // The KeyPrefix of the API key to wrap
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
 
-const file_shared_proto_auth_auth_proto_rawDesc = "" +
+func (x *CreateSDKJWTRequest) Reset() {
+	*x = CreateSDKJWTRequest{}
+	mi := &file_auth_auth_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateSDKJWTRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateSDKJWTRequest) ProtoMessage() {}
+
+func (x *CreateSDKJWTRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_auth_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateSDKJWTRequest.ProtoReflect.Descriptor instead.
+func (*CreateSDKJWTRequest) Descriptor() ([]byte, []int) {
+	return file_auth_auth_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *CreateSDKJWTRequest) GetApiKeyId() string {
+	if x != nil {
+		return x.ApiKeyId
+	}
+	return ""
+}
+
+type CreateSDKJWTResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SdkJwt        string                 `protobuf:"bytes,1,opt,name=sdk_jwt,json=sdkJwt,proto3" json:"sdk_jwt,omitempty"` // The JWT containing the API key
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateSDKJWTResponse) Reset() {
+	*x = CreateSDKJWTResponse{}
+	mi := &file_auth_auth_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateSDKJWTResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateSDKJWTResponse) ProtoMessage() {}
+
+func (x *CreateSDKJWTResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_auth_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateSDKJWTResponse.ProtoReflect.Descriptor instead.
+func (*CreateSDKJWTResponse) Descriptor() ([]byte, []int) {
+	return file_auth_auth_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *CreateSDKJWTResponse) GetSdkJwt() string {
+	if x != nil {
+		return x.SdkJwt
+	}
+	return ""
+}
+
+type GetAuthDetailsForSDKRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ApiKeyId      string                 `protobuf:"bytes,1,opt,name=api_key_id,json=apiKeyId,proto3" json:"api_key_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAuthDetailsForSDKRequest) Reset() {
+	*x = GetAuthDetailsForSDKRequest{}
+	mi := &file_auth_auth_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAuthDetailsForSDKRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAuthDetailsForSDKRequest) ProtoMessage() {}
+
+func (x *GetAuthDetailsForSDKRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_auth_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAuthDetailsForSDKRequest.ProtoReflect.Descriptor instead.
+func (*GetAuthDetailsForSDKRequest) Descriptor() ([]byte, []int) {
+	return file_auth_auth_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *GetAuthDetailsForSDKRequest) GetApiKeyId() string {
+	if x != nil {
+		return x.ApiKeyId
+	}
+	return ""
+}
+
+type GetAuthDetailsForSDKResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Plan          Plan                   `protobuf:"varint,2,opt,name=plan,proto3,enum=vectron.auth.v1.Plan" json:"plan,omitempty"`
+	Success       bool                   `protobuf:"varint,3,opt,name=success,proto3" json:"success,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAuthDetailsForSDKResponse) Reset() {
+	*x = GetAuthDetailsForSDKResponse{}
+	mi := &file_auth_auth_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAuthDetailsForSDKResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAuthDetailsForSDKResponse) ProtoMessage() {}
+
+func (x *GetAuthDetailsForSDKResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_auth_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAuthDetailsForSDKResponse.ProtoReflect.Descriptor instead.
+func (*GetAuthDetailsForSDKResponse) Descriptor() ([]byte, []int) {
+	return file_auth_auth_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *GetAuthDetailsForSDKResponse) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *GetAuthDetailsForSDKResponse) GetPlan() Plan {
+	if x != nil {
+		return x.Plan
+	}
+	return Plan_PLAN_UNSPECIFIED
+}
+
+func (x *GetAuthDetailsForSDKResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+var File_auth_auth_proto protoreflect.FileDescriptor
+
+const file_auth_auth_proto_rawDesc = "" +
 	"\n" +
-	"\x1cshared/proto/auth/auth.proto\x12\x0fvectron.auth.v1\x1a\x1cgoogle/api/annotations.proto\"K\n" +
-	"\x04User\x12\x0e\n" +
+	"\x0fauth/auth.proto\x12\x0fvectron.auth.v1\x1a\x1cgoogle/api/annotations.proto\"\xd3\x01\n" +
+	"\vUserProfile\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12\x1d\n" +
 	"\n" +
-	"created_at\x18\x03 \x01(\x03R\tcreatedAt\"s\n" +
+	"created_at\x18\x03 \x01(\x03R\tcreatedAt\x12)\n" +
+	"\x04plan\x18\x04 \x01(\x0e2\x15.vectron.auth.v1.PlanR\x04plan\x12T\n" +
+	"\x13subscription_status\x18\x05 \x01(\x0e2#.vectron.auth.v1.SubscriptionStatusR\x12subscriptionStatus\"s\n" +
 	"\x06APIKey\x12\x1d\n" +
 	"\n" +
 	"key_prefix\x18\x01 \x01(\tR\tkeyPrefix\x12\x17\n" +
@@ -832,18 +1239,23 @@ const file_shared_proto_auth_auth_proto_rawDesc = "" +
 	"\x04name\x18\x04 \x01(\tR\x04name\"G\n" +
 	"\x13RegisterUserRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x1a\n" +
-	"\bpassword\x18\x02 \x01(\tR\bpassword\"A\n" +
-	"\x14RegisterUserResponse\x12)\n" +
-	"\x04user\x18\x01 \x01(\v2\x15.vectron.auth.v1.UserR\x04user\"@\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpassword\"H\n" +
+	"\x14RegisterUserResponse\x120\n" +
+	"\x04user\x18\x01 \x01(\v2\x1c.vectron.auth.v1.UserProfileR\x04user\"@\n" +
 	"\fLoginRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x1a\n" +
-	"\bpassword\x18\x02 \x01(\tR\bpassword\"W\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpassword\"^\n" +
 	"\rLoginResponse\x12\x1b\n" +
-	"\tjwt_token\x18\x01 \x01(\tR\bjwtToken\x12)\n" +
-	"\x04user\x18\x02 \x01(\v2\x15.vectron.auth.v1.UserR\x04user\"\x17\n" +
-	"\x15GetUserProfileRequest\"C\n" +
-	"\x16GetUserProfileResponse\x12)\n" +
-	"\x04user\x18\x01 \x01(\v2\x15.vectron.auth.v1.UserR\x04user\")\n" +
+	"\tjwt_token\x18\x01 \x01(\tR\bjwtToken\x120\n" +
+	"\x04user\x18\x02 \x01(\v2\x1c.vectron.auth.v1.UserProfileR\x04user\"\x17\n" +
+	"\x15GetUserProfileRequest\"J\n" +
+	"\x16GetUserProfileResponse\x120\n" +
+	"\x04user\x18\x01 \x01(\v2\x1c.vectron.auth.v1.UserProfileR\x04user\"E\n" +
+	"\x18UpdateUserProfileRequest\x12)\n" +
+	"\x04plan\x18\x01 \x01(\x0e2\x15.vectron.auth.v1.PlanR\x04plan\"j\n" +
+	"\x19UpdateUserProfileResponse\x120\n" +
+	"\x04user\x18\x01 \x01(\v2\x1c.vectron.auth.v1.UserProfileR\x04user\x12\x1b\n" +
+	"\tjwt_token\x18\x02 \x01(\tR\bjwtToken\")\n" +
 	"\x13CreateAPIKeyRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"e\n" +
 	"\x14CreateAPIKeyResponse\x12\x19\n" +
@@ -864,95 +1276,141 @@ const file_shared_proto_auth_auth_proto_rawDesc = "" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x12\n" +
 	"\x04plan\x18\x03 \x01(\tR\x04plan\x12\x1c\n" +
 	"\n" +
-	"api_key_id\x18\x04 \x01(\tR\bapiKeyId2\xc5\x06\n" +
+	"api_key_id\x18\x04 \x01(\tR\bapiKeyId\"3\n" +
+	"\x13CreateSDKJWTRequest\x12\x1c\n" +
+	"\n" +
+	"api_key_id\x18\x01 \x01(\tR\bapiKeyId\"/\n" +
+	"\x14CreateSDKJWTResponse\x12\x17\n" +
+	"\asdk_jwt\x18\x01 \x01(\tR\x06sdkJwt\";\n" +
+	"\x1bGetAuthDetailsForSDKRequest\x12\x1c\n" +
+	"\n" +
+	"api_key_id\x18\x01 \x01(\tR\bapiKeyId\"|\n" +
+	"\x1cGetAuthDetailsForSDKResponse\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12)\n" +
+	"\x04plan\x18\x02 \x01(\x0e2\x15.vectron.auth.v1.PlanR\x04plan\x12\x18\n" +
+	"\asuccess\x18\x03 \x01(\bR\asuccess*0\n" +
+	"\x04Plan\x12\x14\n" +
+	"\x10PLAN_UNSPECIFIED\x10\x00\x12\b\n" +
+	"\x04FREE\x10\x01\x12\b\n" +
+	"\x04PAID\x10\x02*a\n" +
+	"\x12SubscriptionStatus\x12#\n" +
+	"\x1fSUBSCRIPTION_STATUS_UNSPECIFIED\x10\x00\x12\n" +
+	"\n" +
+	"\x06ACTIVE\x10\x01\x12\f\n" +
+	"\bCANCELED\x10\x02\x12\f\n" +
+	"\bPAST_DUE\x10\x032\xbb\t\n" +
 	"\vAuthService\x12z\n" +
 	"\fRegisterUser\x12$.vectron.auth.v1.RegisterUserRequest\x1a%.vectron.auth.v1.RegisterUserResponse\"\x1d\x82\xd3\xe4\x93\x02\x17:\x01*\"\x12/v1/users/register\x12b\n" +
 	"\x05Login\x12\x1d.vectron.auth.v1.LoginRequest\x1a\x1e.vectron.auth.v1.LoginResponse\"\x1a\x82\xd3\xe4\x93\x02\x14:\x01*\"\x0f/v1/users/login\x12{\n" +
-	"\x0eGetUserProfile\x12&.vectron.auth.v1.GetUserProfileRequest\x1a'.vectron.auth.v1.GetUserProfileResponse\"\x18\x82\xd3\xe4\x93\x02\x12\x12\x10/v1/user/profile\x12p\n" +
+	"\x0eGetUserProfile\x12&.vectron.auth.v1.GetUserProfileRequest\x1a'.vectron.auth.v1.GetUserProfileResponse\"\x18\x82\xd3\xe4\x93\x02\x12\x12\x10/v1/user/profile\x12\x87\x01\n" +
+	"\x11UpdateUserProfile\x12).vectron.auth.v1.UpdateUserProfileRequest\x1a*.vectron.auth.v1.UpdateUserProfileResponse\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\x1a\x10/v1/user/profile\x12p\n" +
 	"\fCreateAPIKey\x12$.vectron.auth.v1.CreateAPIKeyRequest\x1a%.vectron.auth.v1.CreateAPIKeyResponse\"\x13\x82\xd3\xe4\x93\x02\r:\x01*\"\b/v1/keys\x12j\n" +
 	"\vListAPIKeys\x12#.vectron.auth.v1.ListAPIKeysRequest\x1a$.vectron.auth.v1.ListAPIKeysResponse\"\x10\x82\xd3\xe4\x93\x02\n" +
 	"\x12\b/v1/keys\x12z\n" +
 	"\fDeleteAPIKey\x12$.vectron.auth.v1.DeleteAPIKeyRequest\x1a%.vectron.auth.v1.DeleteAPIKeyResponse\"\x1d\x82\xd3\xe4\x93\x02\x17*\x15/v1/keys/{key_prefix}\x12\x7f\n" +
-	"\x0eValidateAPIKey\x12&.vectron.auth.v1.ValidateAPIKeyRequest\x1a'.vectron.auth.v1.ValidateAPIKeyResponse\"\x1c\x82\xd3\xe4\x93\x02\x16:\x01*\"\x11/v1/keys/validateB2Z0github.com/pavandhadge/vectron/shared/proto/authb\x06proto3"
+	"\x0eValidateAPIKey\x12&.vectron.auth.v1.ValidateAPIKeyRequest\x1a'.vectron.auth.v1.ValidateAPIKeyResponse\"\x1c\x82\xd3\xe4\x93\x02\x16:\x01*\"\x11/v1/keys/validate\x12s\n" +
+	"\fCreateSDKJWT\x12$.vectron.auth.v1.CreateSDKJWTRequest\x1a%.vectron.auth.v1.CreateSDKJWTResponse\"\x16\x82\xd3\xe4\x93\x02\x10:\x01*\"\v/v1/sdk-jwt\x12u\n" +
+	"\x14GetAuthDetailsForSDK\x12,.vectron.auth.v1.GetAuthDetailsForSDKRequest\x1a-.vectron.auth.v1.GetAuthDetailsForSDKResponse\"\x00B2Z0github.com/pavandhadge/vectron/shared/proto/authb\x06proto3"
 
 var (
-	file_shared_proto_auth_auth_proto_rawDescOnce sync.Once
-	file_shared_proto_auth_auth_proto_rawDescData []byte
+	file_auth_auth_proto_rawDescOnce sync.Once
+	file_auth_auth_proto_rawDescData []byte
 )
 
-func file_shared_proto_auth_auth_proto_rawDescGZIP() []byte {
-	file_shared_proto_auth_auth_proto_rawDescOnce.Do(func() {
-		file_shared_proto_auth_auth_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_shared_proto_auth_auth_proto_rawDesc), len(file_shared_proto_auth_auth_proto_rawDesc)))
+func file_auth_auth_proto_rawDescGZIP() []byte {
+	file_auth_auth_proto_rawDescOnce.Do(func() {
+		file_auth_auth_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_auth_auth_proto_rawDesc), len(file_auth_auth_proto_rawDesc)))
 	})
-	return file_shared_proto_auth_auth_proto_rawDescData
+	return file_auth_auth_proto_rawDescData
 }
 
-var file_shared_proto_auth_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
-var file_shared_proto_auth_auth_proto_goTypes = []any{
-	(*User)(nil),                   // 0: vectron.auth.v1.User
-	(*APIKey)(nil),                 // 1: vectron.auth.v1.APIKey
-	(*RegisterUserRequest)(nil),    // 2: vectron.auth.v1.RegisterUserRequest
-	(*RegisterUserResponse)(nil),   // 3: vectron.auth.v1.RegisterUserResponse
-	(*LoginRequest)(nil),           // 4: vectron.auth.v1.LoginRequest
-	(*LoginResponse)(nil),          // 5: vectron.auth.v1.LoginResponse
-	(*GetUserProfileRequest)(nil),  // 6: vectron.auth.v1.GetUserProfileRequest
-	(*GetUserProfileResponse)(nil), // 7: vectron.auth.v1.GetUserProfileResponse
-	(*CreateAPIKeyRequest)(nil),    // 8: vectron.auth.v1.CreateAPIKeyRequest
-	(*CreateAPIKeyResponse)(nil),   // 9: vectron.auth.v1.CreateAPIKeyResponse
-	(*ListAPIKeysRequest)(nil),     // 10: vectron.auth.v1.ListAPIKeysRequest
-	(*ListAPIKeysResponse)(nil),    // 11: vectron.auth.v1.ListAPIKeysResponse
-	(*DeleteAPIKeyRequest)(nil),    // 12: vectron.auth.v1.DeleteAPIKeyRequest
-	(*DeleteAPIKeyResponse)(nil),   // 13: vectron.auth.v1.DeleteAPIKeyResponse
-	(*ValidateAPIKeyRequest)(nil),  // 14: vectron.auth.v1.ValidateAPIKeyRequest
-	(*ValidateAPIKeyResponse)(nil), // 15: vectron.auth.v1.ValidateAPIKeyResponse
+var file_auth_auth_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_auth_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_auth_auth_proto_goTypes = []any{
+	(Plan)(0),                            // 0: vectron.auth.v1.Plan
+	(SubscriptionStatus)(0),              // 1: vectron.auth.v1.SubscriptionStatus
+	(*UserProfile)(nil),                  // 2: vectron.auth.v1.UserProfile
+	(*APIKey)(nil),                       // 3: vectron.auth.v1.APIKey
+	(*RegisterUserRequest)(nil),          // 4: vectron.auth.v1.RegisterUserRequest
+	(*RegisterUserResponse)(nil),         // 5: vectron.auth.v1.RegisterUserResponse
+	(*LoginRequest)(nil),                 // 6: vectron.auth.v1.LoginRequest
+	(*LoginResponse)(nil),                // 7: vectron.auth.v1.LoginResponse
+	(*GetUserProfileRequest)(nil),        // 8: vectron.auth.v1.GetUserProfileRequest
+	(*GetUserProfileResponse)(nil),       // 9: vectron.auth.v1.GetUserProfileResponse
+	(*UpdateUserProfileRequest)(nil),     // 10: vectron.auth.v1.UpdateUserProfileRequest
+	(*UpdateUserProfileResponse)(nil),    // 11: vectron.auth.v1.UpdateUserProfileResponse
+	(*CreateAPIKeyRequest)(nil),          // 12: vectron.auth.v1.CreateAPIKeyRequest
+	(*CreateAPIKeyResponse)(nil),         // 13: vectron.auth.v1.CreateAPIKeyResponse
+	(*ListAPIKeysRequest)(nil),           // 14: vectron.auth.v1.ListAPIKeysRequest
+	(*ListAPIKeysResponse)(nil),          // 15: vectron.auth.v1.ListAPIKeysResponse
+	(*DeleteAPIKeyRequest)(nil),          // 16: vectron.auth.v1.DeleteAPIKeyRequest
+	(*DeleteAPIKeyResponse)(nil),         // 17: vectron.auth.v1.DeleteAPIKeyResponse
+	(*ValidateAPIKeyRequest)(nil),        // 18: vectron.auth.v1.ValidateAPIKeyRequest
+	(*ValidateAPIKeyResponse)(nil),       // 19: vectron.auth.v1.ValidateAPIKeyResponse
+	(*CreateSDKJWTRequest)(nil),          // 20: vectron.auth.v1.CreateSDKJWTRequest
+	(*CreateSDKJWTResponse)(nil),         // 21: vectron.auth.v1.CreateSDKJWTResponse
+	(*GetAuthDetailsForSDKRequest)(nil),  // 22: vectron.auth.v1.GetAuthDetailsForSDKRequest
+	(*GetAuthDetailsForSDKResponse)(nil), // 23: vectron.auth.v1.GetAuthDetailsForSDKResponse
 }
-var file_shared_proto_auth_auth_proto_depIdxs = []int32{
-	0,  // 0: vectron.auth.v1.RegisterUserResponse.user:type_name -> vectron.auth.v1.User
-	0,  // 1: vectron.auth.v1.LoginResponse.user:type_name -> vectron.auth.v1.User
-	0,  // 2: vectron.auth.v1.GetUserProfileResponse.user:type_name -> vectron.auth.v1.User
-	1,  // 3: vectron.auth.v1.CreateAPIKeyResponse.key_info:type_name -> vectron.auth.v1.APIKey
-	1,  // 4: vectron.auth.v1.ListAPIKeysResponse.keys:type_name -> vectron.auth.v1.APIKey
-	2,  // 5: vectron.auth.v1.AuthService.RegisterUser:input_type -> vectron.auth.v1.RegisterUserRequest
-	4,  // 6: vectron.auth.v1.AuthService.Login:input_type -> vectron.auth.v1.LoginRequest
-	6,  // 7: vectron.auth.v1.AuthService.GetUserProfile:input_type -> vectron.auth.v1.GetUserProfileRequest
-	8,  // 8: vectron.auth.v1.AuthService.CreateAPIKey:input_type -> vectron.auth.v1.CreateAPIKeyRequest
-	10, // 9: vectron.auth.v1.AuthService.ListAPIKeys:input_type -> vectron.auth.v1.ListAPIKeysRequest
-	12, // 10: vectron.auth.v1.AuthService.DeleteAPIKey:input_type -> vectron.auth.v1.DeleteAPIKeyRequest
-	14, // 11: vectron.auth.v1.AuthService.ValidateAPIKey:input_type -> vectron.auth.v1.ValidateAPIKeyRequest
-	3,  // 12: vectron.auth.v1.AuthService.RegisterUser:output_type -> vectron.auth.v1.RegisterUserResponse
-	5,  // 13: vectron.auth.v1.AuthService.Login:output_type -> vectron.auth.v1.LoginResponse
-	7,  // 14: vectron.auth.v1.AuthService.GetUserProfile:output_type -> vectron.auth.v1.GetUserProfileResponse
-	9,  // 15: vectron.auth.v1.AuthService.CreateAPIKey:output_type -> vectron.auth.v1.CreateAPIKeyResponse
-	11, // 16: vectron.auth.v1.AuthService.ListAPIKeys:output_type -> vectron.auth.v1.ListAPIKeysResponse
-	13, // 17: vectron.auth.v1.AuthService.DeleteAPIKey:output_type -> vectron.auth.v1.DeleteAPIKeyResponse
-	15, // 18: vectron.auth.v1.AuthService.ValidateAPIKey:output_type -> vectron.auth.v1.ValidateAPIKeyResponse
-	12, // [12:19] is the sub-list for method output_type
-	5,  // [5:12] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+var file_auth_auth_proto_depIdxs = []int32{
+	0,  // 0: vectron.auth.v1.UserProfile.plan:type_name -> vectron.auth.v1.Plan
+	1,  // 1: vectron.auth.v1.UserProfile.subscription_status:type_name -> vectron.auth.v1.SubscriptionStatus
+	2,  // 2: vectron.auth.v1.RegisterUserResponse.user:type_name -> vectron.auth.v1.UserProfile
+	2,  // 3: vectron.auth.v1.LoginResponse.user:type_name -> vectron.auth.v1.UserProfile
+	2,  // 4: vectron.auth.v1.GetUserProfileResponse.user:type_name -> vectron.auth.v1.UserProfile
+	0,  // 5: vectron.auth.v1.UpdateUserProfileRequest.plan:type_name -> vectron.auth.v1.Plan
+	2,  // 6: vectron.auth.v1.UpdateUserProfileResponse.user:type_name -> vectron.auth.v1.UserProfile
+	3,  // 7: vectron.auth.v1.CreateAPIKeyResponse.key_info:type_name -> vectron.auth.v1.APIKey
+	3,  // 8: vectron.auth.v1.ListAPIKeysResponse.keys:type_name -> vectron.auth.v1.APIKey
+	0,  // 9: vectron.auth.v1.GetAuthDetailsForSDKResponse.plan:type_name -> vectron.auth.v1.Plan
+	4,  // 10: vectron.auth.v1.AuthService.RegisterUser:input_type -> vectron.auth.v1.RegisterUserRequest
+	6,  // 11: vectron.auth.v1.AuthService.Login:input_type -> vectron.auth.v1.LoginRequest
+	8,  // 12: vectron.auth.v1.AuthService.GetUserProfile:input_type -> vectron.auth.v1.GetUserProfileRequest
+	10, // 13: vectron.auth.v1.AuthService.UpdateUserProfile:input_type -> vectron.auth.v1.UpdateUserProfileRequest
+	12, // 14: vectron.auth.v1.AuthService.CreateAPIKey:input_type -> vectron.auth.v1.CreateAPIKeyRequest
+	14, // 15: vectron.auth.v1.AuthService.ListAPIKeys:input_type -> vectron.auth.v1.ListAPIKeysRequest
+	16, // 16: vectron.auth.v1.AuthService.DeleteAPIKey:input_type -> vectron.auth.v1.DeleteAPIKeyRequest
+	18, // 17: vectron.auth.v1.AuthService.ValidateAPIKey:input_type -> vectron.auth.v1.ValidateAPIKeyRequest
+	20, // 18: vectron.auth.v1.AuthService.CreateSDKJWT:input_type -> vectron.auth.v1.CreateSDKJWTRequest
+	22, // 19: vectron.auth.v1.AuthService.GetAuthDetailsForSDK:input_type -> vectron.auth.v1.GetAuthDetailsForSDKRequest
+	5,  // 20: vectron.auth.v1.AuthService.RegisterUser:output_type -> vectron.auth.v1.RegisterUserResponse
+	7,  // 21: vectron.auth.v1.AuthService.Login:output_type -> vectron.auth.v1.LoginResponse
+	9,  // 22: vectron.auth.v1.AuthService.GetUserProfile:output_type -> vectron.auth.v1.GetUserProfileResponse
+	11, // 23: vectron.auth.v1.AuthService.UpdateUserProfile:output_type -> vectron.auth.v1.UpdateUserProfileResponse
+	13, // 24: vectron.auth.v1.AuthService.CreateAPIKey:output_type -> vectron.auth.v1.CreateAPIKeyResponse
+	15, // 25: vectron.auth.v1.AuthService.ListAPIKeys:output_type -> vectron.auth.v1.ListAPIKeysResponse
+	17, // 26: vectron.auth.v1.AuthService.DeleteAPIKey:output_type -> vectron.auth.v1.DeleteAPIKeyResponse
+	19, // 27: vectron.auth.v1.AuthService.ValidateAPIKey:output_type -> vectron.auth.v1.ValidateAPIKeyResponse
+	21, // 28: vectron.auth.v1.AuthService.CreateSDKJWT:output_type -> vectron.auth.v1.CreateSDKJWTResponse
+	23, // 29: vectron.auth.v1.AuthService.GetAuthDetailsForSDK:output_type -> vectron.auth.v1.GetAuthDetailsForSDKResponse
+	20, // [20:30] is the sub-list for method output_type
+	10, // [10:20] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
-func init() { file_shared_proto_auth_auth_proto_init() }
-func file_shared_proto_auth_auth_proto_init() {
-	if File_shared_proto_auth_auth_proto != nil {
+func init() { file_auth_auth_proto_init() }
+func file_auth_auth_proto_init() {
+	if File_auth_auth_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shared_proto_auth_auth_proto_rawDesc), len(file_shared_proto_auth_auth_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   16,
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auth_auth_proto_rawDesc), len(file_auth_auth_proto_rawDesc)),
+			NumEnums:      2,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_shared_proto_auth_auth_proto_goTypes,
-		DependencyIndexes: file_shared_proto_auth_auth_proto_depIdxs,
-		MessageInfos:      file_shared_proto_auth_auth_proto_msgTypes,
+		GoTypes:           file_auth_auth_proto_goTypes,
+		DependencyIndexes: file_auth_auth_proto_depIdxs,
+		EnumInfos:         file_auth_auth_proto_enumTypes,
+		MessageInfos:      file_auth_auth_proto_msgTypes,
 	}.Build()
-	File_shared_proto_auth_auth_proto = out.File
-	file_shared_proto_auth_auth_proto_goTypes = nil
-	file_shared_proto_auth_auth_proto_depIdxs = nil
+	File_auth_auth_proto = out.File
+	file_auth_auth_proto_goTypes = nil
+	file_auth_auth_proto_depIdxs = nil
 }

@@ -1,0 +1,10 @@
+I have updated the frontend component `ApiKeyManager.tsx` as you requested.
+
+When a user creates a new API key, the dialog will now display the full SDK JWT, not the raw API key. This allows the user to directly copy the token for use in their applications. The dialog's text has also been updated to reflect this change.
+
+All other functionalities, including listing, deleting, and generating SDK JWTs for existing keys, remain as they were.
+I have updated the frontend component `ApiKeyManager.tsx` as you requested.
+
+When a user creates a new API key, the dialog will now display the full SDK JWT, not the raw API key. This allows the user to directly copy the token for use in their applications. The dialog's text has also been updated to reflect this change.
+
+All other functionalities, including listing, deleting, and generating SDK JWTs for existing keys, remain as they were.

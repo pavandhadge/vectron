@@ -17,7 +17,7 @@
 
 // 	pdRaft "github.com/pavandhadge/vectron/placementdriver/internal/raft"
 // 	pdServer "github.com/pavandhadge/vectron/placementdriver/internal/server"
-// 	pdPb "github.com/pavandhadge/vectron/placementdriver/proto/placementdriver"
+// 	pdPb "github.com/pavandhadge/vectron/shared/proto/placementdriver"
 
 // 	"github.com/lni/dragonboat/v4"
 // 	"github.com/lni/dragonboat/v4/config"

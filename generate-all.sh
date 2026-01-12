@@ -27,26 +27,33 @@ ALL_PROTOS=(
 )
 
 # =================================================
-# GO + GRPC + GRPC-GATEWAY — EACH SERVICE GETS ALL
+# GO + GRPC + GRPC-GATEWAY — CENTRALIZED IN SHARED/PROTO
 # =================================================
 echo "🔧 Generating Go + gRPC + grpc-gateway code"
 
-for SERVICE in "${SERVICES[@]}"; do
-    if [ "$SERVICE" = "auth" ]; then
-      OUT_DIR="auth/service/proto"
-    else
-      OUT_DIR="$SERVICE/proto"
-    fi
+OUT_DIR="shared/proto"
+echo "  → all services → $OUT_DIR"
+mkdir -p "$OUT_DIR"
 
-    echo "  → $SERVICE → $OUT_DIR"
-    mkdir -p "$OUT_DIR"
+protoc ${PROTO_INCLUDE_PATHS} \
+  --go_out="$OUT_DIR" --go_opt=paths=source_relative \
+  --go-grpc_out="$OUT_DIR" --go-grpc_opt=paths=source_relative \
+  --grpc-gateway_out="$OUT_DIR" --grpc-gateway_opt=paths=source_relative \
+  "${ALL_PROTOS[@]}"
 
-  protoc ${PROTO_INCLUDE_PATHS} \
+# =================================================
+# GO CLIENT LIB
+# =================================================
+echo "📦 Generating Go client code"
+
+OUT_DIR="clientlibs/go/proto"
+echo "  → all services → $OUT_DIR"
+mkdir -p "$OUT_DIR"
+
+protoc ${PROTO_INCLUDE_PATHS} \
     --go_out="$OUT_DIR" --go_opt=paths=source_relative \
     --go-grpc_out="$OUT_DIR" --go-grpc_opt=paths=source_relative \
-    --grpc-gateway_out="$OUT_DIR" --grpc-gateway_opt=paths=source_relative \
     "${ALL_PROTOS[@]}"
-done
 
 # =================================================
 # OPENAPI — apigateway ONLY
@@ -63,25 +70,25 @@ protoc ${PROTO_INCLUDE_PATHS} \
 # =================================================
 # JAVASCRIPT — COMMON CLIENT LIB
 # =================================================
-echo "📦 Generating JavaScript client code"
+# echo "📦 Generating JavaScript client code"
 
-mkdir -p clientlibs/js/proto
+# mkdir -p clientlibs/js/proto
 
-protoc ${PROTO_INCLUDE_PATHS} \
-  --js_out=import_style=commonjs,binary:clientlibs/js/proto \
-  --grpc-web_out=import_style=commonjs,mode=grpcwebtext:clientlibs/js/proto \
-  "${ALL_PROTOS[@]}"
+# protoc ${PROTO_INCLUDE_PATHS} \
+#   --js_out=import_style=commonjs,binary:clientlibs/js/proto \
+#   --grpc-web_out=import_style=commonjs,mode=grpcwebtext:clientlibs/js/proto \
+#   "${ALL_PROTOS[@]}"
 
 # =================================================
 # PYTHON — COMMON CLIENT LIB
 # =================================================
 echo "🐍 Generating Python client code"
 
-mkdir -p clientlibs/py/vectron_client/proto
+mkdir -p clientlibs/python/vectron_client/proto
 
 python3 -m grpc_tools.protoc ${PROTO_INCLUDE_PATHS} \
-  --python_out=clientlibs/py/vectron_client/proto \
-  --grpc_python_out=clientlibs/py/vectron_client/proto \
+  --python_out=clientlibs/python/vectron_client/proto \
+  --grpc_python_out=clientlibs/python/vectron_client/proto \
   "${ALL_PROTOS[@]}"
 
 echo "✅ Protobuf generation complete."

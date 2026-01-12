@@ -17,7 +17,7 @@ import (
 	etcdclient "github.com/pavandhadge/vectron/auth/service/internal/etcd"
 	authhandler "github.com/pavandhadge/vectron/auth/service/internal/handler"
 	"github.com/pavandhadge/vectron/auth/service/internal/middleware"
-	authpb "github.com/pavandhadge/vectron/auth/service/proto/auth"
+	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
 )
 
 var (
@@ -83,6 +83,7 @@ func runGrpcServer(store *etcdclient.Client) error {
 		"/vectron.auth.v1.AuthService/RegisterUser",
 		"/vectron.auth.v1.AuthService/Login",
 		"/vectron.auth.v1.AuthService/ValidateAPIKey",
+		"/vectron.auth.v1.AuthService/GetAuthDetailsForSDK",
 	})
 
 	s := grpc.NewServer(

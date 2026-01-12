@@ -41,3 +41,23 @@ This will create the binaries for `apigateway`, `placementdriver`, and `worker` 
 ### Running
 
 (Instructions on how to run the services will be added here once the configuration and startup procedures are fully understood).
+
+> here currently we were in middle of implementing updated auth setup
+
+the plan is the suth will be totally based on the jwt
+
+there will be 2 types of jwt 1 login 2 sdk
+
+login one will only be usred for frontend
+
+nad sdk one will we used by the sdks to do the stuff
+
+and also a single user can have multiple api keys
+
+sdk one comtain apikey, we have to have ai key generation, deletion setup etc
+
+no user gets direct api key he gets the jwt token which has the api key inside along with other relevent stuff
+
+u were middle of doing this i cut u off, so check hte progress and continue and finish it later we have to nodify the test namely @/home/pavan/programming/vectron/e2e_new_routes_test.go and helper @/home/pavan/programming/vectron/e2e_test_helpers_test.go
+
+do not make any mistake follow the instruvtion to the word if anythign raise a question

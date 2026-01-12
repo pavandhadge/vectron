@@ -20,10 +20,10 @@ import (
 
 	"github.com/lni/dragonboat/v3"
 	"github.com/lni/dragonboat/v3/config"
+	worker "github.com/pavandhadge/vectron/shared/proto/worker"
 	"github.com/pavandhadge/vectron/worker/internal"
 	"github.com/pavandhadge/vectron/worker/internal/pd"
 	"github.com/pavandhadge/vectron/worker/internal/shard"
-	worker "github.com/pavandhadge/vectron/worker/proto/worker"
 	"google.golang.org/grpc"
 )
 

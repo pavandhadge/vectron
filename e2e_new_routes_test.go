@@ -17,9 +17,9 @@ import (
 	vectron "github.com/pavandhadge/vectron/clientlibs/go"
 )
 
-const e2eJwtSecret = "e2e-super-secret-jwt-key"
 
-func TestE2E_FullSystem_WithAuth(t *testing.T) {
+
+func TestE2E_NewRoutes(t *testing.T) {
 	// This test orchestrates a full end-to-end scenario, including:
 	// 1. Starting a real etcd instance.
 	// 2. Starting all microservices (placementdriver, worker, auth, apigateway).
@@ -135,6 +135,7 @@ func TestE2E_FullSystem_WithAuth(t *testing.T) {
 		fmt.Sprintf("GRPC_ADDR=%s", gatewayAddr),
 		fmt.Sprintf("PLACEMENT_DRIVER=%s", allPdGrpcAddrs), // Use allPdGrpcAddrs for PLACEMENT_DRIVER env var
 		fmt.Sprintf("AUTH_SERVICE_ADDR=%s", authSvcAddr),
+		fmt.Sprintf("JWT_SECRET=%s", e2eJwtSecret),
 	}
 	gateway, err := StartService(ctx, "apigateway",
 		gatewayEnv,
@@ -157,7 +158,7 @@ func TestE2E_FullSystem_WithAuth(t *testing.T) {
 	_, err = WaitForGrpcService(ctx, gatewayAddr, 30*time.Second)
 	require.NoError(t, err)
 
-	// --- 4. Get JWTs from Auth Service ---
+	// --- 4. Get JWT from Auth Service ---
 
 	authClient, err := NewAuthClient(ctx, authSvcAddr)
 	require.NoError(t, err)
@@ -167,7 +168,7 @@ func TestE2E_FullSystem_WithAuth(t *testing.T) {
 	userPassword := "e2e-password-strong!"
 
 	// Register User
-	regResp, err := authClient.Client.RegisterUser(authClient.NewAuthenticatedContext(ctx), &authpb.RegisterUserRequest{
+	regResp, err := authClient.Client.RegisterUser(ctx, &authpb.RegisterUserRequest{
 		Email:    userEmail,
 		Password: userPassword,
 	})
@@ -180,25 +181,10 @@ func TestE2E_FullSystem_WithAuth(t *testing.T) {
 	require.NoError(t, err)
 	t.Log("Successfully logged in and obtained Login JWT")
 
-	// Create API Key using Login JWT (simulating frontend action)
-	apiKeyName := "e2e-test-api-key"
-	_, err = authClient.CreateAPIKey(authClient.NewAuthenticatedContext(ctx), apiKeyName)
+	// Get SDK JWT
+	sdkJwt, err := authClient.GetSDKJWT(ctx, "e2e-sdk-key")
 	require.NoError(t, err)
-	t.Logf("Successfully created API key: %s", apiKeyName)
-
-	// List API keys to get the KeyPrefix
-	listKeysResp, err := authClient.Client.ListAPIKeys(authClient.NewAuthenticatedContext(ctx), &authpb.ListAPIKeysRequest{})
-	require.NoError(t, err)
-	require.Len(t, listKeysResp.Keys, 1)
-	testAPIKeyID := listKeysResp.Keys[0].KeyPrefix
-	t.Logf("Obtained API Key ID: %s", testAPIKeyID)
-
-	// Create SDK JWT using Login JWT and API Key ID
-	sdkJwt, err := authClient.CreateSDKJWT(authClient.NewAuthenticatedContext(ctx), testAPIKeyID)
-	require.NoError(t, err)
-	require.NotEmpty(t, sdkJwt)
-	t.Logf("Successfully obtained SDK JWT: %s...", sdkJwt[:10])
-
+	t.Log("Successfully created API Key and obtained SDK JWT")
 
 	// --- 5. Run Test Logic using Go Client with SDK JWT ---
 
@@ -213,136 +199,70 @@ func TestE2E_FullSystem_WithAuth(t *testing.T) {
 	require.NoError(t, err)
 	t.Logf("CreateCollection successful for collection: %s", collectionName)
 
-	
-
-		// It can take a moment for the collection and its shards to be fully initialized.
-
-		// We poll the status until it's ready.
-
-		require.Eventually(t, func() bool {
-
-			status, err := client.GetCollectionStatus(collectionName)
-
-			if err != nil {
-
-				return false
-
-			}
-
-			if len(status.Shards) == 0 {
-
-				return false
-
-			}
-
-			for _, shard := range status.Shards {
-
-				if !shard.Ready {
-
-					return false
-
-				}
-
-			}
-
-			t.Log("Collection is ready!")
-
-			return true
-
-		}, 20*time.Second, 1*time.Second, "timed out waiting for collection to be ready")
-
-	
-
-		// 2. List Collections
-
-		collections, err := client.ListCollections()
-
-		require.NoError(t, err)
-
-		assert.Contains(t, collections, collectionName)
-
-		t.Log("ListCollections successful")
-
-	
-
-		// 3. Upsert Points
-
-		points := []*vectron.Point{
-
-			{ID: "p1", Vector: []float32{0.11, 0.22, 0.33, 0.44}},
-
-			{ID: "p2", Vector: []float32{0.55, 0.66, 0.77, 0.88}},
-
-			{ID: "p3", Vector: []float32{0.12, 0.23, 0.34, 0.45}},
-
+	// It can take a moment for the collection and its shards to be fully initialized.
+	// We poll the status until it's ready.
+	require.Eventually(t, func() bool {
+		status, err := client.GetCollectionStatus(collectionName)
+		if err != nil {
+			return false
 		}
+		if len(status.Shards) == 0 {
+			return false
+		}
+		for _, shard := range status.Shards {
+			if !shard.Ready {
+				return false
+			}
+		}
+		t.Log("Collection is ready!")
+		return true
+	}, 20*time.Second, 1*time.Second, "timed out waiting for collection to be ready")
 
-		upserted, err := client.Upsert(collectionName, points)
+	// 2. List Collections
+	collections, err := client.ListCollections()
+	require.NoError(t, err)
+	assert.Contains(t, collections, collectionName)
+	t.Log("ListCollections successful")
 
-		require.NoError(t, err)
-
-		assert.Equal(t, int32(3), upserted)
-
-		t.Logf("Upsert successful for %d points", upserted)
-
-		
-
-		// Allow a moment for the upserts to be indexed.
-
-		time.Sleep(2 * time.Second)
-
-	
-
-		// 4. Search
-
-		results, err := client.Search(collectionName, []float32{0.1, 0.2, 0.3, 0.4}, 2)
-
-		require.NoError(t, err)
-
-		require.Len(t, results, 2)
-
-		assert.Equal(t, "p1", results[0].ID)
-
-		assert.Equal(t, "p3", results[1].ID)
-
-		t.Log("Search successful")
-
-	
-
-		// 5. Get Point
-
-		point, err := client.Get(collectionName, "p2")
-
-		require.NoError(t, err)
-
-		assert.Equal(t, "p2", point.ID)
-
-		assert.Equal(t, []float32{0.55, 0.66, 0.77, 0.88}, point.Vector)
-
-		t.Logf("Get successful for point: %s", point.ID)
-
-	
-
-		// 6. Delete Point
-
-		err = client.Delete(collectionName, "p1")
-
-		require.NoError(t, err)
-
-		t.Logf("Delete successful for point: p1")
-
-	
-
-		// 7. Get Deleted Point (should fail)
-
-		_, err = client.Get(collectionName, "p1")
-
-		assert.Error(t, err)
-
-		assert.Contains(t, err.Error(), vectron.ErrNotFound.Error(), "expected 'not found' error when getting a deleted point")
-
-		t.Log("Verified that getting a deleted point returns a 'not found' error")
-
+	// 3. Upsert Points
+	points := []*vectron.Point{
+		{ID: "p1", Vector: []float32{0.11, 0.22, 0.33, 0.44}},
+		{ID: "p2", Vector: []float32{0.55, 0.66, 0.77, 0.88}},
+		{ID: "p3", Vector: []float32{0.12, 0.23, 0.34, 0.45}},
 	}
+	upserted, err := client.Upsert(collectionName, points)
+	require.NoError(t, err)
+	assert.Equal(t, int32(3), upserted)
+	t.Logf("Upsert successful for %d points", upserted)
 
+	// Allow a moment for the upserts to be indexed.
+	time.Sleep(2 * time.Second)
+
+	// 4. Search
+	results, err := client.Search(collectionName, []float32{0.1, 0.2, 0.3, 0.4}, 2)
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	assert.Equal(t, "p1", results[0].ID)
+	assert.Equal(t, "p3", results[1].ID)
+	t.Log("Search successful")
+
+	// 5. Get Point
+	point, err := client.Get(collectionName, "p2")
+	require.NoError(t, err)
+	assert.Equal(t, "p2", point.ID)
+	assert.Equal(t, []float32{0.55, 0.66, 0.77, 0.88}, point.Vector)
+	t.Logf("Get successful for point: %s", point.ID)
+
+	// 6. Delete Point
+	err = client.Delete(collectionName, "p1")
+	require.NoError(t, err)
+	t.Logf("Delete successful for point: p1")
+
+	// 7. Get Deleted Point (should fail)
+	_, err = client.Get(collectionName, "p1")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), vectron.ErrNotFound.Error(), "expected 'not found' error when getting a deleted point")
+	t.Log("Verified that getting a deleted point returns a 'not found' error")
+
+}
 	

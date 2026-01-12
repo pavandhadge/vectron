@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/lni/dragonboat/v3"
+	"github.com/pavandhadge/vectron/shared/proto/worker"
 	"github.com/pavandhadge/vectron/worker/internal/shard"
-	"github.com/pavandhadge/vectron/worker/proto/worker"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

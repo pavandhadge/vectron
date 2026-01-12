@@ -12,8 +12,8 @@ import (
 	"github.com/lni/dragonboat/v3"
 	"github.com/lni/dragonboat/v3/config"
 	sm "github.com/lni/dragonboat/v3/statemachine"
+	"github.com/pavandhadge/vectron/shared/proto/placementdriver"
 	"github.com/pavandhadge/vectron/worker/internal/pd"
-	"github.com/pavandhadge/vectron/worker/proto/placementdriver"
 )
 
 // Manager is responsible for managing the lifecycle of shard replicas on a worker node.

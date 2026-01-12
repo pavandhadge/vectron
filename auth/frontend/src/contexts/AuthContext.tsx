@@ -1,4 +1,7 @@
-import axios, { AxiosInstance } from "axios";
+import axios, {
+  AxiosInstance,
+  InternalAxiosRequestConfig,
+} from "axios";
 import {
   createContext,
   useContext,
@@ -27,7 +30,9 @@ interface AuthContextType {
   login: (data: LoginRequest) => Promise<void>;
   signup: (data: RegisterUserRequest) => Promise<void>;
   logout: () => void;
-  apiClient: AxiosInstance;
+  updateUserAndToken: (user: UserProfile, token: string) => void;
+  authApiClient: AxiosInstance;
+  apiGatewayApiClient: AxiosInstance;
 }
 
 /* =======================
@@ -37,11 +42,20 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 /* =======================
-   Axios Instance
+   Axios Instances
 ======================= */
 
-const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || "http://localhost:8082",
+const authApiClient = axios.create({
+  baseURL:
+    import.meta.env.VITE_AUTH_API_BASE_URL || "http://localhost:10009",
+  headers: {
+    "Content-Type": "application/json",
+  },
+});
+
+const apiGatewayApiClient = axios.create({
+  baseURL:
+    import.meta.env.VITE_APIGATEWAY_API_BASE_URL || "http://localhost:10012",
   headers: {
     "Content-Type": "application/json",
   },
@@ -51,19 +65,16 @@ const apiClient = axios.create({
    Axios Interceptor
 ======================= */
 
-apiClient.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem("jwt_token");
+const authInterceptor = (config: InternalAxiosRequestConfig) => {
+  const token = localStorage.getItem("jwt_token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+};
 
-    if (token) {
-      console.log(token);
-      config.headers = config.headers ?? {};
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error),
-);
+authApiClient.interceptors.request.use(authInterceptor);
+apiGatewayApiClient.interceptors.request.use(authInterceptor);
 
 /* =======================
    Provider
@@ -84,9 +95,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setError(null);
   };
 
+  const updateUserAndToken = (user: UserProfile, token: string) => {
+    setToken(token);
+    setUser(user);
+    localStorage.setItem("jwt_token", token);
+  };
+
   useEffect(() => {
     if (token && !user) {
-      apiClient
+      authApiClient
         .get("/v1/user/profile")
         .then((response) => {
           setUser(response.data.user);
@@ -105,16 +122,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const login = async (data: LoginRequest) => {
     setError(null);
     try {
-      const response = await apiClient.post<LoginResponse>(
+      const response = await authApiClient.post<LoginResponse>(
         "/v1/users/login",
         data,
       );
-      // FIX: Changed jwt_token to jwtToken to match backend response
       const { jwtToken, user } = response.data;
-
-      localStorage.setItem("jwt_token", jwtToken); // Use jwtToken here
-      setToken(jwtToken); // Use jwtToken here
-      setUser(user);
+      updateUserAndToken(user, jwtToken);
     } catch (err: any) {
       console.error("Login failed:", err);
       setError(
@@ -128,7 +141,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const signup = async (data: RegisterUserRequest) => {
     setError(null);
     try {
-      await apiClient.post<RegisterUserResponse>("/v1/users/register", data);
+      await authApiClient.post<RegisterUserResponse>(
+        "/v1/users/register",
+        data,
+      );
       await login({ email: data.email, password: data.password });
     } catch (err: any) {
       console.error("Signup failed:", err);
@@ -150,7 +166,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         login,
         signup,
         logout,
-        apiClient,
+        updateUserAndToken,
+        authApiClient,
+        apiGatewayApiClient,
       }}
     >
       {children}

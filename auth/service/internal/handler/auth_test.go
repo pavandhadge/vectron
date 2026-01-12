@@ -25,8 +25,8 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	etcdclient "github.com/pavandhadge/vectron/auth/service/internal/etcd"
-	authpb "github.com/pavandhadge/vectron/auth/service/proto/auth"
 	"github.com/pavandhadge/vectron/auth/service/internal/middleware"
+	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
 )
 
 const (

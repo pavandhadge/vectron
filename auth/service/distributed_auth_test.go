@@ -4,7 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
-	
+
 	"sync"
 	"testing"
 	"time"
@@ -16,7 +16,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/pavandhadge/vectron/auth/service/testutil"
-	authpb "github.com/pavandhadge/vectron/auth/service/proto/auth"
+	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
 )
 
 const (
@@ -25,10 +25,10 @@ const (
 )
 
 var (
-	etcdProc   *testutil.EtcdProcess
+	etcdProc    *testutil.EtcdProcess
 	authServers []*testutil.AuthServerProcess
-	ctx        context.Context
-	cancel     context.CancelFunc
+	ctx         context.Context
+	cancel      context.CancelFunc
 )
 
 func TestMain(m *testing.M) {
@@ -77,7 +77,6 @@ func TestMain(m *testing.M) {
 		}
 	}
 	log.Println("Stopped all auth service instances.")
-
 
 	os.Exit(exitCode)
 }

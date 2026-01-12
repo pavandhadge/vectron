@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	pd "github.com/pavandhadge/vectron/worker/proto/placementdriver"
+	pd "github.com/pavandhadge/vectron/shared/proto/placementdriver"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

@@ -11,7 +11,7 @@ import (
 
 	etcdclient "github.com/pavandhadge/vectron/auth/service/internal/etcd"
 	"github.com/pavandhadge/vectron/auth/service/internal/middleware"
-	authpb "github.com/pavandhadge/vectron/auth/service/proto/auth"
+	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
 )
 
 // AuthServer implements the AuthServiceServer interface.
@@ -62,9 +62,11 @@ func (s *AuthServer) Login(ctx context.Context, req *authpb.LoginRequest) (*auth
 		return nil, status.Error(codes.Unauthenticated, "invalid password")
 	}
 
-	// Create JWT token
+	// Create JWT token (Login JWT) - does NOT contain APIKey claim, but contains Plan
 	claims := &middleware.Claims{
 		UserID: userData.ID,
+		APIKey: "", // APIKey claim is empty for Login JWT
+		Plan:   userData.Plan.String(), // Include Plan in Login JWT
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -121,6 +123,22 @@ func (s *AuthServer) UpdateUserProfile(ctx context.Context, req *authpb.UpdateUs
 		return nil, status.Errorf(codes.Internal, "failed to update user profile: %v", err)
 	}
 
+	// Issue a new token with the updated plan claim
+	newClaims := &middleware.Claims{
+		UserID: userData.ID,
+		APIKey: "", // APIKey claim is empty for Login JWT
+		Plan:   userData.Plan.String(),
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, newClaims)
+	tokenString, err := token.SignedString(s.jwtSecret)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to generate token after plan update: %v", err)
+	}
+
 	return &authpb.UpdateUserProfileResponse{
 		User: &authpb.UserProfile{
 			Id:                 userData.ID,
@@ -129,6 +147,7 @@ func (s *AuthServer) UpdateUserProfile(ctx context.Context, req *authpb.UpdateUs
 			Plan:               userData.Plan,
 			SubscriptionStatus: userData.SubscriptionStatus,
 		},
+		JwtToken: tokenString,
 	}, nil
 }
 
@@ -190,6 +209,86 @@ func (s *AuthServer) DeleteAPIKey(ctx context.Context, req *authpb.DeleteAPIKeyR
 	return &authpb.DeleteAPIKeyResponse{Success: success}, nil
 }
 
+// Create an SDK JWT for an existing API key.
+func (s *AuthServer) CreateSDKJWT(ctx context.Context, req *authpb.CreateSDKJWTRequest) (*authpb.CreateSDKJWTResponse, error) {
+	userID, err := middleware.GetUserIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if req.ApiKeyId == "" {
+		return nil, status.Error(codes.InvalidArgument, "API Key ID is required")
+	}
+
+	// Validate that the API Key ID belongs to the user
+	// We call ValidateAPIKey with the API Key ID as the full key.
+	// This is a temporary workaround. A proper solution would be to have
+	// a specific internal RPC to verify API key ownership.
+	// For now, assume a dummy full key that matches the KeyPrefix for validation purposes.
+	// In a real system, you'd retrieve the actual fullKey if it were securely stored,
+	// or perform validation differently. Here, we'll try to retrieve the APIKeyData directly
+	// to get the actual APIKeyId for validation.
+	keyData, err := s.store.GetAPIKeyDataByPrefix(ctx, req.ApiKeyId)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get API key data: %v", err)
+	}
+	if keyData == nil || keyData.UserID != userID {
+		return nil, status.Errorf(codes.PermissionDenied, "invalid API key ID or not owned by user")
+	}
+
+
+	// Retrieve user data to get the plan
+	userData, err := s.store.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get user data: %v", err)
+	}
+
+	// Create SDK JWT
+	claims := &middleware.Claims{
+		UserID: userData.ID,
+		APIKey: req.ApiKeyId, // The APIKey claim now holds the KeyPrefix
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(7 * 24 * time.Hour)), // Longer expiration for SDK JWTs
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString(s.jwtSecret)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to generate SDK JWT: %v", err)
+	}
+
+	return &authpb.CreateSDKJWTResponse{
+		SdkJwt: tokenString,
+	}, nil
+}
+
+// GetAuthDetailsForSDK is an internal RPC for the API Gateway to get user details from an API Key ID.
+func (s *AuthServer) GetAuthDetailsForSDK(ctx context.Context, req *authpb.GetAuthDetailsForSDKRequest) (*authpb.GetAuthDetailsForSDKResponse, error) {
+	if req.ApiKeyId == "" {
+		return nil, status.Error(codes.InvalidArgument, "API Key ID is required")
+	}
+
+	keyData, err := s.store.GetAPIKeyDataByPrefix(ctx, req.ApiKeyId)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get API key data: %v", err)
+	}
+	if keyData == nil {
+		return &authpb.GetAuthDetailsForSDKResponse{Success: false}, nil
+	}
+
+	userData, err := s.store.GetUserByID(ctx, keyData.UserID)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "user not found for API key: %v", err)
+	}
+
+	return &authpb.GetAuthDetailsForSDKResponse{
+		Success: true,
+		UserId:  userData.ID,
+		Plan:    userData.Plan,
+	}, nil
+}
+
 // --- Internal Service RPCs ---
 
 func (s *AuthServer) ValidateAPIKey(ctx context.Context, req *authpb.ValidateAPIKeyRequest) (*authpb.ValidateAPIKeyResponse, error) {
@@ -206,9 +305,9 @@ func (s *AuthServer) ValidateAPIKey(ctx context.Context, req *authpb.ValidateAPI
 	}
 
 	return &authpb.ValidateAPIKeyResponse{
-		Valid:      true,
-		UserId:     keyData.UserID,
-		Plan:       keyData.Plan,
-		ApiKeyId:   keyData.KeyPrefix,
+		Valid:    true,
+		UserId:   keyData.UserID,
+		Plan:     authpb.Plan_name[int32(keyData.Plan)],
+		ApiKeyId: keyData.KeyPrefix,
 	}, nil
 }

@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	authpb "github.com/pavandhadge/vectron/auth/service/proto/auth"
+	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
 	"go.etcd.io/etcd/server/v3/embed"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -186,7 +186,7 @@ func WaitForGrpcService(ctx context.Context, addr string, timeout time.Duration)
 type AuthClient struct {
 	Conn   *grpc.ClientConn
 	Client authpb.AuthServiceClient
-	jwt    string
+	Jwt    string
 }
 
 // NewAuthClient creates a new client for the auth service.
@@ -217,26 +217,84 @@ func (c *AuthClient) Login(ctx context.Context, email, password string) error {
 	if err != nil {
 		return fmt.Errorf("failed to login: %w", err)
 	}
-	c.jwt = resp.JwtToken
+	c.Jwt = resp.JwtToken
 	return nil
 }
 
 // CreateAPIKey creates a new API key using the stored JWT for authentication.
-func (c *AuthClient) CreateAPIKey(ctx context.Context, name string) (string, error) {
-	if c.jwt == "" {
-		return "", fmt.Errorf("must login before creating an API key")
+func (c *AuthClient) CreateAPIKey(ctx context.Context, name string) (*authpb.APIKey, error) {
+	if c.Jwt == "" {
+		return nil, fmt.Errorf("must login before creating an API key")
 	}
 
 	// Create a new context with the JWT metadata.
-	md := metadata.New(map[string]string{"authorization": "Bearer " + c.jwt})
+	md := metadata.New(map[string]string{"authorization": "Bearer " + c.Jwt})
 	authCtx := metadata.NewOutgoingContext(ctx, md)
 
 	resp, err := c.Client.CreateAPIKey(authCtx, &authpb.CreateAPIKeyRequest{
 		Name: name,
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to create API key: %w", err)
+		return nil, fmt.Errorf("failed to create API key: %w", err)
 	}
-	return resp.FullKey, nil
+	return resp.KeyInfo, nil
 }
 
+// GetSDKJWT is a convenience helper that creates an API key and returns an SDK JWT for it.
+func (c *AuthClient) GetSDKJWT(ctx context.Context, keyName string) (string, error) {
+	apiKey, err := c.CreateAPIKey(ctx, keyName)
+	if err != nil {
+		return "", fmt.Errorf("failed to create api key for sdk jwt: %w", err)
+	}
+
+	sdkJwt, err := c.CreateSDKJWT(ctx, apiKey.KeyPrefix)
+	if err != nil {
+		return "", fmt.Errorf("failed to create sdk jwt: %w", err)
+	}
+	return sdkJwt, nil
+}
+
+// GetUserProfile retrieves the user's profile using the stored JWT for authentication.
+func (c *AuthClient) GetUserProfile(ctx context.Context) (*authpb.GetUserProfileResponse, error) {
+	if c.Jwt == "" {
+		return nil, fmt.Errorf("must login before getting user profile")
+	}
+
+	// Create a new context with the JWT metadata.
+	md := metadata.New(map[string]string{"authorization": "Bearer " + c.Jwt})
+	authCtx := metadata.NewOutgoingContext(ctx, md)
+
+	resp, err := c.Client.GetUserProfile(authCtx, &authpb.GetUserProfileRequest{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user profile: %w", err)
+	}
+	return resp, nil
+}
+
+// CreateSDKJWT creates a new SDK JWT for an existing API key.
+func (c *AuthClient) CreateSDKJWT(ctx context.Context, apiKeyId string) (string, error) {
+	if c.Jwt == "" {
+		return "", fmt.Errorf("must login before creating an SDK JWT")
+	}
+
+	// Create a new context with the JWT metadata.
+	md := metadata.New(map[string]string{"authorization": "Bearer " + c.Jwt})
+	authCtx := metadata.NewOutgoingContext(ctx, md)
+
+	resp, err := c.Client.CreateSDKJWT(authCtx, &authpb.CreateSDKJWTRequest{
+		ApiKeyId: apiKeyId,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create SDK JWT: %w", err)
+	}
+	return resp.SdkJwt, nil
+}
+
+// NewAuthenticatedContext creates a new context with the stored JWT for authentication.
+func (c *AuthClient) NewAuthenticatedContext(ctx context.Context) context.Context {
+	if c.Jwt == "" {
+		panic("AuthClient not logged in, JWT is empty")
+	}
+	md := metadata.New(map[string]string{"authorization": "Bearer " + c.Jwt})
+	return metadata.NewOutgoingContext(ctx, md)
+}

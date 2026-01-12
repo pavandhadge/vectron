@@ -19,6 +19,8 @@ const UserIDKey contextKey = "user_id"
 // Claims defines the custom claims for JWT.
 type Claims struct {
 	UserID string `json:"user_id"`
+	APIKey string `json:"api_key"`
+	Plan   string `json:"plan"`
 	jwt.RegisteredClaims
 }
 

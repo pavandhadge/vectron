@@ -2,12 +2,13 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v3.19.6
-// source: shared/proto/apigateway/apigateway.proto
+// source: apigateway/apigateway.proto
 
 package apigateway
 
 import (
 	_ "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2/options"
+	auth "github.com/pavandhadge/vectron/shared/proto/auth"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -34,7 +35,7 @@ type CreateCollectionRequest struct {
 
 func (x *CreateCollectionRequest) Reset() {
 	*x = CreateCollectionRequest{}
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[0]
+	mi := &file_apigateway_apigateway_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -46,7 +47,7 @@ func (x *CreateCollectionRequest) String() string {
 func (*CreateCollectionRequest) ProtoMessage() {}
 
 func (x *CreateCollectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[0]
+	mi := &file_apigateway_apigateway_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -59,7 +60,7 @@ func (x *CreateCollectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateCollectionRequest.ProtoReflect.Descriptor instead.
 func (*CreateCollectionRequest) Descriptor() ([]byte, []int) {
-	return file_shared_proto_apigateway_apigateway_proto_rawDescGZIP(), []int{0}
+	return file_apigateway_apigateway_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *CreateCollectionRequest) GetName() string {
@@ -92,7 +93,7 @@ type CreateCollectionResponse struct {
 
 func (x *CreateCollectionResponse) Reset() {
 	*x = CreateCollectionResponse{}
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[1]
+	mi := &file_apigateway_apigateway_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -104,7 +105,7 @@ func (x *CreateCollectionResponse) String() string {
 func (*CreateCollectionResponse) ProtoMessage() {}
 
 func (x *CreateCollectionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[1]
+	mi := &file_apigateway_apigateway_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -117,7 +118,7 @@ func (x *CreateCollectionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateCollectionResponse.ProtoReflect.Descriptor instead.
 func (*CreateCollectionResponse) Descriptor() ([]byte, []int) {
-	return file_shared_proto_apigateway_apigateway_proto_rawDescGZIP(), []int{1}
+	return file_apigateway_apigateway_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *CreateCollectionResponse) GetSuccess() bool {
@@ -137,7 +138,7 @@ type UpsertRequest struct {
 
 func (x *UpsertRequest) Reset() {
 	*x = UpsertRequest{}
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[2]
+	mi := &file_apigateway_apigateway_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -149,7 +150,7 @@ func (x *UpsertRequest) String() string {
 func (*UpsertRequest) ProtoMessage() {}
 
 func (x *UpsertRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[2]
+	mi := &file_apigateway_apigateway_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -162,7 +163,7 @@ func (x *UpsertRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpsertRequest.ProtoReflect.Descriptor instead.
 func (*UpsertRequest) Descriptor() ([]byte, []int) {
-	return file_shared_proto_apigateway_apigateway_proto_rawDescGZIP(), []int{2}
+	return file_apigateway_apigateway_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *UpsertRequest) GetCollection() string {
@@ -188,7 +189,7 @@ type UpsertResponse struct {
 
 func (x *UpsertResponse) Reset() {
 	*x = UpsertResponse{}
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[3]
+	mi := &file_apigateway_apigateway_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -200,7 +201,7 @@ func (x *UpsertResponse) String() string {
 func (*UpsertResponse) ProtoMessage() {}
 
 func (x *UpsertResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[3]
+	mi := &file_apigateway_apigateway_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -213,7 +214,7 @@ func (x *UpsertResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpsertResponse.ProtoReflect.Descriptor instead.
 func (*UpsertResponse) Descriptor() ([]byte, []int) {
-	return file_shared_proto_apigateway_apigateway_proto_rawDescGZIP(), []int{3}
+	return file_apigateway_apigateway_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *UpsertResponse) GetUpserted() int32 {
@@ -236,7 +237,7 @@ type SearchRequest struct {
 
 func (x *SearchRequest) Reset() {
 	*x = SearchRequest{}
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[4]
+	mi := &file_apigateway_apigateway_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -248,7 +249,7 @@ func (x *SearchRequest) String() string {
 func (*SearchRequest) ProtoMessage() {}
 
 func (x *SearchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[4]
+	mi := &file_apigateway_apigateway_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -261,7 +262,7 @@ func (x *SearchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchRequest.ProtoReflect.Descriptor instead.
 func (*SearchRequest) Descriptor() ([]byte, []int) {
-	return file_shared_proto_apigateway_apigateway_proto_rawDescGZIP(), []int{4}
+	return file_apigateway_apigateway_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *SearchRequest) GetCollection() string {
@@ -294,7 +295,7 @@ type SearchResponse struct {
 
 func (x *SearchResponse) Reset() {
 	*x = SearchResponse{}
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[5]
+	mi := &file_apigateway_apigateway_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -306,7 +307,7 @@ func (x *SearchResponse) String() string {
 func (*SearchResponse) ProtoMessage() {}
 
 func (x *SearchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[5]
+	mi := &file_apigateway_apigateway_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -319,7 +320,7 @@ func (x *SearchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchResponse.ProtoReflect.Descriptor instead.
 func (*SearchResponse) Descriptor() ([]byte, []int) {
-	return file_shared_proto_apigateway_apigateway_proto_rawDescGZIP(), []int{5}
+	return file_apigateway_apigateway_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SearchResponse) GetResults() []*SearchResult {
@@ -340,7 +341,7 @@ type SearchResult struct {
 
 func (x *SearchResult) Reset() {
 	*x = SearchResult{}
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[6]
+	mi := &file_apigateway_apigateway_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -352,7 +353,7 @@ func (x *SearchResult) String() string {
 func (*SearchResult) ProtoMessage() {}
 
 func (x *SearchResult) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[6]
+	mi := &file_apigateway_apigateway_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -365,7 +366,7 @@ func (x *SearchResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchResult.ProtoReflect.Descriptor instead.
 func (*SearchResult) Descriptor() ([]byte, []int) {
-	return file_shared_proto_apigateway_apigateway_proto_rawDescGZIP(), []int{6}
+	return file_apigateway_apigateway_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SearchResult) GetId() string {
@@ -399,7 +400,7 @@ type GetRequest struct {
 
 func (x *GetRequest) Reset() {
 	*x = GetRequest{}
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[7]
+	mi := &file_apigateway_apigateway_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -411,7 +412,7 @@ func (x *GetRequest) String() string {
 func (*GetRequest) ProtoMessage() {}
 
 func (x *GetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[7]
+	mi := &file_apigateway_apigateway_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -424,7 +425,7 @@ func (x *GetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRequest.ProtoReflect.Descriptor instead.
 func (*GetRequest) Descriptor() ([]byte, []int) {
-	return file_shared_proto_apigateway_apigateway_proto_rawDescGZIP(), []int{7}
+	return file_apigateway_apigateway_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *GetRequest) GetCollection() string {
@@ -450,7 +451,7 @@ type GetResponse struct {
 
 func (x *GetResponse) Reset() {
 	*x = GetResponse{}
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[8]
+	mi := &file_apigateway_apigateway_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -462,7 +463,7 @@ func (x *GetResponse) String() string {
 func (*GetResponse) ProtoMessage() {}
 
 func (x *GetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[8]
+	mi := &file_apigateway_apigateway_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -475,7 +476,7 @@ func (x *GetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetResponse.ProtoReflect.Descriptor instead.
 func (*GetResponse) Descriptor() ([]byte, []int) {
-	return file_shared_proto_apigateway_apigateway_proto_rawDescGZIP(), []int{8}
+	return file_apigateway_apigateway_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *GetResponse) GetPoint() *Point {
@@ -495,7 +496,7 @@ type DeleteRequest struct {
 
 func (x *DeleteRequest) Reset() {
 	*x = DeleteRequest{}
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[9]
+	mi := &file_apigateway_apigateway_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -507,7 +508,7 @@ func (x *DeleteRequest) String() string {
 func (*DeleteRequest) ProtoMessage() {}
 
 func (x *DeleteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[9]
+	mi := &file_apigateway_apigateway_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -520,7 +521,7 @@ func (x *DeleteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteRequest.ProtoReflect.Descriptor instead.
 func (*DeleteRequest) Descriptor() ([]byte, []int) {
-	return file_shared_proto_apigateway_apigateway_proto_rawDescGZIP(), []int{9}
+	return file_apigateway_apigateway_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *DeleteRequest) GetCollection() string {
@@ -545,7 +546,7 @@ type DeleteResponse struct {
 
 func (x *DeleteResponse) Reset() {
 	*x = DeleteResponse{}
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[10]
+	mi := &file_apigateway_apigateway_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -557,7 +558,7 @@ func (x *DeleteResponse) String() string {
 func (*DeleteResponse) ProtoMessage() {}
 
 func (x *DeleteResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[10]
+	mi := &file_apigateway_apigateway_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -570,7 +571,7 @@ func (x *DeleteResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteResponse.ProtoReflect.Descriptor instead.
 func (*DeleteResponse) Descriptor() ([]byte, []int) {
-	return file_shared_proto_apigateway_apigateway_proto_rawDescGZIP(), []int{10}
+	return file_apigateway_apigateway_proto_rawDescGZIP(), []int{10}
 }
 
 type ListCollectionsRequest struct {
@@ -581,7 +582,7 @@ type ListCollectionsRequest struct {
 
 func (x *ListCollectionsRequest) Reset() {
 	*x = ListCollectionsRequest{}
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[11]
+	mi := &file_apigateway_apigateway_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -593,7 +594,7 @@ func (x *ListCollectionsRequest) String() string {
 func (*ListCollectionsRequest) ProtoMessage() {}
 
 func (x *ListCollectionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[11]
+	mi := &file_apigateway_apigateway_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -606,7 +607,7 @@ func (x *ListCollectionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCollectionsRequest.ProtoReflect.Descriptor instead.
 func (*ListCollectionsRequest) Descriptor() ([]byte, []int) {
-	return file_shared_proto_apigateway_apigateway_proto_rawDescGZIP(), []int{11}
+	return file_apigateway_apigateway_proto_rawDescGZIP(), []int{11}
 }
 
 type ListCollectionsResponse struct {
@@ -618,7 +619,7 @@ type ListCollectionsResponse struct {
 
 func (x *ListCollectionsResponse) Reset() {
 	*x = ListCollectionsResponse{}
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[12]
+	mi := &file_apigateway_apigateway_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -630,7 +631,7 @@ func (x *ListCollectionsResponse) String() string {
 func (*ListCollectionsResponse) ProtoMessage() {}
 
 func (x *ListCollectionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[12]
+	mi := &file_apigateway_apigateway_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -643,7 +644,7 @@ func (x *ListCollectionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCollectionsResponse.ProtoReflect.Descriptor instead.
 func (*ListCollectionsResponse) Descriptor() ([]byte, []int) {
-	return file_shared_proto_apigateway_apigateway_proto_rawDescGZIP(), []int{12}
+	return file_apigateway_apigateway_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ListCollectionsResponse) GetCollections() []string {
@@ -662,7 +663,7 @@ type GetCollectionStatusRequest struct {
 
 func (x *GetCollectionStatusRequest) Reset() {
 	*x = GetCollectionStatusRequest{}
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[13]
+	mi := &file_apigateway_apigateway_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -674,7 +675,7 @@ func (x *GetCollectionStatusRequest) String() string {
 func (*GetCollectionStatusRequest) ProtoMessage() {}
 
 func (x *GetCollectionStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[13]
+	mi := &file_apigateway_apigateway_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -687,7 +688,7 @@ func (x *GetCollectionStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCollectionStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetCollectionStatusRequest) Descriptor() ([]byte, []int) {
-	return file_shared_proto_apigateway_apigateway_proto_rawDescGZIP(), []int{13}
+	return file_apigateway_apigateway_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *GetCollectionStatusRequest) GetName() string {
@@ -709,7 +710,7 @@ type GetCollectionStatusResponse struct {
 
 func (x *GetCollectionStatusResponse) Reset() {
 	*x = GetCollectionStatusResponse{}
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[14]
+	mi := &file_apigateway_apigateway_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -721,7 +722,7 @@ func (x *GetCollectionStatusResponse) String() string {
 func (*GetCollectionStatusResponse) ProtoMessage() {}
 
 func (x *GetCollectionStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[14]
+	mi := &file_apigateway_apigateway_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -734,7 +735,7 @@ func (x *GetCollectionStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCollectionStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetCollectionStatusResponse) Descriptor() ([]byte, []int) {
-	return file_shared_proto_apigateway_apigateway_proto_rawDescGZIP(), []int{14}
+	return file_apigateway_apigateway_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *GetCollectionStatusResponse) GetName() string {
@@ -777,7 +778,7 @@ type ShardStatus struct {
 
 func (x *ShardStatus) Reset() {
 	*x = ShardStatus{}
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[15]
+	mi := &file_apigateway_apigateway_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -789,7 +790,7 @@ func (x *ShardStatus) String() string {
 func (*ShardStatus) ProtoMessage() {}
 
 func (x *ShardStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[15]
+	mi := &file_apigateway_apigateway_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -802,7 +803,7 @@ func (x *ShardStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShardStatus.ProtoReflect.Descriptor instead.
 func (*ShardStatus) Descriptor() ([]byte, []int) {
-	return file_shared_proto_apigateway_apigateway_proto_rawDescGZIP(), []int{15}
+	return file_apigateway_apigateway_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ShardStatus) GetShardId() uint32 {
@@ -844,7 +845,7 @@ type Point struct {
 
 func (x *Point) Reset() {
 	*x = Point{}
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[16]
+	mi := &file_apigateway_apigateway_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -856,7 +857,7 @@ func (x *Point) String() string {
 func (*Point) ProtoMessage() {}
 
 func (x *Point) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_proto_apigateway_apigateway_proto_msgTypes[16]
+	mi := &file_apigateway_apigateway_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -869,7 +870,7 @@ func (x *Point) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Point.ProtoReflect.Descriptor instead.
 func (*Point) Descriptor() ([]byte, []int) {
-	return file_shared_proto_apigateway_apigateway_proto_rawDescGZIP(), []int{16}
+	return file_apigateway_apigateway_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *Point) GetId() string {
@@ -893,12 +894,100 @@ func (x *Point) GetPayload() map[string]string {
 	return nil
 }
 
-var File_shared_proto_apigateway_apigateway_proto protoreflect.FileDescriptor
+type UpdateUserProfileRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Plan          auth.Plan              `protobuf:"varint,1,opt,name=plan,proto3,enum=vectron.auth.v1.Plan" json:"plan,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
 
-const file_shared_proto_apigateway_apigateway_proto_rawDesc = "" +
+func (x *UpdateUserProfileRequest) Reset() {
+	*x = UpdateUserProfileRequest{}
+	mi := &file_apigateway_apigateway_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateUserProfileRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateUserProfileRequest) ProtoMessage() {}
+
+func (x *UpdateUserProfileRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_apigateway_apigateway_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateUserProfileRequest.ProtoReflect.Descriptor instead.
+func (*UpdateUserProfileRequest) Descriptor() ([]byte, []int) {
+	return file_apigateway_apigateway_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *UpdateUserProfileRequest) GetPlan() auth.Plan {
+	if x != nil {
+		return x.Plan
+	}
+	return auth.Plan(0)
+}
+
+type UpdateUserProfileResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	User          *auth.UserProfile      `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateUserProfileResponse) Reset() {
+	*x = UpdateUserProfileResponse{}
+	mi := &file_apigateway_apigateway_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateUserProfileResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateUserProfileResponse) ProtoMessage() {}
+
+func (x *UpdateUserProfileResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_apigateway_apigateway_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateUserProfileResponse.ProtoReflect.Descriptor instead.
+func (*UpdateUserProfileResponse) Descriptor() ([]byte, []int) {
+	return file_apigateway_apigateway_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *UpdateUserProfileResponse) GetUser() *auth.UserProfile {
+	if x != nil {
+		return x.User
+	}
+	return nil
+}
+
+var File_apigateway_apigateway_proto protoreflect.FileDescriptor
+
+const file_apigateway_apigateway_proto_rawDesc = "" +
 	"\n" +
-	"(shared/proto/apigateway/apigateway.proto\x12\n" +
-	"vectron.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"q\n" +
+	"\x1bapigateway/apigateway.proto\x12\n" +
+	"vectron.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\x1a\x0fauth/auth.proto\"q\n" +
 	"\x17CreateCollectionRequest\x12\x17\n" +
 	"\x04name\x18\x01 \x01(\tB\x03\xe0A\x02R\x04name\x12!\n" +
 	"\tdimension\x18\x02 \x01(\x05B\x03\xe0A\x02R\tdimension\x12\x1a\n" +
@@ -962,7 +1051,11 @@ const file_shared_proto_apigateway_apigateway_proto_rawDesc = "" +
 	"\apayload\x18\x03 \x03(\v2\x1e.vectron.v1.Point.PayloadEntryR\apayload\x1a:\n" +
 	"\fPayloadEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x012\xd6\x06\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"E\n" +
+	"\x18UpdateUserProfileRequest\x12)\n" +
+	"\x04plan\x18\x01 \x01(\x0e2\x15.vectron.auth.v1.PlanR\x04plan\"M\n" +
+	"\x19UpdateUserProfileResponse\x120\n" +
+	"\x04user\x18\x01 \x01(\v2\x1c.vectron.auth.v1.UserProfileR\x04user2\xd5\a\n" +
 	"\x0eVectronService\x12y\n" +
 	"\x10CreateCollection\x12#.vectron.v1.CreateCollectionRequest\x1a$.vectron.v1.CreateCollectionResponse\"\x1a\x82\xd3\xe4\x93\x02\x14:\x01*\"\x0f/v1/collections\x12o\n" +
 	"\x06Upsert\x12\x19.vectron.v1.UpsertRequest\x1a\x1a.vectron.v1.UpsertResponse\".\x82\xd3\xe4\x93\x02(:\x01*\"#/v1/collections/{collection}/points\x12v\n" +
@@ -970,22 +1063,23 @@ const file_shared_proto_apigateway_apigateway_proto_rawDesc = "" +
 	"\x03Get\x12\x16.vectron.v1.GetRequest\x1a\x17.vectron.v1.GetResponse\"0\x82\xd3\xe4\x93\x02*\x12(/v1/collections/{collection}/points/{id}\x12q\n" +
 	"\x06Delete\x12\x19.vectron.v1.DeleteRequest\x1a\x1a.vectron.v1.DeleteResponse\"0\x82\xd3\xe4\x93\x02**(/v1/collections/{collection}/points/{id}\x12s\n" +
 	"\x0fListCollections\x12\".vectron.v1.ListCollectionsRequest\x1a#.vectron.v1.ListCollectionsResponse\"\x17\x82\xd3\xe4\x93\x02\x11\x12\x0f/v1/collections\x12\x8d\x01\n" +
-	"\x13GetCollectionStatus\x12&.vectron.v1.GetCollectionStatusRequest\x1a'.vectron.v1.GetCollectionStatusResponse\"%\x82\xd3\xe4\x93\x02\x1f\x12\x1d/v1/collections/{name}/statusB8Z6github.com/pavandhadge/vectron/shared/proto/apigatewayb\x06proto3"
+	"\x13GetCollectionStatus\x12&.vectron.v1.GetCollectionStatusRequest\x1a'.vectron.v1.GetCollectionStatusResponse\"%\x82\xd3\xe4\x93\x02\x1f\x12\x1d/v1/collections/{name}/status\x12}\n" +
+	"\x11UpdateUserProfile\x12$.vectron.v1.UpdateUserProfileRequest\x1a%.vectron.v1.UpdateUserProfileResponse\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\x1a\x10/v1/user/profileB8Z6github.com/pavandhadge/vectron/shared/proto/apigatewayb\x06proto3"
 
 var (
-	file_shared_proto_apigateway_apigateway_proto_rawDescOnce sync.Once
-	file_shared_proto_apigateway_apigateway_proto_rawDescData []byte
+	file_apigateway_apigateway_proto_rawDescOnce sync.Once
+	file_apigateway_apigateway_proto_rawDescData []byte
 )
 
-func file_shared_proto_apigateway_apigateway_proto_rawDescGZIP() []byte {
-	file_shared_proto_apigateway_apigateway_proto_rawDescOnce.Do(func() {
-		file_shared_proto_apigateway_apigateway_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_shared_proto_apigateway_apigateway_proto_rawDesc), len(file_shared_proto_apigateway_apigateway_proto_rawDesc)))
+func file_apigateway_apigateway_proto_rawDescGZIP() []byte {
+	file_apigateway_apigateway_proto_rawDescOnce.Do(func() {
+		file_apigateway_apigateway_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_apigateway_apigateway_proto_rawDesc), len(file_apigateway_apigateway_proto_rawDesc)))
 	})
-	return file_shared_proto_apigateway_apigateway_proto_rawDescData
+	return file_apigateway_apigateway_proto_rawDescData
 }
 
-var file_shared_proto_apigateway_apigateway_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
-var file_shared_proto_apigateway_apigateway_proto_goTypes = []any{
+var file_apigateway_apigateway_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_apigateway_apigateway_proto_goTypes = []any{
 	(*CreateCollectionRequest)(nil),     // 0: vectron.v1.CreateCollectionRequest
 	(*CreateCollectionResponse)(nil),    // 1: vectron.v1.CreateCollectionResponse
 	(*UpsertRequest)(nil),               // 2: vectron.v1.UpsertRequest
@@ -1003,57 +1097,65 @@ var file_shared_proto_apigateway_apigateway_proto_goTypes = []any{
 	(*GetCollectionStatusResponse)(nil), // 14: vectron.v1.GetCollectionStatusResponse
 	(*ShardStatus)(nil),                 // 15: vectron.v1.ShardStatus
 	(*Point)(nil),                       // 16: vectron.v1.Point
-	nil,                                 // 17: vectron.v1.SearchResult.PayloadEntry
-	nil,                                 // 18: vectron.v1.Point.PayloadEntry
+	(*UpdateUserProfileRequest)(nil),    // 17: vectron.v1.UpdateUserProfileRequest
+	(*UpdateUserProfileResponse)(nil),   // 18: vectron.v1.UpdateUserProfileResponse
+	nil,                                 // 19: vectron.v1.SearchResult.PayloadEntry
+	nil,                                 // 20: vectron.v1.Point.PayloadEntry
+	(auth.Plan)(0),                      // 21: vectron.auth.v1.Plan
+	(*auth.UserProfile)(nil),            // 22: vectron.auth.v1.UserProfile
 }
-var file_shared_proto_apigateway_apigateway_proto_depIdxs = []int32{
+var file_apigateway_apigateway_proto_depIdxs = []int32{
 	16, // 0: vectron.v1.UpsertRequest.points:type_name -> vectron.v1.Point
 	6,  // 1: vectron.v1.SearchResponse.results:type_name -> vectron.v1.SearchResult
-	17, // 2: vectron.v1.SearchResult.payload:type_name -> vectron.v1.SearchResult.PayloadEntry
+	19, // 2: vectron.v1.SearchResult.payload:type_name -> vectron.v1.SearchResult.PayloadEntry
 	16, // 3: vectron.v1.GetResponse.point:type_name -> vectron.v1.Point
 	15, // 4: vectron.v1.GetCollectionStatusResponse.shards:type_name -> vectron.v1.ShardStatus
-	18, // 5: vectron.v1.Point.payload:type_name -> vectron.v1.Point.PayloadEntry
-	0,  // 6: vectron.v1.VectronService.CreateCollection:input_type -> vectron.v1.CreateCollectionRequest
-	2,  // 7: vectron.v1.VectronService.Upsert:input_type -> vectron.v1.UpsertRequest
-	4,  // 8: vectron.v1.VectronService.Search:input_type -> vectron.v1.SearchRequest
-	7,  // 9: vectron.v1.VectronService.Get:input_type -> vectron.v1.GetRequest
-	9,  // 10: vectron.v1.VectronService.Delete:input_type -> vectron.v1.DeleteRequest
-	11, // 11: vectron.v1.VectronService.ListCollections:input_type -> vectron.v1.ListCollectionsRequest
-	13, // 12: vectron.v1.VectronService.GetCollectionStatus:input_type -> vectron.v1.GetCollectionStatusRequest
-	1,  // 13: vectron.v1.VectronService.CreateCollection:output_type -> vectron.v1.CreateCollectionResponse
-	3,  // 14: vectron.v1.VectronService.Upsert:output_type -> vectron.v1.UpsertResponse
-	5,  // 15: vectron.v1.VectronService.Search:output_type -> vectron.v1.SearchResponse
-	8,  // 16: vectron.v1.VectronService.Get:output_type -> vectron.v1.GetResponse
-	10, // 17: vectron.v1.VectronService.Delete:output_type -> vectron.v1.DeleteResponse
-	12, // 18: vectron.v1.VectronService.ListCollections:output_type -> vectron.v1.ListCollectionsResponse
-	14, // 19: vectron.v1.VectronService.GetCollectionStatus:output_type -> vectron.v1.GetCollectionStatusResponse
-	13, // [13:20] is the sub-list for method output_type
-	6,  // [6:13] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	20, // 5: vectron.v1.Point.payload:type_name -> vectron.v1.Point.PayloadEntry
+	21, // 6: vectron.v1.UpdateUserProfileRequest.plan:type_name -> vectron.auth.v1.Plan
+	22, // 7: vectron.v1.UpdateUserProfileResponse.user:type_name -> vectron.auth.v1.UserProfile
+	0,  // 8: vectron.v1.VectronService.CreateCollection:input_type -> vectron.v1.CreateCollectionRequest
+	2,  // 9: vectron.v1.VectronService.Upsert:input_type -> vectron.v1.UpsertRequest
+	4,  // 10: vectron.v1.VectronService.Search:input_type -> vectron.v1.SearchRequest
+	7,  // 11: vectron.v1.VectronService.Get:input_type -> vectron.v1.GetRequest
+	9,  // 12: vectron.v1.VectronService.Delete:input_type -> vectron.v1.DeleteRequest
+	11, // 13: vectron.v1.VectronService.ListCollections:input_type -> vectron.v1.ListCollectionsRequest
+	13, // 14: vectron.v1.VectronService.GetCollectionStatus:input_type -> vectron.v1.GetCollectionStatusRequest
+	17, // 15: vectron.v1.VectronService.UpdateUserProfile:input_type -> vectron.v1.UpdateUserProfileRequest
+	1,  // 16: vectron.v1.VectronService.CreateCollection:output_type -> vectron.v1.CreateCollectionResponse
+	3,  // 17: vectron.v1.VectronService.Upsert:output_type -> vectron.v1.UpsertResponse
+	5,  // 18: vectron.v1.VectronService.Search:output_type -> vectron.v1.SearchResponse
+	8,  // 19: vectron.v1.VectronService.Get:output_type -> vectron.v1.GetResponse
+	10, // 20: vectron.v1.VectronService.Delete:output_type -> vectron.v1.DeleteResponse
+	12, // 21: vectron.v1.VectronService.ListCollections:output_type -> vectron.v1.ListCollectionsResponse
+	14, // 22: vectron.v1.VectronService.GetCollectionStatus:output_type -> vectron.v1.GetCollectionStatusResponse
+	18, // 23: vectron.v1.VectronService.UpdateUserProfile:output_type -> vectron.v1.UpdateUserProfileResponse
+	16, // [16:24] is the sub-list for method output_type
+	8,  // [8:16] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
-func init() { file_shared_proto_apigateway_apigateway_proto_init() }
-func file_shared_proto_apigateway_apigateway_proto_init() {
-	if File_shared_proto_apigateway_apigateway_proto != nil {
+func init() { file_apigateway_apigateway_proto_init() }
+func file_apigateway_apigateway_proto_init() {
+	if File_apigateway_apigateway_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shared_proto_apigateway_apigateway_proto_rawDesc), len(file_shared_proto_apigateway_apigateway_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_apigateway_apigateway_proto_rawDesc), len(file_apigateway_apigateway_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_shared_proto_apigateway_apigateway_proto_goTypes,
-		DependencyIndexes: file_shared_proto_apigateway_apigateway_proto_depIdxs,
-		MessageInfos:      file_shared_proto_apigateway_apigateway_proto_msgTypes,
+		GoTypes:           file_apigateway_apigateway_proto_goTypes,
+		DependencyIndexes: file_apigateway_apigateway_proto_depIdxs,
+		MessageInfos:      file_apigateway_apigateway_proto_msgTypes,
 	}.Build()
-	File_shared_proto_apigateway_apigateway_proto = out.File
-	file_shared_proto_apigateway_apigateway_proto_goTypes = nil
-	file_shared_proto_apigateway_apigateway_proto_depIdxs = nil
+	File_apigateway_apigateway_proto = out.File
+	file_apigateway_apigateway_proto_goTypes = nil
+	file_apigateway_apigateway_proto_depIdxs = nil
 }

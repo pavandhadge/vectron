@@ -7,7 +7,7 @@ require (
 	github.com/google/uuid v1.6.0
 	//github.com/pavandhadge/vectron/auth/service v0.0.0 // Add this line
 	github.com/pavandhadge/vectron/clientlibs/go v0.0.0
-	//github.com/pavandhadge/vectron/shared v0.0.0-00010101000000-000000000000
+	github.com/pavandhadge/vectron/shared v0.0.0
 	github.com/stretchr/testify v1.11.1
 	go.etcd.io/etcd/server/v3 v3.6.7
 	google.golang.org/grpc v1.78.0
@@ -86,4 +86,4 @@ replace github.com/pavandhadge/vectron/clientlibs/go => ./clientlibs/go
 
 //replace github.com/pavandhadge/vectron/auth/service => ./auth/service
 
-//replace github.com/pavandhadge/vectron/shared => ./shared
+replace github.com/pavandhadge/vectron/shared => ./shared

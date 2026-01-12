@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from shared.proto.auth import auth_pb2 as shared_dot_proto_dot_auth_dot_auth__pb2
+from auth import auth_pb2 as auth_dot_auth__pb2
 
 GRPC_GENERATED_VERSION = '1.76.0'
 GRPC_VERSION = grpc.__version__
@@ -18,7 +18,7 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + ' but the generated code in shared/proto/auth/auth_pb2_grpc.py depends on'
+        + ' but the generated code in auth/auth_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
@@ -40,38 +40,53 @@ class AuthServiceStub(object):
         """
         self.RegisterUser = channel.unary_unary(
                 '/vectron.auth.v1.AuthService/RegisterUser',
-                request_serializer=shared_dot_proto_dot_auth_dot_auth__pb2.RegisterUserRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_auth_dot_auth__pb2.RegisterUserResponse.FromString,
+                request_serializer=auth_dot_auth__pb2.RegisterUserRequest.SerializeToString,
+                response_deserializer=auth_dot_auth__pb2.RegisterUserResponse.FromString,
                 _registered_method=True)
         self.Login = channel.unary_unary(
                 '/vectron.auth.v1.AuthService/Login',
-                request_serializer=shared_dot_proto_dot_auth_dot_auth__pb2.LoginRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_auth_dot_auth__pb2.LoginResponse.FromString,
+                request_serializer=auth_dot_auth__pb2.LoginRequest.SerializeToString,
+                response_deserializer=auth_dot_auth__pb2.LoginResponse.FromString,
                 _registered_method=True)
         self.GetUserProfile = channel.unary_unary(
                 '/vectron.auth.v1.AuthService/GetUserProfile',
-                request_serializer=shared_dot_proto_dot_auth_dot_auth__pb2.GetUserProfileRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_auth_dot_auth__pb2.GetUserProfileResponse.FromString,
+                request_serializer=auth_dot_auth__pb2.GetUserProfileRequest.SerializeToString,
+                response_deserializer=auth_dot_auth__pb2.GetUserProfileResponse.FromString,
+                _registered_method=True)
+        self.UpdateUserProfile = channel.unary_unary(
+                '/vectron.auth.v1.AuthService/UpdateUserProfile',
+                request_serializer=auth_dot_auth__pb2.UpdateUserProfileRequest.SerializeToString,
+                response_deserializer=auth_dot_auth__pb2.UpdateUserProfileResponse.FromString,
                 _registered_method=True)
         self.CreateAPIKey = channel.unary_unary(
                 '/vectron.auth.v1.AuthService/CreateAPIKey',
-                request_serializer=shared_dot_proto_dot_auth_dot_auth__pb2.CreateAPIKeyRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_auth_dot_auth__pb2.CreateAPIKeyResponse.FromString,
+                request_serializer=auth_dot_auth__pb2.CreateAPIKeyRequest.SerializeToString,
+                response_deserializer=auth_dot_auth__pb2.CreateAPIKeyResponse.FromString,
                 _registered_method=True)
         self.ListAPIKeys = channel.unary_unary(
                 '/vectron.auth.v1.AuthService/ListAPIKeys',
-                request_serializer=shared_dot_proto_dot_auth_dot_auth__pb2.ListAPIKeysRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_auth_dot_auth__pb2.ListAPIKeysResponse.FromString,
+                request_serializer=auth_dot_auth__pb2.ListAPIKeysRequest.SerializeToString,
+                response_deserializer=auth_dot_auth__pb2.ListAPIKeysResponse.FromString,
                 _registered_method=True)
         self.DeleteAPIKey = channel.unary_unary(
                 '/vectron.auth.v1.AuthService/DeleteAPIKey',
-                request_serializer=shared_dot_proto_dot_auth_dot_auth__pb2.DeleteAPIKeyRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_auth_dot_auth__pb2.DeleteAPIKeyResponse.FromString,
+                request_serializer=auth_dot_auth__pb2.DeleteAPIKeyRequest.SerializeToString,
+                response_deserializer=auth_dot_auth__pb2.DeleteAPIKeyResponse.FromString,
                 _registered_method=True)
         self.ValidateAPIKey = channel.unary_unary(
                 '/vectron.auth.v1.AuthService/ValidateAPIKey',
-                request_serializer=shared_dot_proto_dot_auth_dot_auth__pb2.ValidateAPIKeyRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_auth_dot_auth__pb2.ValidateAPIKeyResponse.FromString,
+                request_serializer=auth_dot_auth__pb2.ValidateAPIKeyRequest.SerializeToString,
+                response_deserializer=auth_dot_auth__pb2.ValidateAPIKeyResponse.FromString,
+                _registered_method=True)
+        self.CreateSDKJWT = channel.unary_unary(
+                '/vectron.auth.v1.AuthService/CreateSDKJWT',
+                request_serializer=auth_dot_auth__pb2.CreateSDKJWTRequest.SerializeToString,
+                response_deserializer=auth_dot_auth__pb2.CreateSDKJWTResponse.FromString,
+                _registered_method=True)
+        self.GetAuthDetailsForSDK = channel.unary_unary(
+                '/vectron.auth.v1.AuthService/GetAuthDetailsForSDK',
+                request_serializer=auth_dot_auth__pb2.GetAuthDetailsForSDKRequest.SerializeToString,
+                response_deserializer=auth_dot_auth__pb2.GetAuthDetailsForSDKResponse.FromString,
                 _registered_method=True)
 
 
@@ -98,6 +113,13 @@ class AuthServiceServicer(object):
 
     def GetUserProfile(self, request, context):
         """Get the current user's profile (requires JWT authentication).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UpdateUserProfile(self, request, context):
+        """Update the current user's profile (requires JWT authentication).
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -135,43 +157,72 @@ class AuthServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def CreateSDKJWT(self, request, context):
+        """Create an SDK JWT for an existing API key.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetAuthDetailsForSDK(self, request, context):
+        """Get user and plan details for a given API Key ID.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AuthServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'RegisterUser': grpc.unary_unary_rpc_method_handler(
                     servicer.RegisterUser,
-                    request_deserializer=shared_dot_proto_dot_auth_dot_auth__pb2.RegisterUserRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_auth_dot_auth__pb2.RegisterUserResponse.SerializeToString,
+                    request_deserializer=auth_dot_auth__pb2.RegisterUserRequest.FromString,
+                    response_serializer=auth_dot_auth__pb2.RegisterUserResponse.SerializeToString,
             ),
             'Login': grpc.unary_unary_rpc_method_handler(
                     servicer.Login,
-                    request_deserializer=shared_dot_proto_dot_auth_dot_auth__pb2.LoginRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_auth_dot_auth__pb2.LoginResponse.SerializeToString,
+                    request_deserializer=auth_dot_auth__pb2.LoginRequest.FromString,
+                    response_serializer=auth_dot_auth__pb2.LoginResponse.SerializeToString,
             ),
             'GetUserProfile': grpc.unary_unary_rpc_method_handler(
                     servicer.GetUserProfile,
-                    request_deserializer=shared_dot_proto_dot_auth_dot_auth__pb2.GetUserProfileRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_auth_dot_auth__pb2.GetUserProfileResponse.SerializeToString,
+                    request_deserializer=auth_dot_auth__pb2.GetUserProfileRequest.FromString,
+                    response_serializer=auth_dot_auth__pb2.GetUserProfileResponse.SerializeToString,
+            ),
+            'UpdateUserProfile': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateUserProfile,
+                    request_deserializer=auth_dot_auth__pb2.UpdateUserProfileRequest.FromString,
+                    response_serializer=auth_dot_auth__pb2.UpdateUserProfileResponse.SerializeToString,
             ),
             'CreateAPIKey': grpc.unary_unary_rpc_method_handler(
                     servicer.CreateAPIKey,
-                    request_deserializer=shared_dot_proto_dot_auth_dot_auth__pb2.CreateAPIKeyRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_auth_dot_auth__pb2.CreateAPIKeyResponse.SerializeToString,
+                    request_deserializer=auth_dot_auth__pb2.CreateAPIKeyRequest.FromString,
+                    response_serializer=auth_dot_auth__pb2.CreateAPIKeyResponse.SerializeToString,
             ),
             'ListAPIKeys': grpc.unary_unary_rpc_method_handler(
                     servicer.ListAPIKeys,
-                    request_deserializer=shared_dot_proto_dot_auth_dot_auth__pb2.ListAPIKeysRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_auth_dot_auth__pb2.ListAPIKeysResponse.SerializeToString,
+                    request_deserializer=auth_dot_auth__pb2.ListAPIKeysRequest.FromString,
+                    response_serializer=auth_dot_auth__pb2.ListAPIKeysResponse.SerializeToString,
             ),
             'DeleteAPIKey': grpc.unary_unary_rpc_method_handler(
                     servicer.DeleteAPIKey,
-                    request_deserializer=shared_dot_proto_dot_auth_dot_auth__pb2.DeleteAPIKeyRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_auth_dot_auth__pb2.DeleteAPIKeyResponse.SerializeToString,
+                    request_deserializer=auth_dot_auth__pb2.DeleteAPIKeyRequest.FromString,
+                    response_serializer=auth_dot_auth__pb2.DeleteAPIKeyResponse.SerializeToString,
             ),
             'ValidateAPIKey': grpc.unary_unary_rpc_method_handler(
                     servicer.ValidateAPIKey,
-                    request_deserializer=shared_dot_proto_dot_auth_dot_auth__pb2.ValidateAPIKeyRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_auth_dot_auth__pb2.ValidateAPIKeyResponse.SerializeToString,
+                    request_deserializer=auth_dot_auth__pb2.ValidateAPIKeyRequest.FromString,
+                    response_serializer=auth_dot_auth__pb2.ValidateAPIKeyResponse.SerializeToString,
+            ),
+            'CreateSDKJWT': grpc.unary_unary_rpc_method_handler(
+                    servicer.CreateSDKJWT,
+                    request_deserializer=auth_dot_auth__pb2.CreateSDKJWTRequest.FromString,
+                    response_serializer=auth_dot_auth__pb2.CreateSDKJWTResponse.SerializeToString,
+            ),
+            'GetAuthDetailsForSDK': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAuthDetailsForSDK,
+                    request_deserializer=auth_dot_auth__pb2.GetAuthDetailsForSDKRequest.FromString,
+                    response_serializer=auth_dot_auth__pb2.GetAuthDetailsForSDKResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -203,8 +254,8 @@ class AuthService(object):
             request,
             target,
             '/vectron.auth.v1.AuthService/RegisterUser',
-            shared_dot_proto_dot_auth_dot_auth__pb2.RegisterUserRequest.SerializeToString,
-            shared_dot_proto_dot_auth_dot_auth__pb2.RegisterUserResponse.FromString,
+            auth_dot_auth__pb2.RegisterUserRequest.SerializeToString,
+            auth_dot_auth__pb2.RegisterUserResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -230,8 +281,8 @@ class AuthService(object):
             request,
             target,
             '/vectron.auth.v1.AuthService/Login',
-            shared_dot_proto_dot_auth_dot_auth__pb2.LoginRequest.SerializeToString,
-            shared_dot_proto_dot_auth_dot_auth__pb2.LoginResponse.FromString,
+            auth_dot_auth__pb2.LoginRequest.SerializeToString,
+            auth_dot_auth__pb2.LoginResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -257,8 +308,35 @@ class AuthService(object):
             request,
             target,
             '/vectron.auth.v1.AuthService/GetUserProfile',
-            shared_dot_proto_dot_auth_dot_auth__pb2.GetUserProfileRequest.SerializeToString,
-            shared_dot_proto_dot_auth_dot_auth__pb2.GetUserProfileResponse.FromString,
+            auth_dot_auth__pb2.GetUserProfileRequest.SerializeToString,
+            auth_dot_auth__pb2.GetUserProfileResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateUserProfile(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vectron.auth.v1.AuthService/UpdateUserProfile',
+            auth_dot_auth__pb2.UpdateUserProfileRequest.SerializeToString,
+            auth_dot_auth__pb2.UpdateUserProfileResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -284,8 +362,8 @@ class AuthService(object):
             request,
             target,
             '/vectron.auth.v1.AuthService/CreateAPIKey',
-            shared_dot_proto_dot_auth_dot_auth__pb2.CreateAPIKeyRequest.SerializeToString,
-            shared_dot_proto_dot_auth_dot_auth__pb2.CreateAPIKeyResponse.FromString,
+            auth_dot_auth__pb2.CreateAPIKeyRequest.SerializeToString,
+            auth_dot_auth__pb2.CreateAPIKeyResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -311,8 +389,8 @@ class AuthService(object):
             request,
             target,
             '/vectron.auth.v1.AuthService/ListAPIKeys',
-            shared_dot_proto_dot_auth_dot_auth__pb2.ListAPIKeysRequest.SerializeToString,
-            shared_dot_proto_dot_auth_dot_auth__pb2.ListAPIKeysResponse.FromString,
+            auth_dot_auth__pb2.ListAPIKeysRequest.SerializeToString,
+            auth_dot_auth__pb2.ListAPIKeysResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -338,8 +416,8 @@ class AuthService(object):
             request,
             target,
             '/vectron.auth.v1.AuthService/DeleteAPIKey',
-            shared_dot_proto_dot_auth_dot_auth__pb2.DeleteAPIKeyRequest.SerializeToString,
-            shared_dot_proto_dot_auth_dot_auth__pb2.DeleteAPIKeyResponse.FromString,
+            auth_dot_auth__pb2.DeleteAPIKeyRequest.SerializeToString,
+            auth_dot_auth__pb2.DeleteAPIKeyResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -365,8 +443,62 @@ class AuthService(object):
             request,
             target,
             '/vectron.auth.v1.AuthService/ValidateAPIKey',
-            shared_dot_proto_dot_auth_dot_auth__pb2.ValidateAPIKeyRequest.SerializeToString,
-            shared_dot_proto_dot_auth_dot_auth__pb2.ValidateAPIKeyResponse.FromString,
+            auth_dot_auth__pb2.ValidateAPIKeyRequest.SerializeToString,
+            auth_dot_auth__pb2.ValidateAPIKeyResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CreateSDKJWT(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vectron.auth.v1.AuthService/CreateSDKJWT',
+            auth_dot_auth__pb2.CreateSDKJWTRequest.SerializeToString,
+            auth_dot_auth__pb2.CreateSDKJWTResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetAuthDetailsForSDK(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vectron.auth.v1.AuthService/GetAuthDetailsForSDK',
+            auth_dot_auth__pb2.GetAuthDetailsForSDKRequest.SerializeToString,
+            auth_dot_auth__pb2.GetAuthDetailsForSDKResponse.FromString,
             options,
             channel_credentials,
             insecure,

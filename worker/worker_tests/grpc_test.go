@@ -9,9 +9,9 @@ import (
 	"time"
 
 	// "github.com/pavandhadge/vectron/worker/internal"
+	"github.com/pavandhadge/vectron/shared/proto/worker"
 	"github.com/pavandhadge/vectron/worker/internal"
 	"github.com/pavandhadge/vectron/worker/internal/storage"
-	"github.com/pavandhadge/vectron/worker/proto/worker"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"

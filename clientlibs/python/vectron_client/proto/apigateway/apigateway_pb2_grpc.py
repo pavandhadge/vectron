@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from shared.proto.apigateway import apigateway_pb2 as shared_dot_proto_dot_apigateway_dot_apigateway__pb2
+from apigateway import apigateway_pb2 as apigateway_dot_apigateway__pb2
 
 GRPC_GENERATED_VERSION = '1.76.0'
 GRPC_VERSION = grpc.__version__
@@ -18,7 +18,7 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + ' but the generated code in shared/proto/apigateway/apigateway_pb2_grpc.py depends on'
+        + ' but the generated code in apigateway/apigateway_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
@@ -40,38 +40,43 @@ class VectronServiceStub(object):
         """
         self.CreateCollection = channel.unary_unary(
                 '/vectron.v1.VectronService/CreateCollection',
-                request_serializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.CreateCollectionRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.CreateCollectionResponse.FromString,
+                request_serializer=apigateway_dot_apigateway__pb2.CreateCollectionRequest.SerializeToString,
+                response_deserializer=apigateway_dot_apigateway__pb2.CreateCollectionResponse.FromString,
                 _registered_method=True)
         self.Upsert = channel.unary_unary(
                 '/vectron.v1.VectronService/Upsert',
-                request_serializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.UpsertRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.UpsertResponse.FromString,
+                request_serializer=apigateway_dot_apigateway__pb2.UpsertRequest.SerializeToString,
+                response_deserializer=apigateway_dot_apigateway__pb2.UpsertResponse.FromString,
                 _registered_method=True)
         self.Search = channel.unary_unary(
                 '/vectron.v1.VectronService/Search',
-                request_serializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.SearchRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.SearchResponse.FromString,
+                request_serializer=apigateway_dot_apigateway__pb2.SearchRequest.SerializeToString,
+                response_deserializer=apigateway_dot_apigateway__pb2.SearchResponse.FromString,
                 _registered_method=True)
         self.Get = channel.unary_unary(
                 '/vectron.v1.VectronService/Get',
-                request_serializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.GetRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.GetResponse.FromString,
+                request_serializer=apigateway_dot_apigateway__pb2.GetRequest.SerializeToString,
+                response_deserializer=apigateway_dot_apigateway__pb2.GetResponse.FromString,
                 _registered_method=True)
         self.Delete = channel.unary_unary(
                 '/vectron.v1.VectronService/Delete',
-                request_serializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.DeleteRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.DeleteResponse.FromString,
+                request_serializer=apigateway_dot_apigateway__pb2.DeleteRequest.SerializeToString,
+                response_deserializer=apigateway_dot_apigateway__pb2.DeleteResponse.FromString,
                 _registered_method=True)
         self.ListCollections = channel.unary_unary(
                 '/vectron.v1.VectronService/ListCollections',
-                request_serializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.ListCollectionsRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.ListCollectionsResponse.FromString,
+                request_serializer=apigateway_dot_apigateway__pb2.ListCollectionsRequest.SerializeToString,
+                response_deserializer=apigateway_dot_apigateway__pb2.ListCollectionsResponse.FromString,
                 _registered_method=True)
         self.GetCollectionStatus = channel.unary_unary(
                 '/vectron.v1.VectronService/GetCollectionStatus',
-                request_serializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.GetCollectionStatusRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.GetCollectionStatusResponse.FromString,
+                request_serializer=apigateway_dot_apigateway__pb2.GetCollectionStatusRequest.SerializeToString,
+                response_deserializer=apigateway_dot_apigateway__pb2.GetCollectionStatusResponse.FromString,
+                _registered_method=True)
+        self.UpdateUserProfile = channel.unary_unary(
+                '/vectron.v1.VectronService/UpdateUserProfile',
+                request_serializer=apigateway_dot_apigateway__pb2.UpdateUserProfileRequest.SerializeToString,
+                response_deserializer=apigateway_dot_apigateway__pb2.UpdateUserProfileResponse.FromString,
                 _registered_method=True)
 
 
@@ -131,43 +136,55 @@ class VectronServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def UpdateUserProfile(self, request, context):
+        """Update user profile
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_VectronServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'CreateCollection': grpc.unary_unary_rpc_method_handler(
                     servicer.CreateCollection,
-                    request_deserializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.CreateCollectionRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.CreateCollectionResponse.SerializeToString,
+                    request_deserializer=apigateway_dot_apigateway__pb2.CreateCollectionRequest.FromString,
+                    response_serializer=apigateway_dot_apigateway__pb2.CreateCollectionResponse.SerializeToString,
             ),
             'Upsert': grpc.unary_unary_rpc_method_handler(
                     servicer.Upsert,
-                    request_deserializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.UpsertRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.UpsertResponse.SerializeToString,
+                    request_deserializer=apigateway_dot_apigateway__pb2.UpsertRequest.FromString,
+                    response_serializer=apigateway_dot_apigateway__pb2.UpsertResponse.SerializeToString,
             ),
             'Search': grpc.unary_unary_rpc_method_handler(
                     servicer.Search,
-                    request_deserializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.SearchRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.SearchResponse.SerializeToString,
+                    request_deserializer=apigateway_dot_apigateway__pb2.SearchRequest.FromString,
+                    response_serializer=apigateway_dot_apigateway__pb2.SearchResponse.SerializeToString,
             ),
             'Get': grpc.unary_unary_rpc_method_handler(
                     servicer.Get,
-                    request_deserializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.GetRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.GetResponse.SerializeToString,
+                    request_deserializer=apigateway_dot_apigateway__pb2.GetRequest.FromString,
+                    response_serializer=apigateway_dot_apigateway__pb2.GetResponse.SerializeToString,
             ),
             'Delete': grpc.unary_unary_rpc_method_handler(
                     servicer.Delete,
-                    request_deserializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.DeleteRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.DeleteResponse.SerializeToString,
+                    request_deserializer=apigateway_dot_apigateway__pb2.DeleteRequest.FromString,
+                    response_serializer=apigateway_dot_apigateway__pb2.DeleteResponse.SerializeToString,
             ),
             'ListCollections': grpc.unary_unary_rpc_method_handler(
                     servicer.ListCollections,
-                    request_deserializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.ListCollectionsRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.ListCollectionsResponse.SerializeToString,
+                    request_deserializer=apigateway_dot_apigateway__pb2.ListCollectionsRequest.FromString,
+                    response_serializer=apigateway_dot_apigateway__pb2.ListCollectionsResponse.SerializeToString,
             ),
             'GetCollectionStatus': grpc.unary_unary_rpc_method_handler(
                     servicer.GetCollectionStatus,
-                    request_deserializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.GetCollectionStatusRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_apigateway_dot_apigateway__pb2.GetCollectionStatusResponse.SerializeToString,
+                    request_deserializer=apigateway_dot_apigateway__pb2.GetCollectionStatusRequest.FromString,
+                    response_serializer=apigateway_dot_apigateway__pb2.GetCollectionStatusResponse.SerializeToString,
+            ),
+            'UpdateUserProfile': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateUserProfile,
+                    request_deserializer=apigateway_dot_apigateway__pb2.UpdateUserProfileRequest.FromString,
+                    response_serializer=apigateway_dot_apigateway__pb2.UpdateUserProfileResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -199,8 +216,8 @@ class VectronService(object):
             request,
             target,
             '/vectron.v1.VectronService/CreateCollection',
-            shared_dot_proto_dot_apigateway_dot_apigateway__pb2.CreateCollectionRequest.SerializeToString,
-            shared_dot_proto_dot_apigateway_dot_apigateway__pb2.CreateCollectionResponse.FromString,
+            apigateway_dot_apigateway__pb2.CreateCollectionRequest.SerializeToString,
+            apigateway_dot_apigateway__pb2.CreateCollectionResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -226,8 +243,8 @@ class VectronService(object):
             request,
             target,
             '/vectron.v1.VectronService/Upsert',
-            shared_dot_proto_dot_apigateway_dot_apigateway__pb2.UpsertRequest.SerializeToString,
-            shared_dot_proto_dot_apigateway_dot_apigateway__pb2.UpsertResponse.FromString,
+            apigateway_dot_apigateway__pb2.UpsertRequest.SerializeToString,
+            apigateway_dot_apigateway__pb2.UpsertResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -253,8 +270,8 @@ class VectronService(object):
             request,
             target,
             '/vectron.v1.VectronService/Search',
-            shared_dot_proto_dot_apigateway_dot_apigateway__pb2.SearchRequest.SerializeToString,
-            shared_dot_proto_dot_apigateway_dot_apigateway__pb2.SearchResponse.FromString,
+            apigateway_dot_apigateway__pb2.SearchRequest.SerializeToString,
+            apigateway_dot_apigateway__pb2.SearchResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -280,8 +297,8 @@ class VectronService(object):
             request,
             target,
             '/vectron.v1.VectronService/Get',
-            shared_dot_proto_dot_apigateway_dot_apigateway__pb2.GetRequest.SerializeToString,
-            shared_dot_proto_dot_apigateway_dot_apigateway__pb2.GetResponse.FromString,
+            apigateway_dot_apigateway__pb2.GetRequest.SerializeToString,
+            apigateway_dot_apigateway__pb2.GetResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -307,8 +324,8 @@ class VectronService(object):
             request,
             target,
             '/vectron.v1.VectronService/Delete',
-            shared_dot_proto_dot_apigateway_dot_apigateway__pb2.DeleteRequest.SerializeToString,
-            shared_dot_proto_dot_apigateway_dot_apigateway__pb2.DeleteResponse.FromString,
+            apigateway_dot_apigateway__pb2.DeleteRequest.SerializeToString,
+            apigateway_dot_apigateway__pb2.DeleteResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -334,8 +351,8 @@ class VectronService(object):
             request,
             target,
             '/vectron.v1.VectronService/ListCollections',
-            shared_dot_proto_dot_apigateway_dot_apigateway__pb2.ListCollectionsRequest.SerializeToString,
-            shared_dot_proto_dot_apigateway_dot_apigateway__pb2.ListCollectionsResponse.FromString,
+            apigateway_dot_apigateway__pb2.ListCollectionsRequest.SerializeToString,
+            apigateway_dot_apigateway__pb2.ListCollectionsResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -361,8 +378,35 @@ class VectronService(object):
             request,
             target,
             '/vectron.v1.VectronService/GetCollectionStatus',
-            shared_dot_proto_dot_apigateway_dot_apigateway__pb2.GetCollectionStatusRequest.SerializeToString,
-            shared_dot_proto_dot_apigateway_dot_apigateway__pb2.GetCollectionStatusResponse.FromString,
+            apigateway_dot_apigateway__pb2.GetCollectionStatusRequest.SerializeToString,
+            apigateway_dot_apigateway__pb2.GetCollectionStatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateUserProfile(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vectron.v1.VectronService/UpdateUserProfile',
+            apigateway_dot_apigateway__pb2.UpdateUserProfileRequest.SerializeToString,
+            apigateway_dot_apigateway__pb2.UpdateUserProfileResponse.FromString,
             options,
             channel_credentials,
             insecure,

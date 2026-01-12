@@ -17,6 +17,7 @@ import (
 
 	// This assumes the generated protobuf code is in this package path.
 	apigateway "github.com/pavandhadge/vectron/clientlibs/go/proto/apigateway"
+	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
 )
 
 // Point represents a single vector point for upserting.
@@ -35,14 +36,14 @@ type SearchResult struct {
 
 // Client is the primary entrypoint for interacting with the Vectron API.
 type Client struct {
-	conn   *grpc.ClientConn
-	client apigateway.VectronServiceClient
-	apiKey string
+	conn       *grpc.ClientConn
+	client     apigateway.VectronServiceClient
+	jwtToken   string
 }
 
 // NewClient creates a new Vectron client.
 // It establishes a gRPC connection to the specified host address of the API gateway.
-func NewClient(host string, apiKey string) (*Client, error) {
+func NewClient(host string, jwtToken string) (*Client, error) {
 	if host == "" {
 		return nil, fmt.Errorf("%w: host cannot be empty", ErrInvalidArgument)
 	}
@@ -53,9 +54,9 @@ func NewClient(host string, apiKey string) (*Client, error) {
 	}
 
 	return &Client{
-		conn:   conn,
-		client: apigateway.NewVectronServiceClient(conn),
-		apiKey: apiKey,
+		conn:       conn,
+		client:     apigateway.NewVectronServiceClient(conn),
+		jwtToken:   jwtToken,
 	}, nil
 }
 
@@ -85,12 +86,12 @@ func handleError(err error) error {
 	}
 }
 
-// getContext creates a new context with a default timeout and injects the API key for authentication.
+// getContext creates a new context with a default timeout and injects the JWT for authentication.
 func (c *Client) getContext() (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	if c.apiKey != "" {
-		// Adds "authorization: Bearer <apiKey>" to the outgoing gRPC metadata.
-		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+c.apiKey)
+	if c.jwtToken != "" {
+		// Adds "authorization: Bearer <jwtToken>" to the outgoing gRPC metadata.
+		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+c.jwtToken)
 	}
 	return ctx, cancel
 }
@@ -262,6 +263,22 @@ func (c *Client) Delete(collection string, pointID string) error {
 
 	_, err := c.client.Delete(ctx, req)
 	return handleError(err)
+}
+
+// UpdateUserProfile updates the user's profile information.
+func (c *Client) UpdateUserProfile(plan authpb.Plan) (*authpb.UserProfile, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+
+	req := &apigateway.UpdateUserProfileRequest{
+		Plan: plan,
+	}
+
+	res, err := c.client.UpdateUserProfile(ctx, req)
+	if err != nil {
+		return nil, handleError(err)
+	}
+	return res.User, nil
 }
 
 // Close terminates the underlying gRPC connection to the server.

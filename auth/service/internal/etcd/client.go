@@ -11,7 +11,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"golang.org/x/crypto/bcrypt"
 
-	authpb "github.com/pavandhadge/vectron/auth/service/proto/auth"
+	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
 )
 
 const (
@@ -26,22 +26,22 @@ type Client struct {
 
 // UserData is the structure for users stored in etcd.
 type UserData struct {
-	ID                 string                  `json:"id"`
-	Email              string                  `json:"email"`
-	HashedPassword     string                  `json:"hashed_password"`
-	CreatedAt          int64                   `json:"created_at"`
-	Plan               authpb.Plan             `json:"plan"`
+	ID                 string                    `json:"id"`
+	Email              string                    `json:"email"`
+	HashedPassword     string                    `json:"hashed_password"`
+	CreatedAt          int64                     `json:"created_at"`
+	Plan               authpb.Plan               `json:"plan"`
 	SubscriptionStatus authpb.SubscriptionStatus `json:"subscription_status"`
 }
 
 // APIKeyData is the structure for API keys stored in etcd.
 type APIKeyData struct {
-	HashedKey string `json:"hashed_key"`
-	UserID    string `json:"user_id"`
-	Name      string `json:"name"`
-	Plan      string `json:"plan"`
-	CreatedAt int64  `json:"created_at"`
-	KeyPrefix string `json:"key_prefix"`
+	HashedKey string      `json:"hashed_key"`
+	UserID    string      `json:"user_id"`
+	Name      string      `json:"name"`
+	Plan      authpb.Plan `json:"plan"`
+	CreatedAt int64       `json:"created_at"`
+	KeyPrefix string      `json:"key_prefix"`
 }
 
 // NewClient creates a new etcd client.
@@ -161,11 +161,16 @@ func (c *Client) CreateAPIKey(ctx context.Context, userID, name string) (string,
 		return "", nil, err
 	}
 
+	userData, err := c.GetUserByID(ctx, userID)
+	if err != nil {
+		return "", nil, err
+	}
+
 	keyInfo := &APIKeyData{
 		HashedKey: string(hashedKey),
 		UserID:    userID,
 		Name:      name,
-		Plan:      "free", // Default plan
+		Plan:      userData.Plan, // Use authpb.Plan
 		CreatedAt: time.Now().Unix(),
 		KeyPrefix: fullKey[:13], // "vkey-" + 8 chars of uuid
 	}
@@ -260,4 +265,22 @@ func (c *Client) DeleteAPIKey(ctx context.Context, keyPrefixToDelete, userID str
 
 	_, err = c.Delete(ctx, etcdKey)
 	return err == nil, err
+}
+
+// GetAPIKeyDataByPrefix retrieves APIKeyData by its prefix.
+func (c *Client) GetAPIKeyDataByPrefix(ctx context.Context, prefix string) (*APIKeyData, error) {
+	etcdKey := fmt.Sprintf("%s%s", apiKeyPrefix, prefix)
+	resp, err := c.Get(ctx, etcdKey)
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.Kvs) == 0 {
+		return nil, nil // Key not found
+	}
+
+	var keyData APIKeyData
+	if err := json.Unmarshal(resp.Kvs[0].Value, &keyData); err != nil {
+		return nil, err
+	}
+	return &keyData, nil
 }

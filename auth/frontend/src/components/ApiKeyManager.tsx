@@ -5,6 +5,8 @@ import {
   ListKeysResponse,
   CreateKeyRequest,
   CreateKeyResponse,
+  CreateSDKJWTRequest,
+  CreateSDKJWTResponse,
 } from "../api-types";
 import {
   Copy,
@@ -15,24 +17,29 @@ import {
   AlertTriangle,
   Shield,
   Check,
+  KeyRound,
 } from "lucide-react";
 import { Dialog } from "./Dialog";
 import { Toast } from "./Toast";
 
 export const ApiKeyManager: React.FC = () => {
-  const { token, apiClient } = useAuth();
+  const { authApiClient } = useAuth(); // Use the correct client
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [newKeyName, setNewKeyName] = useState<string>("");
-  const [newlyCreatedKey, setNewlyCreatedKey] = useState<string | null>(null);
+  const [newlyGeneratedToken, setNewlyGeneratedToken] = useState<string | null>(
+    null,
+  );
+  const [sdkJwt, setSdkJwt] = useState<string | null>(null);
+  const [keyForJwt, setKeyForJwt] = useState<ApiKey | null>(null);
 
   // UI States
   const [loading, setLoading] = useState<boolean>(false);
-  const [actionLoading, setActionLoading] = useState<boolean>(false); // For delete/create specific loading
+  const [actionLoading, setActionLoading] = useState<string | boolean>(false);
   const [toastMessage, setToastMessage] = useState<{
     message: string;
     type: "success" | "danger" | "info";
   } | null>(null);
-  const [copiedKey, setCopiedKey] = useState<string | null>(null); // Visual feedback for copy
+  const [copiedValue, setCopiedValue] = useState<string | null>(null);
 
   // Dialog States
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
@@ -40,10 +47,9 @@ export const ApiKeyManager: React.FC = () => {
   const [keyToDelete, setKeyToDelete] = useState<string | null>(null);
 
   const fetchKeys = useCallback(async () => {
-    if (!token) return;
-    setLoading(true);
+    setIsLoading(true);
     try {
-      const response = await apiClient.get<ListKeysResponse>("/v1/keys");
+      const response = await authApiClient.get<ListKeysResponse>("/v1/keys");
       setKeys(response.data.keys || []);
     } catch (err) {
       setToastMessage({ message: "Failed to fetch API keys.", type: "danger" });
@@ -51,7 +57,7 @@ export const ApiKeyManager: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [token, apiClient]);
+  }, [authApiClient]);
 
   useEffect(() => {
     fetchKeys();
@@ -66,25 +72,38 @@ export const ApiKeyManager: React.FC = () => {
       });
       return;
     }
+
     setActionLoading(true);
-    setNewlyCreatedKey(null);
+    setNewlyGeneratedToken(null);
     try {
-      const payload: CreateKeyRequest = { name: newKeyName };
-      const response = await apiClient.post<CreateKeyResponse>(
+      const createKeyPayload: CreateKeyRequest = { name: newKeyName };
+      const keyResponse = await authApiClient.post<CreateKeyResponse>(
         "/v1/keys",
-        payload,
+        createKeyPayload,
       );
 
-      setNewlyCreatedKey(response.data.full_key);
+      const newKeyInfo = keyResponse.data.key_info;
+      if (!newKeyInfo) {
+        throw new Error("Failed to get key info after creation.");
+      }
+
+      const sdkJwtResponse = await authApiClient.post<CreateSDKJWTResponse>(
+        "/v1/sdk-jwt",
+        { api_key_id: newKeyInfo.keyPrefix } as CreateSDKJWTRequest,
+      );
+
+      setNewlyGeneratedToken(sdkJwtResponse.data.sdk_jwt);
       setNewKeyName("");
       fetchKeys();
       setToastMessage({
-        message: "API Key created successfully",
+        message: "API Key and SDK JWT created successfully",
         type: "success",
       });
     } catch (err: any) {
       setToastMessage({
-        message: err.response?.data?.message || "Failed to create API key.",
+        message:
+          err.response?.data?.message ||
+          "Failed to complete key creation process.",
         type: "danger",
       });
     } finally {
@@ -102,15 +121,15 @@ export const ApiKeyManager: React.FC = () => {
     if (!keyToDelete) return;
     setActionLoading(true);
     try {
-      await apiClient.delete(`/v1/keys/${keyToDelete}`);
-      setKeys((prev) => prev.filter((k) => k.keyPrefix !== keyToDelete)); // Optimistic update
+      await authApiClient.delete(`/v1/keys/${keyToDelete}`);
+      setKeys((prev) => prev.filter((k) => k.keyPrefix !== keyToDelete));
       setToastMessage({ message: "Key revoked successfully", type: "success" });
     } catch (err: any) {
       setToastMessage({
         message: err.response?.data?.message || "Failed to revoke key.",
         type: "danger",
       });
-      fetchKeys(); // Revert on failure
+      fetchKeys();
     } finally {
       setActionLoading(false);
       setOpenDeleteDialog(false);
@@ -118,16 +137,35 @@ export const ApiKeyManager: React.FC = () => {
     }
   };
 
+  const handleGetSdkJwt = async (key: ApiKey) => {
+    setActionLoading(key.keyPrefix);
+    try {
+      const response = await authApiClient.post<CreateSDKJWTResponse>(
+        "/v1/sdk-jwt",
+        { api_key_id: key.keyPrefix } as CreateSDKJWTRequest,
+      );
+      setSdkJwt(response.data.sdk_jwt);
+      setKeyForJwt(key);
+      setToastMessage({ message: "SDK JWT created", type: "success" });
+    } catch (err: any) {
+      setToastMessage({
+        message: err.response?.data?.message || "Failed to create SDK JWT.",
+        type: "danger",
+      });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
-    setCopiedKey(id);
+    setCopiedValue(id);
     setToastMessage({ message: "Copied to clipboard", type: "info" });
-    setTimeout(() => setCopiedKey(null), 2000);
+    setTimeout(() => setCopiedValue(null), 2000);
   };
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight text-white">
@@ -146,7 +184,6 @@ export const ApiKeyManager: React.FC = () => {
         </button>
       </div>
 
-      {/* Table Container */}
       <div className="rounded-xl border border-neutral-800 bg-[#0a0a0a] overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="min-w-full text-left">
@@ -216,16 +253,25 @@ export const ApiKeyManager: React.FC = () => {
                     <td className="px-6 py-4 text-right">
                       <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
+                          onClick={() => handleGetSdkJwt(key)}
+                          disabled={actionLoading === key.keyPrefix}
+                          className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-md transition-colors disabled:opacity-50"
+                          title="Get SDK JWT"
+                        >
+                          {actionLoading === key.keyPrefix ? (
+                            <Loader2 size={16} className="animate-spin" />
+                          ) : (
+                            <KeyRound size={16} />
+                          )}
+                        </button>
+                        <button
                           onClick={() =>
-                            copyToClipboard(
-                              key.full_key || key.keyPrefix,
-                              key.keyPrefix,
-                            )
+                            copyToClipboard(key.keyPrefix, key.keyPrefix)
                           }
                           className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-md transition-colors"
                           title="Copy Prefix"
                         >
-                          {copiedKey === key.keyPrefix ? (
+                          {copiedValue === key.keyPrefix ? (
                             <Check size={16} />
                           ) : (
                             <Copy size={16} />
@@ -269,7 +315,6 @@ export const ApiKeyManager: React.FC = () => {
 
       {/* --- Dialogs --- */}
 
-      {/* 1. Create Key Dialog */}
       <Dialog
         open={openCreateDialog}
         onClose={() => setOpenCreateDialog(false)}
@@ -284,10 +329,12 @@ export const ApiKeyManager: React.FC = () => {
             </button>
             <button
               onClick={handleCreateKey}
-              disabled={actionLoading}
+              disabled={actionLoading === true}
               className="flex items-center gap-2 px-4 py-2 bg-white text-black text-sm font-medium rounded hover:bg-neutral-200 transition-colors disabled:opacity-50"
             >
-              {actionLoading && <Loader2 className="animate-spin" size={14} />}
+              {actionLoading === true && (
+                <Loader2 className="animate-spin" size={14} />
+              )}
               Create Key
             </button>
           </>
@@ -315,17 +362,16 @@ export const ApiKeyManager: React.FC = () => {
         </div>
       </Dialog>
 
-      {/* 2. Success/Reveal Dialog */}
       <Dialog
-        open={!!newlyCreatedKey}
-        onClose={() => setNewlyCreatedKey(null)}
-        title="API Key Created"
+        open={!!newlyGeneratedToken}
+        onClose={() => setNewlyGeneratedToken(null)}
+        title="SDK JWT Created"
         actions={
           <button
-            onClick={() => setNewlyCreatedKey(null)}
+            onClick={() => setNewlyGeneratedToken(null)}
             className="w-full sm:w-auto px-4 py-2 bg-white text-black text-sm font-medium rounded hover:bg-neutral-200 transition-colors"
           >
-            I have saved this key
+            I have saved this token
           </button>
         }
       >
@@ -333,22 +379,22 @@ export const ApiKeyManager: React.FC = () => {
           <div className="flex items-start gap-3 p-3 bg-amber-900/10 border border-amber-900/30 rounded-lg">
             <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
             <p className="text-sm text-amber-500">
-              This key will only be shown once. If you lose it, you will need to
-              create a new one.
+              This is the SDK JWT to use in your client applications. It is
+              short-lived and will only be shown once.
             </p>
           </div>
-
           <div className="relative group">
             <div className="bg-black border border-neutral-800 rounded-lg p-4 font-mono text-sm break-all text-green-400 selection:bg-green-900 selection:text-white">
-              {newlyCreatedKey}
+              {newlyGeneratedToken}
             </div>
             <button
               onClick={() =>
-                newlyCreatedKey && copyToClipboard(newlyCreatedKey, "new-key")
+                newlyGeneratedToken &&
+                copyToClipboard(newlyGeneratedToken, "new-key")
               }
               className="absolute top-2 right-2 p-2 bg-neutral-800 text-neutral-300 hover:text-white rounded hover:bg-neutral-700 transition-colors"
             >
-              {copiedKey === "new-key" ? (
+              {copiedValue === "new-key" ? (
                 <Check size={14} />
               ) : (
                 <Copy size={14} />
@@ -358,7 +404,6 @@ export const ApiKeyManager: React.FC = () => {
         </div>
       </Dialog>
 
-      {/* 3. Delete Confirmation Dialog */}
       <Dialog
         open={openDeleteDialog}
         onClose={() => setOpenDeleteDialog(false)}
@@ -373,10 +418,12 @@ export const ApiKeyManager: React.FC = () => {
             </button>
             <button
               onClick={handleDeleteKey}
-              disabled={actionLoading}
+              disabled={actionLoading === true}
               className="flex items-center gap-2 px-4 py-2 bg-red-600/10 text-red-500 border border-red-900/50 text-sm font-medium rounded hover:bg-red-600 hover:text-white transition-all disabled:opacity-50"
             >
-              {actionLoading && <Loader2 className="animate-spin" size={14} />}
+              {actionLoading === true && (
+                <Loader2 className="animate-spin" size={14} />
+              )}
               Revoke Key
             </button>
           </>
@@ -392,14 +439,50 @@ export const ApiKeyManager: React.FC = () => {
         </p>
       </Dialog>
 
-      {/* Global Toast */}
-      {toastMessage && (
-        <Toast
-          message={toastMessage.message}
-          type={toastMessage.type}
-          onClose={() => setToastMessage(null)}
-        />
-      )}
+      <Dialog
+        open={!!sdkJwt}
+        onClose={() => setSdkJwt(null)}
+        title={`SDK JWT for "${keyForJwt?.name}"`}
+        actions={
+          <button
+            onClick={() => setSdkJwt(null)}
+            className="w-full sm:w-auto px-4 py-2 bg-white text-black text-sm font-medium rounded hover:bg-neutral-200 transition-colors"
+          >
+            Done
+          </button>
+        }
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-blue-900/10 border border-blue-900/30 rounded-lg">
+            <AlertTriangle className="w-5 h-5 text-blue-500 shrink-0" />
+            <p className="text-sm text-blue-400">
+              This is a short-lived JSON Web Token for use in your SDKs. It will
+              expire and cannot be refreshed automatically.
+            </p>
+          </div>
+          <div className="relative group">
+            <div className="bg-black border border-neutral-800 rounded-lg p-4 font-mono text-xs break-all text-green-400 selection:bg-green-900 selection:text-white">
+              {sdkJwt}
+            </div>
+            <button
+              onClick={() => sdkJwt && copyToClipboard(sdkJwt, "sdk-jwt")}
+              className="absolute top-2 right-2 p-2 bg-neutral-800 text-neutral-300 hover:text-white rounded hover:bg-neutral-700 transition-colors"
+            >
+              {copiedValue === "sdk-jwt" ? (
+                <Check size={14} />
+              ) : (
+                <Copy size={14} />
+              )}
+            </button>
+          </div>
+        </div>
+      </Dialog>
+
+      <Toast
+        message={toastMessage?.message}
+        type={toastMessage?.type}
+        onClose={() => setToastMessage(null)}
+      />
     </div>
   );
 };

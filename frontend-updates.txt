@@ -1,0 +1,8 @@
+I have updated the frontend application at `auth/frontend` to align with the new authentication flow.
+
+Here is a summary of the changes:
+- **SDK JWT Generation**: I've added a new feature to the `API Keys` page. You can now generate a short-lived SDK JWT for any of your API keys.
+- **New UI Components**: A new button and dialog have been added to the `ApiKeyManager` component to handle the SDK JWT generation and display. The styling of these new components matches the existing design of the application.
+- **Bug Fix**: I also fixed a minor bug related to the JWT field name in the login response type definition.
+
+The frontend should now be fully functional with the new authentication flow. You can run the frontend development server to see the changes.

@@ -17,11 +17,11 @@ import (
 
 	"github.com/pavandhadge/vectron/apigateway/internal/middleware"
 	"github.com/pavandhadge/vectron/apigateway/internal/translator"
-	pb "github.com/pavandhadge/vectron/apigateway/proto/apigateway"
-	placementpb "github.com/pavandhadge/vectron/apigateway/proto/placementdriver"
-	workerpb "github.com/pavandhadge/vectron/apigateway/proto/worker"
+	pb "github.com/pavandhadge/vectron/shared/proto/apigateway"
+	placementpb "github.com/pavandhadge/vectron/shared/proto/placementdriver"
+	workerpb "github.com/pavandhadge/vectron/shared/proto/worker"
 
-	authpb "github.com/pavandhadge/vectron/apigateway/proto/auth"
+	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
@@ -417,7 +417,7 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 	// Create the gRPC server with a chain of unary interceptors for middleware.
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
-			middleware.AuthInterceptor(authClient),               // Handles API Key authentication.
+			middleware.AuthInterceptor(authClient, config.JWTSecret), // Handles API Key authentication.
 			middleware.LoggingInterceptor,                        // Logs incoming requests.
 			middleware.RateLimitInterceptor(config.RateLimitRPS), // Enforces rate limiting.
 		),

@@ -85,6 +85,17 @@ service AuthService {
       body: "*"
     };
   }
+
+  // Create an SDK JWT for an existing API key.
+  rpc CreateSDKJWT(CreateSDKJWTRequest) returns (CreateSDKJWTResponse) {
+    option (google.api.http) = {
+      post: "/v1/sdk-jwt"
+      body: "*"
+    };
+  }
+
+  // Get user and plan details for a given API Key ID.
+  rpc GetAuthDetailsForSDK(GetAuthDetailsForSDKRequest) returns (GetAuthDetailsForSDKResponse) {}
 }
 
 // ================== Messages ==================
@@ -138,6 +149,7 @@ message UpdateUserProfileRequest {
 
 message UpdateUserProfileResponse {
   UserProfile user = 1;
+  string jwt_token = 2 [json_name = "jwtToken"];
 }
 
 // --- API Key Management ---
@@ -176,4 +188,22 @@ message ValidateAPIKeyResponse {
   string user_id = 2;
   string plan = 3;
   string api_key_id = 4;
+}
+
+message CreateSDKJWTRequest {
+  string api_key_id = 1; // The KeyPrefix of the API key to wrap
+}
+
+message CreateSDKJWTResponse {
+  string sdk_jwt = 1; // The JWT containing the API key
+}
+
+message GetAuthDetailsForSDKRequest {
+  string api_key_id = 1;
+}
+
+message GetAuthDetailsForSDKResponse {
+  string user_id = 1;
+  Plan plan = 2;
+  bool success = 3;
 }

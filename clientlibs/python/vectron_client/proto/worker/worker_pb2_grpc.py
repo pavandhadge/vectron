@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from shared.proto.worker import worker_pb2 as shared_dot_proto_dot_worker_dot_worker__pb2
+from worker import worker_pb2 as worker_dot_worker__pb2
 
 GRPC_GENERATED_VERSION = '1.76.0'
 GRPC_VERSION = grpc.__version__
@@ -18,7 +18,7 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + ' but the generated code in shared/proto/worker/worker_pb2_grpc.py depends on'
+        + ' but the generated code in worker/worker_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
@@ -37,48 +37,48 @@ class WorkerServiceStub(object):
         """
         self.StoreVector = channel.unary_unary(
                 '/vectron.worker.v1.WorkerService/StoreVector',
-                request_serializer=shared_dot_proto_dot_worker_dot_worker__pb2.StoreVectorRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_worker_dot_worker__pb2.StoreVectorResponse.FromString,
+                request_serializer=worker_dot_worker__pb2.StoreVectorRequest.SerializeToString,
+                response_deserializer=worker_dot_worker__pb2.StoreVectorResponse.FromString,
                 _registered_method=True)
         self.GetVector = channel.unary_unary(
                 '/vectron.worker.v1.WorkerService/GetVector',
-                request_serializer=shared_dot_proto_dot_worker_dot_worker__pb2.GetVectorRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_worker_dot_worker__pb2.GetVectorResponse.FromString,
+                request_serializer=worker_dot_worker__pb2.GetVectorRequest.SerializeToString,
+                response_deserializer=worker_dot_worker__pb2.GetVectorResponse.FromString,
                 _registered_method=True)
         self.DeleteVector = channel.unary_unary(
                 '/vectron.worker.v1.WorkerService/DeleteVector',
-                request_serializer=shared_dot_proto_dot_worker_dot_worker__pb2.DeleteVectorRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_worker_dot_worker__pb2.DeleteVectorResponse.FromString,
+                request_serializer=worker_dot_worker__pb2.DeleteVectorRequest.SerializeToString,
+                response_deserializer=worker_dot_worker__pb2.DeleteVectorResponse.FromString,
                 _registered_method=True)
         self.Search = channel.unary_unary(
                 '/vectron.worker.v1.WorkerService/Search',
-                request_serializer=shared_dot_proto_dot_worker_dot_worker__pb2.SearchRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_worker_dot_worker__pb2.SearchResponse.FromString,
+                request_serializer=worker_dot_worker__pb2.SearchRequest.SerializeToString,
+                response_deserializer=worker_dot_worker__pb2.SearchResponse.FromString,
                 _registered_method=True)
         self.Put = channel.unary_unary(
                 '/vectron.worker.v1.WorkerService/Put',
-                request_serializer=shared_dot_proto_dot_worker_dot_worker__pb2.PutRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_worker_dot_worker__pb2.PutResponse.FromString,
+                request_serializer=worker_dot_worker__pb2.PutRequest.SerializeToString,
+                response_deserializer=worker_dot_worker__pb2.PutResponse.FromString,
                 _registered_method=True)
         self.Get = channel.unary_unary(
                 '/vectron.worker.v1.WorkerService/Get',
-                request_serializer=shared_dot_proto_dot_worker_dot_worker__pb2.GetRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_worker_dot_worker__pb2.GetResponse.FromString,
+                request_serializer=worker_dot_worker__pb2.GetRequest.SerializeToString,
+                response_deserializer=worker_dot_worker__pb2.GetResponse.FromString,
                 _registered_method=True)
         self.Delete = channel.unary_unary(
                 '/vectron.worker.v1.WorkerService/Delete',
-                request_serializer=shared_dot_proto_dot_worker_dot_worker__pb2.DeleteRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_worker_dot_worker__pb2.DeleteResponse.FromString,
+                request_serializer=worker_dot_worker__pb2.DeleteRequest.SerializeToString,
+                response_deserializer=worker_dot_worker__pb2.DeleteResponse.FromString,
                 _registered_method=True)
         self.Status = channel.unary_unary(
                 '/vectron.worker.v1.WorkerService/Status',
-                request_serializer=shared_dot_proto_dot_worker_dot_worker__pb2.StatusRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_worker_dot_worker__pb2.StatusResponse.FromString,
+                request_serializer=worker_dot_worker__pb2.StatusRequest.SerializeToString,
+                response_deserializer=worker_dot_worker__pb2.StatusResponse.FromString,
                 _registered_method=True)
         self.Flush = channel.unary_unary(
                 '/vectron.worker.v1.WorkerService/Flush',
-                request_serializer=shared_dot_proto_dot_worker_dot_worker__pb2.FlushRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_worker_dot_worker__pb2.FlushResponse.FromString,
+                request_serializer=worker_dot_worker__pb2.FlushRequest.SerializeToString,
+                response_deserializer=worker_dot_worker__pb2.FlushResponse.FromString,
                 _registered_method=True)
 
 
@@ -148,48 +148,48 @@ def add_WorkerServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'StoreVector': grpc.unary_unary_rpc_method_handler(
                     servicer.StoreVector,
-                    request_deserializer=shared_dot_proto_dot_worker_dot_worker__pb2.StoreVectorRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_worker_dot_worker__pb2.StoreVectorResponse.SerializeToString,
+                    request_deserializer=worker_dot_worker__pb2.StoreVectorRequest.FromString,
+                    response_serializer=worker_dot_worker__pb2.StoreVectorResponse.SerializeToString,
             ),
             'GetVector': grpc.unary_unary_rpc_method_handler(
                     servicer.GetVector,
-                    request_deserializer=shared_dot_proto_dot_worker_dot_worker__pb2.GetVectorRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_worker_dot_worker__pb2.GetVectorResponse.SerializeToString,
+                    request_deserializer=worker_dot_worker__pb2.GetVectorRequest.FromString,
+                    response_serializer=worker_dot_worker__pb2.GetVectorResponse.SerializeToString,
             ),
             'DeleteVector': grpc.unary_unary_rpc_method_handler(
                     servicer.DeleteVector,
-                    request_deserializer=shared_dot_proto_dot_worker_dot_worker__pb2.DeleteVectorRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_worker_dot_worker__pb2.DeleteVectorResponse.SerializeToString,
+                    request_deserializer=worker_dot_worker__pb2.DeleteVectorRequest.FromString,
+                    response_serializer=worker_dot_worker__pb2.DeleteVectorResponse.SerializeToString,
             ),
             'Search': grpc.unary_unary_rpc_method_handler(
                     servicer.Search,
-                    request_deserializer=shared_dot_proto_dot_worker_dot_worker__pb2.SearchRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_worker_dot_worker__pb2.SearchResponse.SerializeToString,
+                    request_deserializer=worker_dot_worker__pb2.SearchRequest.FromString,
+                    response_serializer=worker_dot_worker__pb2.SearchResponse.SerializeToString,
             ),
             'Put': grpc.unary_unary_rpc_method_handler(
                     servicer.Put,
-                    request_deserializer=shared_dot_proto_dot_worker_dot_worker__pb2.PutRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_worker_dot_worker__pb2.PutResponse.SerializeToString,
+                    request_deserializer=worker_dot_worker__pb2.PutRequest.FromString,
+                    response_serializer=worker_dot_worker__pb2.PutResponse.SerializeToString,
             ),
             'Get': grpc.unary_unary_rpc_method_handler(
                     servicer.Get,
-                    request_deserializer=shared_dot_proto_dot_worker_dot_worker__pb2.GetRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_worker_dot_worker__pb2.GetResponse.SerializeToString,
+                    request_deserializer=worker_dot_worker__pb2.GetRequest.FromString,
+                    response_serializer=worker_dot_worker__pb2.GetResponse.SerializeToString,
             ),
             'Delete': grpc.unary_unary_rpc_method_handler(
                     servicer.Delete,
-                    request_deserializer=shared_dot_proto_dot_worker_dot_worker__pb2.DeleteRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_worker_dot_worker__pb2.DeleteResponse.SerializeToString,
+                    request_deserializer=worker_dot_worker__pb2.DeleteRequest.FromString,
+                    response_serializer=worker_dot_worker__pb2.DeleteResponse.SerializeToString,
             ),
             'Status': grpc.unary_unary_rpc_method_handler(
                     servicer.Status,
-                    request_deserializer=shared_dot_proto_dot_worker_dot_worker__pb2.StatusRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_worker_dot_worker__pb2.StatusResponse.SerializeToString,
+                    request_deserializer=worker_dot_worker__pb2.StatusRequest.FromString,
+                    response_serializer=worker_dot_worker__pb2.StatusResponse.SerializeToString,
             ),
             'Flush': grpc.unary_unary_rpc_method_handler(
                     servicer.Flush,
-                    request_deserializer=shared_dot_proto_dot_worker_dot_worker__pb2.FlushRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_worker_dot_worker__pb2.FlushResponse.SerializeToString,
+                    request_deserializer=worker_dot_worker__pb2.FlushRequest.FromString,
+                    response_serializer=worker_dot_worker__pb2.FlushResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -218,8 +218,8 @@ class WorkerService(object):
             request,
             target,
             '/vectron.worker.v1.WorkerService/StoreVector',
-            shared_dot_proto_dot_worker_dot_worker__pb2.StoreVectorRequest.SerializeToString,
-            shared_dot_proto_dot_worker_dot_worker__pb2.StoreVectorResponse.FromString,
+            worker_dot_worker__pb2.StoreVectorRequest.SerializeToString,
+            worker_dot_worker__pb2.StoreVectorResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -245,8 +245,8 @@ class WorkerService(object):
             request,
             target,
             '/vectron.worker.v1.WorkerService/GetVector',
-            shared_dot_proto_dot_worker_dot_worker__pb2.GetVectorRequest.SerializeToString,
-            shared_dot_proto_dot_worker_dot_worker__pb2.GetVectorResponse.FromString,
+            worker_dot_worker__pb2.GetVectorRequest.SerializeToString,
+            worker_dot_worker__pb2.GetVectorResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -272,8 +272,8 @@ class WorkerService(object):
             request,
             target,
             '/vectron.worker.v1.WorkerService/DeleteVector',
-            shared_dot_proto_dot_worker_dot_worker__pb2.DeleteVectorRequest.SerializeToString,
-            shared_dot_proto_dot_worker_dot_worker__pb2.DeleteVectorResponse.FromString,
+            worker_dot_worker__pb2.DeleteVectorRequest.SerializeToString,
+            worker_dot_worker__pb2.DeleteVectorResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -299,8 +299,8 @@ class WorkerService(object):
             request,
             target,
             '/vectron.worker.v1.WorkerService/Search',
-            shared_dot_proto_dot_worker_dot_worker__pb2.SearchRequest.SerializeToString,
-            shared_dot_proto_dot_worker_dot_worker__pb2.SearchResponse.FromString,
+            worker_dot_worker__pb2.SearchRequest.SerializeToString,
+            worker_dot_worker__pb2.SearchResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -326,8 +326,8 @@ class WorkerService(object):
             request,
             target,
             '/vectron.worker.v1.WorkerService/Put',
-            shared_dot_proto_dot_worker_dot_worker__pb2.PutRequest.SerializeToString,
-            shared_dot_proto_dot_worker_dot_worker__pb2.PutResponse.FromString,
+            worker_dot_worker__pb2.PutRequest.SerializeToString,
+            worker_dot_worker__pb2.PutResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -353,8 +353,8 @@ class WorkerService(object):
             request,
             target,
             '/vectron.worker.v1.WorkerService/Get',
-            shared_dot_proto_dot_worker_dot_worker__pb2.GetRequest.SerializeToString,
-            shared_dot_proto_dot_worker_dot_worker__pb2.GetResponse.FromString,
+            worker_dot_worker__pb2.GetRequest.SerializeToString,
+            worker_dot_worker__pb2.GetResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -380,8 +380,8 @@ class WorkerService(object):
             request,
             target,
             '/vectron.worker.v1.WorkerService/Delete',
-            shared_dot_proto_dot_worker_dot_worker__pb2.DeleteRequest.SerializeToString,
-            shared_dot_proto_dot_worker_dot_worker__pb2.DeleteResponse.FromString,
+            worker_dot_worker__pb2.DeleteRequest.SerializeToString,
+            worker_dot_worker__pb2.DeleteResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -407,8 +407,8 @@ class WorkerService(object):
             request,
             target,
             '/vectron.worker.v1.WorkerService/Status',
-            shared_dot_proto_dot_worker_dot_worker__pb2.StatusRequest.SerializeToString,
-            shared_dot_proto_dot_worker_dot_worker__pb2.StatusResponse.FromString,
+            worker_dot_worker__pb2.StatusRequest.SerializeToString,
+            worker_dot_worker__pb2.StatusResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -434,8 +434,8 @@ class WorkerService(object):
             request,
             target,
             '/vectron.worker.v1.WorkerService/Flush',
-            shared_dot_proto_dot_worker_dot_worker__pb2.FlushRequest.SerializeToString,
-            shared_dot_proto_dot_worker_dot_worker__pb2.FlushResponse.FromString,
+            worker_dot_worker__pb2.FlushRequest.SerializeToString,
+            worker_dot_worker__pb2.FlushResponse.FromString,
             options,
             channel_credentials,
             insecure,

@@ -60,6 +60,19 @@ export interface LoginRequest {
 }
 
 export interface LoginResponse {
-  jwt_token: string;
+  jwtToken: string;
   user: UserProfile;
+}
+
+export interface CreateSDKJWTRequest {
+  api_key_id: string;
+}
+
+export interface CreateSDKJWTResponse {
+  sdkjwt: string;
+}
+
+export interface UpdateUserProfileResponse {
+  user: UserProfile;
+  jwtToken: string;
 }

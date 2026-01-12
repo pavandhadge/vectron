@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from shared.proto.placementdriver import placementdriver_pb2 as shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2
+from placementdriver import placementdriver_pb2 as placementdriver_dot_placementdriver__pb2
 
 GRPC_GENERATED_VERSION = '1.76.0'
 GRPC_VERSION = grpc.__version__
@@ -18,7 +18,7 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + ' but the generated code in shared/proto/placementdriver/placementdriver_pb2_grpc.py depends on'
+        + ' but the generated code in placementdriver/placementdriver_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
@@ -36,53 +36,53 @@ class PlacementServiceStub(object):
         """
         self.GetWorker = channel.unary_unary(
                 '/vectron.placementdriver.v1.PlacementService/GetWorker',
-                request_serializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.GetWorkerRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.GetWorkerResponse.FromString,
+                request_serializer=placementdriver_dot_placementdriver__pb2.GetWorkerRequest.SerializeToString,
+                response_deserializer=placementdriver_dot_placementdriver__pb2.GetWorkerResponse.FromString,
                 _registered_method=True)
         self.RegisterWorker = channel.unary_unary(
                 '/vectron.placementdriver.v1.PlacementService/RegisterWorker',
-                request_serializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.RegisterWorkerRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.RegisterWorkerResponse.FromString,
+                request_serializer=placementdriver_dot_placementdriver__pb2.RegisterWorkerRequest.SerializeToString,
+                response_deserializer=placementdriver_dot_placementdriver__pb2.RegisterWorkerResponse.FromString,
                 _registered_method=True)
         self.Heartbeat = channel.unary_unary(
                 '/vectron.placementdriver.v1.PlacementService/Heartbeat',
-                request_serializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.HeartbeatRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.HeartbeatResponse.FromString,
+                request_serializer=placementdriver_dot_placementdriver__pb2.HeartbeatRequest.SerializeToString,
+                response_deserializer=placementdriver_dot_placementdriver__pb2.HeartbeatResponse.FromString,
                 _registered_method=True)
         self.ListWorkers = channel.unary_unary(
                 '/vectron.placementdriver.v1.PlacementService/ListWorkers',
-                request_serializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.ListWorkersRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.ListWorkersResponse.FromString,
+                request_serializer=placementdriver_dot_placementdriver__pb2.ListWorkersRequest.SerializeToString,
+                response_deserializer=placementdriver_dot_placementdriver__pb2.ListWorkersResponse.FromString,
                 _registered_method=True)
         self.Rebalance = channel.unary_unary(
                 '/vectron.placementdriver.v1.PlacementService/Rebalance',
-                request_serializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.RebalanceRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.RebalanceResponse.FromString,
+                request_serializer=placementdriver_dot_placementdriver__pb2.RebalanceRequest.SerializeToString,
+                response_deserializer=placementdriver_dot_placementdriver__pb2.RebalanceResponse.FromString,
                 _registered_method=True)
         self.CreateCollection = channel.unary_unary(
                 '/vectron.placementdriver.v1.PlacementService/CreateCollection',
-                request_serializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.CreateCollectionRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.CreateCollectionResponse.FromString,
+                request_serializer=placementdriver_dot_placementdriver__pb2.CreateCollectionRequest.SerializeToString,
+                response_deserializer=placementdriver_dot_placementdriver__pb2.CreateCollectionResponse.FromString,
                 _registered_method=True)
         self.ListCollections = channel.unary_unary(
                 '/vectron.placementdriver.v1.PlacementService/ListCollections',
-                request_serializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.ListCollectionsRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.ListCollectionsResponse.FromString,
+                request_serializer=placementdriver_dot_placementdriver__pb2.ListCollectionsRequest.SerializeToString,
+                response_deserializer=placementdriver_dot_placementdriver__pb2.ListCollectionsResponse.FromString,
                 _registered_method=True)
         self.DeleteCollection = channel.unary_unary(
                 '/vectron.placementdriver.v1.PlacementService/DeleteCollection',
-                request_serializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.DeleteCollectionRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.DeleteCollectionResponse.FromString,
+                request_serializer=placementdriver_dot_placementdriver__pb2.DeleteCollectionRequest.SerializeToString,
+                response_deserializer=placementdriver_dot_placementdriver__pb2.DeleteCollectionResponse.FromString,
                 _registered_method=True)
         self.GetCollectionStatus = channel.unary_unary(
                 '/vectron.placementdriver.v1.PlacementService/GetCollectionStatus',
-                request_serializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.GetCollectionStatusRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.GetCollectionStatusResponse.FromString,
+                request_serializer=placementdriver_dot_placementdriver__pb2.GetCollectionStatusRequest.SerializeToString,
+                response_deserializer=placementdriver_dot_placementdriver__pb2.GetCollectionStatusResponse.FromString,
                 _registered_method=True)
         self.GetLeader = channel.unary_unary(
                 '/vectron.placementdriver.v1.PlacementService/GetLeader',
-                request_serializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.GetLeaderRequest.SerializeToString,
-                response_deserializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.GetLeaderResponse.FromString,
+                request_serializer=placementdriver_dot_placementdriver__pb2.GetLeaderRequest.SerializeToString,
+                response_deserializer=placementdriver_dot_placementdriver__pb2.GetLeaderResponse.FromString,
                 _registered_method=True)
 
 
@@ -160,53 +160,53 @@ def add_PlacementServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'GetWorker': grpc.unary_unary_rpc_method_handler(
                     servicer.GetWorker,
-                    request_deserializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.GetWorkerRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.GetWorkerResponse.SerializeToString,
+                    request_deserializer=placementdriver_dot_placementdriver__pb2.GetWorkerRequest.FromString,
+                    response_serializer=placementdriver_dot_placementdriver__pb2.GetWorkerResponse.SerializeToString,
             ),
             'RegisterWorker': grpc.unary_unary_rpc_method_handler(
                     servicer.RegisterWorker,
-                    request_deserializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.RegisterWorkerRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.RegisterWorkerResponse.SerializeToString,
+                    request_deserializer=placementdriver_dot_placementdriver__pb2.RegisterWorkerRequest.FromString,
+                    response_serializer=placementdriver_dot_placementdriver__pb2.RegisterWorkerResponse.SerializeToString,
             ),
             'Heartbeat': grpc.unary_unary_rpc_method_handler(
                     servicer.Heartbeat,
-                    request_deserializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.HeartbeatRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.HeartbeatResponse.SerializeToString,
+                    request_deserializer=placementdriver_dot_placementdriver__pb2.HeartbeatRequest.FromString,
+                    response_serializer=placementdriver_dot_placementdriver__pb2.HeartbeatResponse.SerializeToString,
             ),
             'ListWorkers': grpc.unary_unary_rpc_method_handler(
                     servicer.ListWorkers,
-                    request_deserializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.ListWorkersRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.ListWorkersResponse.SerializeToString,
+                    request_deserializer=placementdriver_dot_placementdriver__pb2.ListWorkersRequest.FromString,
+                    response_serializer=placementdriver_dot_placementdriver__pb2.ListWorkersResponse.SerializeToString,
             ),
             'Rebalance': grpc.unary_unary_rpc_method_handler(
                     servicer.Rebalance,
-                    request_deserializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.RebalanceRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.RebalanceResponse.SerializeToString,
+                    request_deserializer=placementdriver_dot_placementdriver__pb2.RebalanceRequest.FromString,
+                    response_serializer=placementdriver_dot_placementdriver__pb2.RebalanceResponse.SerializeToString,
             ),
             'CreateCollection': grpc.unary_unary_rpc_method_handler(
                     servicer.CreateCollection,
-                    request_deserializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.CreateCollectionRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.CreateCollectionResponse.SerializeToString,
+                    request_deserializer=placementdriver_dot_placementdriver__pb2.CreateCollectionRequest.FromString,
+                    response_serializer=placementdriver_dot_placementdriver__pb2.CreateCollectionResponse.SerializeToString,
             ),
             'ListCollections': grpc.unary_unary_rpc_method_handler(
                     servicer.ListCollections,
-                    request_deserializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.ListCollectionsRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.ListCollectionsResponse.SerializeToString,
+                    request_deserializer=placementdriver_dot_placementdriver__pb2.ListCollectionsRequest.FromString,
+                    response_serializer=placementdriver_dot_placementdriver__pb2.ListCollectionsResponse.SerializeToString,
             ),
             'DeleteCollection': grpc.unary_unary_rpc_method_handler(
                     servicer.DeleteCollection,
-                    request_deserializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.DeleteCollectionRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.DeleteCollectionResponse.SerializeToString,
+                    request_deserializer=placementdriver_dot_placementdriver__pb2.DeleteCollectionRequest.FromString,
+                    response_serializer=placementdriver_dot_placementdriver__pb2.DeleteCollectionResponse.SerializeToString,
             ),
             'GetCollectionStatus': grpc.unary_unary_rpc_method_handler(
                     servicer.GetCollectionStatus,
-                    request_deserializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.GetCollectionStatusRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.GetCollectionStatusResponse.SerializeToString,
+                    request_deserializer=placementdriver_dot_placementdriver__pb2.GetCollectionStatusRequest.FromString,
+                    response_serializer=placementdriver_dot_placementdriver__pb2.GetCollectionStatusResponse.SerializeToString,
             ),
             'GetLeader': grpc.unary_unary_rpc_method_handler(
                     servicer.GetLeader,
-                    request_deserializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.GetLeaderRequest.FromString,
-                    response_serializer=shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.GetLeaderResponse.SerializeToString,
+                    request_deserializer=placementdriver_dot_placementdriver__pb2.GetLeaderRequest.FromString,
+                    response_serializer=placementdriver_dot_placementdriver__pb2.GetLeaderResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -234,8 +234,8 @@ class PlacementService(object):
             request,
             target,
             '/vectron.placementdriver.v1.PlacementService/GetWorker',
-            shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.GetWorkerRequest.SerializeToString,
-            shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.GetWorkerResponse.FromString,
+            placementdriver_dot_placementdriver__pb2.GetWorkerRequest.SerializeToString,
+            placementdriver_dot_placementdriver__pb2.GetWorkerResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -261,8 +261,8 @@ class PlacementService(object):
             request,
             target,
             '/vectron.placementdriver.v1.PlacementService/RegisterWorker',
-            shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.RegisterWorkerRequest.SerializeToString,
-            shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.RegisterWorkerResponse.FromString,
+            placementdriver_dot_placementdriver__pb2.RegisterWorkerRequest.SerializeToString,
+            placementdriver_dot_placementdriver__pb2.RegisterWorkerResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -288,8 +288,8 @@ class PlacementService(object):
             request,
             target,
             '/vectron.placementdriver.v1.PlacementService/Heartbeat',
-            shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.HeartbeatRequest.SerializeToString,
-            shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.HeartbeatResponse.FromString,
+            placementdriver_dot_placementdriver__pb2.HeartbeatRequest.SerializeToString,
+            placementdriver_dot_placementdriver__pb2.HeartbeatResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -315,8 +315,8 @@ class PlacementService(object):
             request,
             target,
             '/vectron.placementdriver.v1.PlacementService/ListWorkers',
-            shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.ListWorkersRequest.SerializeToString,
-            shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.ListWorkersResponse.FromString,
+            placementdriver_dot_placementdriver__pb2.ListWorkersRequest.SerializeToString,
+            placementdriver_dot_placementdriver__pb2.ListWorkersResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -342,8 +342,8 @@ class PlacementService(object):
             request,
             target,
             '/vectron.placementdriver.v1.PlacementService/Rebalance',
-            shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.RebalanceRequest.SerializeToString,
-            shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.RebalanceResponse.FromString,
+            placementdriver_dot_placementdriver__pb2.RebalanceRequest.SerializeToString,
+            placementdriver_dot_placementdriver__pb2.RebalanceResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -369,8 +369,8 @@ class PlacementService(object):
             request,
             target,
             '/vectron.placementdriver.v1.PlacementService/CreateCollection',
-            shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.CreateCollectionRequest.SerializeToString,
-            shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.CreateCollectionResponse.FromString,
+            placementdriver_dot_placementdriver__pb2.CreateCollectionRequest.SerializeToString,
+            placementdriver_dot_placementdriver__pb2.CreateCollectionResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -396,8 +396,8 @@ class PlacementService(object):
             request,
             target,
             '/vectron.placementdriver.v1.PlacementService/ListCollections',
-            shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.ListCollectionsRequest.SerializeToString,
-            shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.ListCollectionsResponse.FromString,
+            placementdriver_dot_placementdriver__pb2.ListCollectionsRequest.SerializeToString,
+            placementdriver_dot_placementdriver__pb2.ListCollectionsResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -423,8 +423,8 @@ class PlacementService(object):
             request,
             target,
             '/vectron.placementdriver.v1.PlacementService/DeleteCollection',
-            shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.DeleteCollectionRequest.SerializeToString,
-            shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.DeleteCollectionResponse.FromString,
+            placementdriver_dot_placementdriver__pb2.DeleteCollectionRequest.SerializeToString,
+            placementdriver_dot_placementdriver__pb2.DeleteCollectionResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -450,8 +450,8 @@ class PlacementService(object):
             request,
             target,
             '/vectron.placementdriver.v1.PlacementService/GetCollectionStatus',
-            shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.GetCollectionStatusRequest.SerializeToString,
-            shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.GetCollectionStatusResponse.FromString,
+            placementdriver_dot_placementdriver__pb2.GetCollectionStatusRequest.SerializeToString,
+            placementdriver_dot_placementdriver__pb2.GetCollectionStatusResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -477,8 +477,8 @@ class PlacementService(object):
             request,
             target,
             '/vectron.placementdriver.v1.PlacementService/GetLeader',
-            shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.GetLeaderRequest.SerializeToString,
-            shared_dot_proto_dot_placementdriver_dot_placementdriver__pb2.GetLeaderResponse.FromString,
+            placementdriver_dot_placementdriver__pb2.GetLeaderRequest.SerializeToString,
+            placementdriver_dot_placementdriver__pb2.GetLeaderResponse.FromString,
             options,
             channel_credentials,
             insecure,

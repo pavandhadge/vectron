@@ -5,8 +5,6 @@ import {
   Check,
   CreditCard,
   Zap,
-  Shield,
-  Database,
   Download,
   ExternalLink,
   AlertCircle,
@@ -119,36 +117,31 @@ const PlanCard = ({
 // --- Main Page ---
 
 const BillingPage: React.FC = () => {
-  const { user, setUser, token } = useAuth();
+  const { user, updateUserAndToken, authApiClient } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const isPaid = user?.plan === Plan.PAID;
+  const currentPlanData = isPaid
+    ? billingData.plans.pro
+    : billingData.plans.free;
 
   const handleSubscribe = async () => {
     setIsLoading(true);
     setError(null);
 
     try {
-      const response = await fetch("/v1/user/profile", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          plan: Plan.PAID,
-        }),
+      const response = await authApiClient.put("/v1/user/profile", {
+        plan: Plan.PAID,
       });
-
-      if (!response.ok) {
-        throw new Error("Failed to update plan");
-      }
-
-      const data = await response.json();
-      setUser(data.user);
+      const { user, jwtToken } = response.data;
+      updateUserAndToken(user, jwtToken);
     } catch (err: any) {
-      setError(err.message || "An unexpected error occurred");
+      const errorMessage =
+        err.response?.data?.message ||
+        err.message ||
+        "An unexpected error occurred";
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -175,16 +168,16 @@ const BillingPage: React.FC = () => {
 
           <UsageBar
             label="Vectors Stored"
-            used={isPaid ? 124500 : 8500}
-            limit={isPaid ? "10,000,000" : "10,000"}
-            unit="vectors"
+            used={currentPlanData.usage.vectors.used}
+            limit={currentPlanData.usage.vectors.limit}
+            unit={currentPlanData.usage.vectors.unit}
           />
 
           <UsageBar
             label="Read Operations"
-            used={45200}
-            limit={isPaid ? "Unlimited" : "50,000"}
-            unit="req/mo"
+            used={currentPlanData.usage.reads.used}
+            limit={currentPlanData.usage.reads.limit}
+            unit={currentPlanData.usage.reads.unit}
           />
 
           <div className="mt-6 pt-4 border-t border-neutral-800 flex items-center justify-between text-xs text-neutral-500">
@@ -237,31 +230,16 @@ const BillingPage: React.FC = () => {
 
         <div className="grid md:grid-cols-2 gap-6">
           <PlanCard
-            title="Hobby"
-            price="Free"
+            {...billingData.plans.free}
             isCurrent={!isPaid}
             actionLabel="Current Plan"
-            features={[
-              "Up to 10k vectors",
-              "Community Support",
-              "Shared Infrastructure",
-              "30-day log retention",
-            ]}
           />
           <PlanCard
-            title="Pro"
-            price="$29"
+            {...billingData.plans.pro}
             isCurrent={isPaid}
             isLoading={isLoading}
             onAction={handleSubscribe}
             actionLabel={billingData.subscribeButtonText}
-            features={[
-              "Up to 10M vectors",
-              "Priority Email Support",
-              "Dedicated Processing Units",
-              "Unlimited log retention",
-              "RBAC & SSO",
-            ]}
           />
         </div>
       </div>
@@ -287,20 +265,24 @@ const BillingPage: React.FC = () => {
             </thead>
             <tbody className="divide-y divide-neutral-800">
               {isPaid ? (
-                <tr>
-                  <td className="px-6 py-4 text-white">Jan 1, 2026</td>
-                  <td className="px-6 py-4 text-neutral-300">$29.00</td>
-                  <td className="px-6 py-4">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-500/10 text-green-400 border border-green-500/20">
-                      Paid
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <button className="text-neutral-400 hover:text-white">
-                      <Download className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
+                billingData.invoiceHistory.map((invoice, i) => (
+                  <tr key={i}>
+                    <td className="px-6 py-4 text-white">{invoice.date}</td>
+                    <td className="px-6 py-4 text-neutral-300">
+                      {invoice.amount}
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-500/10 text-green-400 border border-green-500/20">
+                        {invoice.status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <button className="text-neutral-400 hover:text-white">
+                        <Download className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))
               ) : (
                 <tr>
                   <td

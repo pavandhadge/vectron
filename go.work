@@ -7,4 +7,5 @@ use (
 	./clientlibs/go
 	./placementdriver
 	./worker
+	./shared
 )

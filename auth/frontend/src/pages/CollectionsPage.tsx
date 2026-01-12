@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { collectionsData } from "./collectionsPage.data";
 import {
@@ -22,7 +22,7 @@ interface Collection {
 }
 
 const CollectionsPage: React.FC = () => {
-  const { token } = useAuth();
+  const { apiGatewayApiClient } = useAuth();
   const [collections, setCollections] = useState<Collection[]>([]);
 
   // UI States
@@ -41,14 +41,12 @@ const CollectionsPage: React.FC = () => {
     number | string
   >(1536);
 
-  const fetchCollections = async () => {
+  // Wrap in useCallback to safely use in useEffect
+  const fetchCollections = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await fetch("/v1/collections", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) throw new Error("Failed to fetch collections");
-      const data = await response.json();
+      const response = await apiGatewayApiClient.get("/v1/collections");
+      const data = response.data;
 
       const mapped = (data.collections || []).map((c: any) => ({
         ...c,
@@ -57,45 +55,37 @@ const CollectionsPage: React.FC = () => {
       }));
       setCollections(mapped);
     } catch (err: any) {
-      setToast({ msg: "Failed to load collections", type: "danger" });
+      const msg = err.response?.data?.message || "Failed to load collections";
+      setToast({ msg, type: "danger" });
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [apiGatewayApiClient]);
 
   useEffect(() => {
     fetchCollections();
-  }, [token]);
+  }, [fetchCollections]);
 
   const handleCreateCollection = async () => {
     if (!newCollectionName.trim()) return;
 
     setIsActionLoading(true);
     try {
-      const response = await fetch("/v1/collections", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          name: newCollectionName,
-          dimension: Number(newCollectionDimension),
-        }),
+      await apiGatewayApiClient.post("/v1/collections", {
+        name: newCollectionName,
+        dimension: Number(newCollectionDimension),
       });
-
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.message || "Failed to create collection");
-      }
 
       setToast({ msg: "Collection created successfully", type: "success" });
       await fetchCollections();
+
+      // Reset Form
       setIsCreateOpen(false);
       setNewCollectionName("");
       setNewCollectionDimension(1536);
     } catch (err: any) {
-      setToast({ msg: err.message, type: "danger" });
+      const msg = err.response?.data?.message || "Failed to create collection";
+      setToast({ msg, type: "danger" });
     } finally {
       setIsActionLoading(false);
     }
@@ -104,11 +94,14 @@ const CollectionsPage: React.FC = () => {
   const handleDelete = async (name: string) => {
     if (!confirm(`Are you sure you want to delete ${name}?`)) return;
     try {
-      // Mock delete
+      await apiGatewayApiClient.delete(`/v1/collections/${name}`);
+
+      // Optimistic update
       setCollections((prev) => prev.filter((c) => c.name !== name));
       setToast({ msg: "Collection deleted", type: "success" });
-    } catch (err) {
-      setToast({ msg: "Failed to delete collection", type: "danger" });
+    } catch (err: any) {
+      const msg = err.response?.data?.message || "Failed to delete collection";
+      setToast({ msg, type: "danger" });
     }
   };
 

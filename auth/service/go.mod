@@ -6,6 +6,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.4
+	github.com/pavandhadge/vectron/shared v0.0.0
 	//github.com/pavandhadge/vectron/shared v0.0.0-20260111115933-426a40528d6e
 	github.com/stretchr/testify v1.11.1
 	go.etcd.io/etcd/client/v3 v3.6.7
@@ -15,6 +16,8 @@ require (
 	google.golang.org/grpc v1.78.0
 	google.golang.org/protobuf v1.36.11
 )
+
+replace github.com/pavandhadge/vectron/shared => ../../shared
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
