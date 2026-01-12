@@ -69,7 +69,7 @@ export interface CreateSDKJWTRequest {
 }
 
 export interface CreateSDKJWTResponse {
-  sdkjwt: string;
+  sdkJwt: string;
 }
 
 export interface UpdateUserProfileResponse {

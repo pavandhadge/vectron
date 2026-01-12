@@ -33,13 +33,13 @@ export const ApiKeyManager: React.FC = () => {
   const [keyForJwt, setKeyForJwt] = useState<ApiKey | null>(null);
 
   // UI States
-  const [loading, setLoading] = useState<boolean>(false);
-  const [actionLoading, setActionLoading] = useState<string | boolean>(false);
+  const [loading, setLoading] = useState<boolean>(false); // This is the correct state variable for general loading
+  const [actionLoading, setActionLoading] = useState<string | boolean>(false); // For delete/create/get-sdk-jwt specific loading
   const [toastMessage, setToastMessage] = useState<{
     message: string;
     type: "success" | "danger" | "info";
   } | null>(null);
-  const [copiedValue, setCopiedValue] = useState<string | null>(null);
+  const [copiedValue, setCopiedValue] = useState<string | null>(null); // Visual feedback for copy
 
   // Dialog States
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
@@ -47,7 +47,7 @@ export const ApiKeyManager: React.FC = () => {
   const [keyToDelete, setKeyToDelete] = useState<string | null>(null);
 
   const fetchKeys = useCallback(async () => {
-    setIsLoading(true);
+    setLoading(true); // Corrected: use setLoading
     try {
       const response = await authApiClient.get<ListKeysResponse>("/v1/keys");
       setKeys(response.data.keys || []);
@@ -92,7 +92,7 @@ export const ApiKeyManager: React.FC = () => {
         { api_key_id: newKeyInfo.keyPrefix } as CreateSDKJWTRequest,
       );
 
-      setNewlyGeneratedToken(sdkJwtResponse.data.sdk_jwt);
+      setNewlyGeneratedToken(sdkJwtResponse.data.sdkJwt);
       setNewKeyName("");
       fetchKeys();
       setToastMessage({
@@ -312,8 +312,6 @@ export const ApiKeyManager: React.FC = () => {
           </table>
         </div>
       </div>
-
-      {/* --- Dialogs --- */}
 
       <Dialog
         open={openCreateDialog}
