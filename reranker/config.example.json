@@ -1,0 +1,31 @@
+# Example rule-based reranker configuration
+
+{
+  "exact_match_boost": 0.3,
+  "fuzzy_match_boost": 0.1,
+  "title_boost": 0.2,
+  "metadata_boosts": {
+    "verified": 0.2,
+    "featured": 0.3,
+    "high_quality": 0.15,
+    "official": 0.25
+  },
+  "metadata_penalties": {
+    "deprecated": 0.5,
+    "spam": 1.0,
+    "low_quality": 0.3,
+    "outdated": 0.4
+  },
+  "recency_boost": 0.15,
+  "recency_field": "created_at",
+  "recency_days": 30,
+  "tfidf_weight": 0.4,
+  "original_weight": 0.6,
+  "stop_words": [
+    "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
+    "of", "with", "is", "was", "are", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "should",
+    "could", "may", "might", "must", "can", "this", "that", "these", "those"
+  ],
+  "case_sensitive": false
+}
