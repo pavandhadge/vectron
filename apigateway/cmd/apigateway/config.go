@@ -8,23 +8,27 @@ import "os"
 
 // Config holds all the configuration settings for the API Gateway.
 type Config struct {
-	GRPCAddr        string // Address for the gRPC server to listen on.
-	HTTPAddr        string // Address for the HTTP/JSON gateway to listen on.
-	PlacementDriver string // Address of the placement driver service.
-	JWTSecret       string // Secret key for signing and verifying JWT tokens.
-	AuthServiceAddr string // Address of the Auth service.
-	RateLimitRPS    int    // Requests per second for the rate limiter.
+	GRPCAddr            string // Address for the gRPC server to listen on.
+	HTTPAddr            string // Address for the HTTP/JSON gateway to listen on.
+	PlacementDriver     string // Address of the placement driver service.
+	JWTSecret           string // Secret key for signing and verifying JWT tokens.
+	AuthServiceAddr     string // Address of the Auth service.
+	RerankerServiceAddr string // Address of the Reranker service.
+	FeedbackDBPath      string // Path to the feedback SQLite database.
+	RateLimitRPS        int    // Requests per second for the rate limiter.
 }
 
 // LoadConfig loads the configuration from environment variables with default fallbacks.
 func LoadConfig() Config {
 	return Config{
-		GRPCAddr:        getEnv("GRPC_ADDR", ":8081"),
-		HTTPAddr:        getEnv("HTTP_ADDR", ":8080"),
-		PlacementDriver: getEnv("PLACEMENT_DRIVER", "placement:6300"),
-		JWTSecret:       getEnv("JWT_SECRET", "CHANGE_ME_IN_PRODUCTION"),
-		AuthServiceAddr: getEnv("AUTH_SERVICE_ADDR", "auth:50051"), // Default Auth service address
-		RateLimitRPS:    100,
+		GRPCAddr:            getEnv("GRPC_ADDR", ":8081"),
+		HTTPAddr:            getEnv("HTTP_ADDR", ":8080"),
+		PlacementDriver:     getEnv("PLACEMENT_DRIVER", "placement:6300"),
+		JWTSecret:           getEnv("JWT_SECRET", "CHANGE_ME_IN_PRODUCTION"),
+		AuthServiceAddr:     getEnv("AUTH_SERVICE_ADDR", "auth:50051"), // Default Auth service address
+		RerankerServiceAddr: getEnv("RERANKER_SERVICE_ADDR", "localhost:50051"), // Default Reranker service address
+		FeedbackDBPath:      getEnv("FEEDBACK_DB_PATH", "./data/feedback.db"), // Default feedback database path
+		RateLimitRPS:        100,
 	}
 }
 

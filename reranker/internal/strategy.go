@@ -73,6 +73,9 @@ type Cache interface {
 
 	// Clear removes all cache entries (or matching a pattern)
 	Clear(pattern string) int
+
+	// Close closes the cache and cleans up resources
+	Close() error
 }
 
 // CacheKey generates a deterministic cache key from query and candidate IDs.

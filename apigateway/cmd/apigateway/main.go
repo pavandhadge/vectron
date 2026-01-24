@@ -17,6 +17,7 @@ import (
 
 	"github.com/pavandhadge/vectron/apigateway/internal/middleware"
 	"github.com/pavandhadge/vectron/apigateway/internal/translator"
+	"github.com/pavandhadge/vectron/apigateway/internal/feedback"
 	pb "github.com/pavandhadge/vectron/shared/proto/apigateway"
 	placementpb "github.com/pavandhadge/vectron/shared/proto/placementdriver"
 	reranker "github.com/pavandhadge/vectron/shared/proto/reranker"
@@ -43,11 +44,12 @@ type LeaderInfo struct {
 // forwarding requests to the appropriate backend services (placement driver or workers).
 type gatewayServer struct {
 	pb.UnimplementedVectronServiceServer
-	pdAddrs       []string
-	leader        *LeaderInfo
-	leaderMu      sync.RWMutex
-	authClient    authpb.AuthServiceClient
+	pdAddrs        []string
+	leader         *LeaderInfo
+	leaderMu       sync.RWMutex
+	authClient     authpb.AuthServiceClient
 	rerankerClient reranker.RerankServiceClient
+	feedbackService *feedback.Service
 }
 
 func (s *gatewayServer) getPlacementClient() (placementpb.PlacementServiceClient, error) {
@@ -90,6 +92,61 @@ func (s *gatewayServer) UpdateUserProfile(ctx context.Context, req *pb.UpdateUse
 
 	return &pb.UpdateUserProfileResponse{
 		User: authResp.User,
+	}, nil
+}
+
+// SubmitFeedback handles the RPC for submitting search result feedback
+func (s *gatewayServer) SubmitFeedback(ctx context.Context, req *pb.SubmitFeedbackRequest) (*pb.SubmitFeedbackResponse, error) {
+	if req.Collection == "" {
+		return nil, status.Error(codes.InvalidArgument, "collection name cannot be empty")
+	}
+	if len(req.FeedbackItems) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "feedback items cannot be empty")
+	}
+
+	// Convert proto feedback to internal format
+	feedbackItems := make([]feedback.FeedbackItem, len(req.FeedbackItems))
+	for i, item := range req.FeedbackItems {
+		if item.RelevanceScore < 1 || item.RelevanceScore > 5 {
+			return nil, status.Error(codes.InvalidArgument, "relevance score must be between 1 and 5")
+		}
+		feedbackItems[i] = feedback.FeedbackItem{
+			ResultID:       item.ResultId,
+			RelevanceScore: item.RelevanceScore,
+			Clicked:        item.Clicked,
+			Position:       item.Position,
+			Comment:        item.Comment,
+		}
+	}
+
+	// Create feedback session
+	session := &feedback.FeedbackSession{
+		Collection: req.Collection,
+		Query:      req.Query,
+		Items:      feedbackItems,
+		Context:    req.Context,
+	}
+
+	// Extract user info from context if available
+	if userID, ok := req.Context["user_id"]; ok {
+		session.UserID = userID
+	}
+	if sessionID, ok := req.Context["session_id"]; ok {
+		session.SessionID = sessionID
+	}
+
+	// Store feedback
+	feedbackID, err := s.feedbackService.StoreFeedback(ctx, session)
+	if err != nil {
+		log.Printf("Failed to store feedback: %v", err)
+		return nil, status.Error(codes.Internal, "failed to store feedback")
+	}
+
+	log.Printf("Stored feedback for collection %s: %s", req.Collection, feedbackID)
+
+	return &pb.SubmitFeedbackResponse{
+		Success:    true,
+		FeedbackId: feedbackID,
 	}, nil
 }
 
@@ -252,7 +309,7 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 }
 
 // Search handles the RPC for searching for similar vectors.
-// It forwards the search request to a relevant worker.
+// It forwards the search request to a relevant worker, then reranks the results.
 func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.SearchResponse, error) {
 	if req.Collection == "" {
 		return nil, status.Error(codes.InvalidArgument, "collection name cannot be empty")
@@ -265,10 +322,17 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 		req.TopK = 10 // Default to 10 nearest neighbors
 	}
 
+	// First, get results from the worker (increase top_k for better reranking)
+	workerTopK := req.TopK * 2 // Get more results for better reranking
+	if workerTopK > 100 {
+		workerTopK = 100 // Cap at 100 for performance
+	}
+
 	// For search, we can query any worker that has a replica of the shard.
 	// The vectorID is empty, letting the placement driver pick a suitable worker.
 	result, err := s.forwardToWorker(ctx, req.Collection, "", func(c workerpb.WorkerServiceClient, shardID uint64) (interface{}, error) {
 		workerReq := translator.ToWorkerSearchRequest(req, shardID)
+		workerReq.K = int32(workerTopK) // Use increased K for worker search
 		res, err := c.Search(ctx, workerReq)
 		if err != nil {
 			return nil, err
@@ -278,7 +342,72 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 	if err != nil {
 		return nil, err
 	}
-	return result.(*pb.SearchResponse), nil
+	
+	searchResponse := result.(*pb.SearchResponse)
+	
+	// If no results or reranker is not available, return worker results
+	if len(searchResponse.Results) == 0 {
+		return searchResponse, nil
+	}
+	
+	// Prepare reranker request
+	candidates := make([]*reranker.Candidate, len(searchResponse.Results))
+	for i, result := range searchResponse.Results {
+		// Create metadata from payload
+		metadata := make(map[string]string)
+		if result.Payload != nil {
+			for k, v := range result.Payload {
+				metadata[k] = v
+			}
+		}
+		
+		candidates[i] = &reranker.Candidate{
+			Id:       result.Id,
+			Score:    result.Score,
+			Metadata: metadata,
+		}
+	}
+	
+	// Call reranker service
+	rerankReq := &reranker.RerankRequest{
+		Query:      "", // We don't have the original query text, using empty string
+		Candidates: candidates,
+		TopN:       int32(req.TopK),
+	}
+	
+	rerankResp, err := s.rerankerClient.Rerank(ctx, rerankReq)
+	if err != nil {
+		// If reranking fails, log the error but return original results
+		log.Printf("Reranking failed, returning original results: %v", err)
+		// Truncate to requested TopK
+		if len(searchResponse.Results) > int(req.TopK) {
+			searchResponse.Results = searchResponse.Results[:req.TopK]
+		}
+		return searchResponse, nil
+	}
+	
+	// Convert reranked results back to SearchResponse format
+	rerankedResults := make([]*pb.SearchResult, len(rerankResp.Results))
+	for i, result := range rerankResp.Results {
+		// Convert metadata back to payload
+		payload := make(map[string]string)
+		for _, candidate := range candidates {
+			if candidate.Id == result.Id {
+				payload = candidate.Metadata
+				break
+			}
+		}
+		
+		rerankedResults[i] = &pb.SearchResult{
+			Id:      result.Id,
+			Score:   result.RerankScore, // Use reranked score
+			Payload: payload,
+		}
+	}
+	
+	return &pb.SearchResponse{
+		Results: rerankedResults,
+	}, nil
 }
 
 // Get handles the RPC for retrieving a point by its ID.
@@ -402,11 +531,18 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 	}
 	rerankerClient := reranker.NewRerankServiceClient(rerankerConn)
 
+	// Initialize feedback service with SQLite
+	feedbackService, err := feedback.NewService(config.FeedbackDBPath)
+	if err != nil {
+		log.Fatalf("Failed to initialize feedback service: %v", err)
+	}
+
 	// Create the gateway server with the list of PD addresses
 	server := &gatewayServer{
-		pdAddrs:        strings.Split(config.PlacementDriver, ","),
-		authClient:     authClient,
-		rerankerClient: rerankerClient,
+		pdAddrs:         strings.Split(config.PlacementDriver, ","),
+		authClient:      authClient,
+		rerankerClient:  rerankerClient,
+		feedbackService: feedbackService,
 	}
 	// Initialize the leader connection with retry logic
 	maxRetries := 5

@@ -65,6 +65,14 @@ service VectronService {
       body: "*"
     };
   }
+
+  // Submit search feedback
+  rpc SubmitFeedback(SubmitFeedbackRequest) returns (SubmitFeedbackResponse) {
+    option (google.api.http) = {
+      post: "/v1/feedback"
+      body: "*"
+    };
+  }
 }
 
 // ===============================================
@@ -161,4 +169,29 @@ message UpdateUserProfileRequest {
 
 message UpdateUserProfileResponse {
   vectron.auth.v1.UserProfile user = 1;
+}
+
+// ===============================================
+// Feedback Messages
+// ===============================================
+
+message SubmitFeedbackRequest {
+  string collection = 1 [(google.api.field_behavior) = REQUIRED];
+  string query = 2; // Original search query (optional)
+  repeated string result_ids = 3 [(google.api.field_behavior) = REQUIRED]; // IDs of search results
+  repeated FeedbackItem feedback_items = 4 [(google.api.field_behavior) = REQUIRED]; // Feedback for each result
+  map<string, string> context = 5; // Additional context (user_id, session_id, etc.)
+}
+
+message FeedbackItem {
+  string result_id = 1 [(google.api.field_behavior) = REQUIRED]; // ID of the result being rated
+  int32 relevance_score = 2; // 1-5 scale (1=not relevant, 5=highly relevant)
+  bool clicked = 3; // Whether user clicked on this result
+  int32 position = 4; // Position in the returned results (0-based)
+  string comment = 5; // Optional user comment
+}
+
+message SubmitFeedbackResponse {
+  bool success = 1;
+  string feedback_id = 2; // Unique identifier for this feedback session
 }

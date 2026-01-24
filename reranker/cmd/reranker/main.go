@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pavandhadge/vectron/reranker/internal"
+	"github.com/pavandhadge/vectron/reranker/internal/cache"
 	"github.com/pavandhadge/vectron/reranker/internal/strategies/rule"
 	pb "github.com/pavandhadge/vectron/shared/proto/reranker"
 	"google.golang.org/grpc"
@@ -35,13 +36,16 @@ func main() {
 	log.Printf("Strategy: %s, Cache: %s", *strategyType, *cacheBackend)
 
 	// Initialize components
-	cache := createCache(*cacheBackend)
 	logger := createLogger()
+	cacheInstance, err := createCache(*cacheBackend, logger)
+	if err != nil {
+		log.Fatalf("Failed to create cache: %v", err)
+	}
 	metrics := createMetrics()
 	strategy := createStrategy(*strategyType, logger)
 
 	// Create gRPC server
-	grpcServer := internal.NewGrpcServer(strategy, cache, logger, metrics)
+	grpcServer := internal.NewGrpcServer(strategy, cacheInstance, logger, metrics)
 
 	// Start gRPC listener
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", *port))
@@ -75,18 +79,9 @@ func main() {
 }
 
 // createCache initializes the cache implementation based on config.
-func createCache(backend string) internal.Cache {
-	switch backend {
-	case "redis":
-		// TODO: Implement Redis cache
-		log.Println("Redis cache not yet implemented, falling back to memory")
-		return &MemoryCache{}
-	case "memory":
-		return &MemoryCache{}
-	default:
-		log.Printf("Unknown cache backend '%s', using memory", backend)
-		return &MemoryCache{}
-	}
+func createCache(backend string, logger internal.Logger) (internal.Cache, error) {
+	factory := cache.NewCacheFactory(logger)
+	return factory.CreateCache(backend)
 }
 
 // createLogger initializes the logger implementation.
@@ -156,42 +151,6 @@ func getEnv(key, defaultValue string) string {
 // ==============================
 // Stub Implementations (Temporary)
 // ==============================
-
-// MemoryCache is a simple in-memory cache implementation.
-type MemoryCache struct {
-	data map[string]*internal.RerankOutput
-}
-
-func (c *MemoryCache) Get(key string) (*internal.RerankOutput, bool) {
-	if c.data == nil {
-		return nil, false
-	}
-	val, ok := c.data[key]
-	return val, ok
-}
-
-func (c *MemoryCache) Set(key string, value *internal.RerankOutput, ttl time.Duration) {
-	if c.data == nil {
-		c.data = make(map[string]*internal.RerankOutput)
-	}
-	c.data[key] = value
-	// TODO: Implement TTL expiration
-}
-
-func (c *MemoryCache) Delete(key string) {
-	if c.data != nil {
-		delete(c.data, key)
-	}
-}
-
-func (c *MemoryCache) Clear(pattern string) int {
-	if c.data == nil {
-		return 0
-	}
-	count := len(c.data)
-	c.data = make(map[string]*internal.RerankOutput)
-	return count
-}
 
 // SimpleLogger is a basic logger implementation.
 type SimpleLogger struct{}

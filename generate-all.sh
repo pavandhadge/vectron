@@ -14,7 +14,7 @@ PROTO_INCLUDE_PATHS="-I. \
 # -------------------------------------------------
 # SERVICES
 # -------------------------------------------------
-SERVICES=("auth" "apigateway" "worker" "placementdriver")
+SERVICES=("auth" "apigateway" "worker" "placementdriver" "reranker")
 
 # -------------------------------------------------
 # ALL PROTOS (RELATIVE TO shared/proto)
@@ -24,6 +24,7 @@ ALL_PROTOS=(
   apigateway/apigateway.proto
   worker/worker.proto
   placementdriver/placementdriver.proto
+  reranker/reranker.proto
 )
 
 # =================================================

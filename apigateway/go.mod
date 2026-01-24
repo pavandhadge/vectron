@@ -4,7 +4,9 @@ go 1.24.0
 
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.0
+	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.4
+	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/pavandhadge/vectron/shared v0.0.0
 	google.golang.org/grpc v1.78.0
 )
