@@ -450,11 +450,26 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 		}
 	}()
 
+	// Wrap mux with CORS middleware
+	corsHandler := func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
+			w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Content-Length, X-CSRF-Token, X-API-Key")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			h.ServeHTTP(w, r)
+		})
+	}
+
 	// Start the HTTP server in a separate goroutine.
 	go func() {
 		log.Printf("Vectron HTTP API (curl)      → %s", config.HTTPAddr)
 		log.Printf("Using placement driver           → %s", config.PlacementDriver)
-		if err := http.ListenAndServe(config.HTTPAddr, mux); err != nil && err != http.ErrServerClosed {
+		if err := http.ListenAndServe(config.HTTPAddr, corsHandler(mux)); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("HTTP server failed to serve: %v", err)
 		}
 	}()
