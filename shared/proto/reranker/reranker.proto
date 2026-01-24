@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package reranker;
+package vectron.reranker.v1;
 
-option go_package = "github.com/pavandhadge/vectron/reranker/proto/reranker";
+option go_package = "github.com/pavandhadge/vectron/shared/proto/reranker";
 
 // RerankService provides intelligent reranking of search results
 // to improve relevance and correctness beyond simple distance metrics.

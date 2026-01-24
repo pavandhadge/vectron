@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	pb "github.com/pavandhadge/vectron/reranker/proto/reranker"
+	pb "github.com/pavandhadge/vectron/shared/proto/reranker"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

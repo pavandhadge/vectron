@@ -13,7 +13,7 @@ import (
 
 	"github.com/pavandhadge/vectron/reranker/internal"
 	"github.com/pavandhadge/vectron/reranker/internal/strategies/rule"
-	pb "github.com/pavandhadge/vectron/reranker/proto/reranker"
+	pb "github.com/pavandhadge/vectron/shared/proto/reranker"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )

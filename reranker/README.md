@@ -48,7 +48,7 @@ service RerankService {
 }
 ```
 
-See [`proto/reranker/reranker.proto`](proto/reranker/reranker.proto) for the complete definition.
+See [`../shared/proto/reranker/reranker.proto`](../shared/proto/reranker/reranker.proto) for the complete definition.
 
 ## Strategy Interface
 
@@ -135,10 +135,10 @@ reranker:
 ### Generate gRPC Code
 
 ```bash
-cd reranker
+cd shared/proto/reranker
 protoc --go_out=. --go_opt=paths=source_relative \
        --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-       proto/reranker/reranker.proto
+       reranker.proto
 ```
 
 ### Build

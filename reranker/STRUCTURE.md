@@ -8,26 +8,27 @@ reranker/
 ├── internal/
 │   ├── grpc.go                  # gRPC server implementation
 │   ├── strategy.go              # Strategy interface definitions
-│   └── strategies/              # Strategy implementations (to be added)
+│   └── strategies/              # Strategy implementations
 │       ├── rule/                # Rule-based reranking
-│       ├── llm/                 # LLM-based reranking
-│       └── rl/                  # RL-based reranking
-├── proto/
-│   └── reranker/
-│       └── reranker.proto       # gRPC service definition
+│       ├── llm/                 # LLM-based reranking (to be added)
+│       └── rl/                  # RL-based reranking (to be added)
 ├── go.mod                       # Go module definition
 ├── README.md                    # Service documentation
 └── TODO.md                      # Implementation roadmap
+
+# Proto files are located in:
+../shared/proto/reranker/
+    └── reranker.proto           # gRPC service definition
 ```
 
 ## Quick Start
 
 1. **Generate gRPC code:**
    ```bash
-   cd reranker
+   cd shared/proto/reranker
    protoc --go_out=. --go_opt=paths=source_relative \
           --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-          proto/reranker/reranker.proto
+          reranker.proto
    ```
 
 2. **Build:**

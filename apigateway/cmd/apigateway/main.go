@@ -19,6 +19,7 @@ import (
 	"github.com/pavandhadge/vectron/apigateway/internal/translator"
 	pb "github.com/pavandhadge/vectron/shared/proto/apigateway"
 	placementpb "github.com/pavandhadge/vectron/shared/proto/placementdriver"
+	reranker "github.com/pavandhadge/vectron/shared/proto/reranker"
 	workerpb "github.com/pavandhadge/vectron/shared/proto/worker"
 
 	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
@@ -42,10 +43,11 @@ type LeaderInfo struct {
 // forwarding requests to the appropriate backend services (placement driver or workers).
 type gatewayServer struct {
 	pb.UnimplementedVectronServiceServer
-	pdAddrs    []string
-	leader     *LeaderInfo
-	leaderMu   sync.RWMutex
-	authClient authpb.AuthServiceClient
+	pdAddrs       []string
+	leader        *LeaderInfo
+	leaderMu      sync.RWMutex
+	authClient    authpb.AuthServiceClient
+	rerankerClient reranker.RerankServiceClient
 }
 
 func (s *gatewayServer) getPlacementClient() (placementpb.PlacementServiceClient, error) {
@@ -393,10 +395,18 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 	}
 	authClient := authpb.NewAuthServiceClient(authConn)
 
+	// Establish gRPC connection to Reranker service
+	rerankerConn, err := grpc.Dial(config.RerankerServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Fatalf("Failed to connect to Reranker service: %v", err)
+	}
+	rerankerClient := reranker.NewRerankServiceClient(rerankerConn)
+
 	// Create the gateway server with the list of PD addresses
 	server := &gatewayServer{
-		pdAddrs:    strings.Split(config.PlacementDriver, ","),
-		authClient: authClient,
+		pdAddrs:        strings.Split(config.PlacementDriver, ","),
+		authClient:     authClient,
+		rerankerClient: rerankerClient,
 	}
 	// Initialize the leader connection with retry logic
 	maxRetries := 5
