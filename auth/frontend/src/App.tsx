@@ -16,6 +16,13 @@ import ProfilePage from "./pages/ProfilePage";
 import SDKDownloadPage from "./pages/SDKDownloadPage";
 import CollectionsPage from "./pages/CollectionsPage";
 
+// Management Console Pages
+import ManagementDashboard from "./pages/ManagementDashboard";
+import ApiGatewayManagement from "./pages/ApiGatewayManagement";
+import WorkersManagement from "./pages/WorkersManagement";
+import CollectionsManagement from "./pages/CollectionsManagement";
+import SystemHealthPage from "./pages/SystemHealthPage";
+
 function App() {
   return (
     <AuthProvider>
@@ -39,6 +46,13 @@ function App() {
             <Route path="billing" element={<BillingPage />} />
             <Route path="collections" element={<CollectionsPage />} />
             <Route path="sdk" element={<SDKDownloadPage />} />
+            
+            {/* Management Console Routes */}
+            <Route path="management" element={<ManagementDashboard />} />
+            <Route path="management/gateway" element={<ApiGatewayManagement />} />
+            <Route path="management/workers" element={<WorkersManagement />} />
+            <Route path="management/collections" element={<CollectionsManagement />} />
+            <Route path="management/health" element={<SystemHealthPage />} />
           </Route>
           <Route
             path="/dashboard/documentation"

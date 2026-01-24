@@ -332,7 +332,7 @@ const CollectionsPage: React.FC = () => {
       {toast && (
         <Toast
           message={toast.msg}
-          type={toast.type}
+          type={toast.type === "danger" ? "error" : toast.type}
           onClose={() => setToast(null)}
         />
       )}

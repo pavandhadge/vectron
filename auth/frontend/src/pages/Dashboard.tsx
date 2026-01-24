@@ -8,6 +8,11 @@ import {
   Activity,
   Zap,
   Plus,
+  BarChart3,
+  Server,
+  Globe,
+  Shield,
+  ArrowRight,
 } from "lucide-react";
 
 // --- Components ---
@@ -33,6 +38,31 @@ const StatCard = ({ title, value, subtext, icon, trend }: any) => (
       <p className="text-xs text-neutral-500">{subtext}</p>
     </div>
   </div>
+);
+
+const QuickAccessCard = ({ title, description, href, icon }: {
+  title: string;
+  description: string;
+  href: string;
+  icon: React.ReactNode;
+}) => (
+  <RouterLink
+    to={href}
+    className="block p-4 rounded-lg border border-neutral-800 bg-neutral-900/30 hover:bg-neutral-900/50 hover:border-purple-500/50 transition-all group"
+  >
+    <div className="flex items-center justify-between">
+      <div className="flex items-center gap-3">
+        <div className="p-2 rounded-lg bg-neutral-800 text-neutral-400 group-hover:bg-purple-500/10 group-hover:text-purple-400 transition-colors">
+          {icon}
+        </div>
+        <div>
+          <h3 className="text-white font-medium group-hover:text-purple-400 transition-colors">{title}</h3>
+          <p className="text-sm text-neutral-400">{description}</p>
+        </div>
+      </div>
+      <ArrowRight className="w-4 h-4 text-neutral-500 group-hover:text-purple-400 transition-colors" />
+    </div>
+  </RouterLink>
 );
 
 const EmptyState = () => (
@@ -138,6 +168,45 @@ export const Dashboard = () => {
               icon={<Zap className="w-5 h-5" />}
               trend={5.1}
             />
+          </div>
+
+          {/* Management Console Quick Access */}
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-white">Management Console</h2>
+              <RouterLink
+                to="/dashboard/management"
+                className="text-sm text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1"
+              >
+                View All <ArrowRight className="w-4 h-4" />
+              </RouterLink>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <QuickAccessCard
+                title="System Overview"
+                description="Monitor overall system health and metrics"
+                href="/dashboard/management"
+                icon={<BarChart3 className="w-4 h-4" />}
+              />
+              <QuickAccessCard
+                title="API Gateway"
+                description="View gateway stats and endpoint performance"
+                href="/dashboard/management/gateway"
+                icon={<Globe className="w-4 h-4" />}
+              />
+              <QuickAccessCard
+                title="Worker Nodes"
+                description="Monitor and manage worker node status"
+                href="/dashboard/management/workers"
+                icon={<Server className="w-4 h-4" />}
+              />
+              <QuickAccessCard
+                title="Collections Manager"
+                description="Advanced collection management and analytics"
+                href="/dashboard/management/collections"
+                icon={<Database className="w-4 h-4" />}
+              />
+            </div>
           </div>
 
           {/* Recent Activity / Content */}

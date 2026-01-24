@@ -3,7 +3,7 @@ import { X, CheckCircle, AlertCircle, Info } from "lucide-react";
 
 interface ToastProps {
   message: string | null;
-  type: "success" | "danger" | "info";
+  type: "success" | "error" | "info";
   onClose: () => void;
   duration?: number;
 }
@@ -54,7 +54,7 @@ export const Toast: React.FC<ToastProps> = ({
       border: "border-green-500/20",
       bg: "bg-green-500/10", // Very subtle glow
     },
-    danger: {
+    error: {
       icon: <AlertCircle className="w-5 h-5 text-red-500" />,
       border: "border-red-500/20",
       bg: "bg-red-500/10",

@@ -144,7 +144,7 @@ export const ApiKeyManager: React.FC = () => {
         "/v1/sdk-jwt",
         { api_key_id: key.keyPrefix } as CreateSDKJWTRequest,
       );
-      setSdkJwt(response.data.sdk_jwt);
+      setSdkJwt(response.data.sdkJwt);
       setKeyForJwt(key);
       setToastMessage({ message: "SDK JWT created", type: "success" });
     } catch (err: any) {
@@ -477,8 +477,8 @@ export const ApiKeyManager: React.FC = () => {
       </Dialog>
 
       <Toast
-        message={toastMessage?.message}
-        type={toastMessage?.type}
+        message={toastMessage?.message || null}
+        type={toastMessage?.type === "danger" ? "error" : (toastMessage?.type || "info")}
         onClose={() => setToastMessage(null)}
       />
     </div>
