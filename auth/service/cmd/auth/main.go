@@ -108,6 +108,21 @@ func runHttpServer() error {
 		return err
 	}
 
+	// Wrap mux with CORS middleware to allow all origins
+	corsHandler := func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
+			w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Content-Length, X-CSRF-Token, X-API-Key")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			h.ServeHTTP(w, r)
+		})
+	}
+
 	log.Printf("HTTP server listening at %s", httpPort)
-	return http.ListenAndServe(httpPort, mux)
+	return http.ListenAndServe(httpPort, corsHandler(mux))
 }
