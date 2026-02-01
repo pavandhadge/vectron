@@ -15,7 +15,7 @@ PROTO_INCLUDE_PATHS="-I. \
 # -------------------------------------------------
 # SERVICES
 # -------------------------------------------------
-SERVICES=("auth" "apigateway" "worker" "placementdriver")
+SERVICES=("auth" "apigateway" "worker" "placementdriver" "reranker")
 
 # -------------------------------------------------
 # ALL PROTOS (RELATIVE TO shared/proto)
@@ -25,6 +25,7 @@ ALL_PROTOS=(
   apigateway/apigateway.proto
   worker/worker.proto
   placementdriver/placementdriver.proto
+  reranker/reranker.proto
 )
 
 # =================================================
@@ -83,13 +84,13 @@ protoc ${PROTO_INCLUDE_PATHS} \
 # =================================================
 # PYTHON — COMMON CLIENT LIB
 # =================================================
-echo "🐍 Generating Python client code"
+# echo "🐍 Generating Python client code"
 
-mkdir -p clientlibs/python/vectron_client/proto
+# mkdir -p clientlibs/python/vectron_client/proto
 
-python3 -m grpc_tools.protoc ${PROTO_INCLUDE_PATHS} \
-  --python_out=clientlibs/python/vectron_client/proto \
-  --grpc_python_out=clientlibs/python/vectron_client/proto \
-  "${ALL_PROTOS[@]}"
+# python3 -m grpc_tools.protoc ${PROTO_INCLUDE_PATHS} \
+#   --python_out=clientlibs/python/vectron_client/proto \
+#   --grpc_python_out=clientlibs/python/vectron_client/proto \
+#   "${ALL_PROTOS[@]}"
 
 echo "✅ Protobuf generation complete."

@@ -146,7 +146,13 @@ echo "▶️  Starting Frontend development server..."
     cd auth/frontend
     echo "    (Running npm install in auth/frontend...)"
     npm install > /tmp/vectron-frontend-install.log 2>&1
-    VITE_API_BASE_URL="http://localhost:${AUTH_HTTP}" npm run dev -- --port ${FRONTEND_PORT}
+    
+    # Export environment variables for the frontend
+    export VITE_AUTH_API_BASE_URL="http://localhost:${AUTH_HTTP}"
+    export VITE_APIGATEWAY_API_BASE_URL="http://localhost:10012"
+    export VITE_PLACEMENT_DRIVER_API_BASE_URL="http://localhost:${PD_GRPC_1}"
+    
+    npm run dev -- --port ${FRONTEND_PORT}
 )
 
 echo " "
@@ -154,7 +160,14 @@ echo "🎉 All services are running!"
 echo "-----------------------------------"
 echo "Vectron Frontend      > http://localhost:${FRONTEND_PORT}"
 echo "Auth Service (HTTP)   > http://localhost:${AUTH_HTTP}"
+echo "API Gateway (HTTP)    > http://localhost:10012"
 echo "API Gateway (gRPC)    > 127.0.0.1:${APIGATEWAY_GRPC}"
+echo "Placement Driver      > 127.0.0.1:${PD_GRPC_1}"
+echo "-----------------------------------"
+echo "Frontend Environment Variables:"
+echo "VITE_AUTH_API_BASE_URL=http://localhost:${AUTH_HTTP}"
+echo "VITE_APIGATEWAY_API_BASE_URL=http://localhost:10012"
+echo "VITE_PLACEMENT_DRIVER_API_BASE_URL=http://localhost:${PD_GRPC_1}"
 echo "-----------------------------------"
 echo "Logs are being written to /tmp/vectron-*.log"
 echo "Press Ctrl+C to stop all services."

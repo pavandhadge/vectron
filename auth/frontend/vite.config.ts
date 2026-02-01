@@ -8,7 +8,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/v1": {
-        target: "http://localhost:8082", // Proxy to auth service HTTP gateway
+        target: process.env.VITE_AUTH_API_BASE_URL || "http://localhost:10009",
         changeOrigin: true,
       },
     },

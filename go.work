@@ -6,6 +6,7 @@ use (
 	./auth/service
 	./clientlibs/go
 	./placementdriver
-	./worker
+	./reranker
 	./shared
+	./worker
 )

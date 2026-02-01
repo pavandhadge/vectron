@@ -11,6 +11,12 @@ import {
   Code,
   ChevronRight,
   X,
+  Server,
+  Activity,
+  Globe,
+  Shield,
+  BarChart3,
+  Users,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -37,6 +43,39 @@ export const NewSidebar: React.FC<NewSidebarProps> = ({
     },
     { name: "API Keys", to: "/dashboard/keys", icon: Key, end: false },
     { name: "SDK", to: "/dashboard/sdk", icon: Code, end: false },
+  ];
+
+  const managementNav = [
+    {
+      name: "System Dashboard",
+      to: "/dashboard/management",
+      icon: BarChart3,
+      end: false,
+    },
+    {
+      name: "API Gateway",
+      to: "/dashboard/management/gateway",
+      icon: Globe,
+      end: false,
+    },
+    {
+      name: "Workers", 
+      to: "/dashboard/management/workers",
+      icon: Server,
+      end: false,
+    },
+    {
+      name: "Collections Manager",
+      to: "/dashboard/management/collections",
+      icon: Database,
+      end: false,
+    },
+    {
+      name: "System Health",
+      to: "/dashboard/management/health",
+      icon: Activity,
+      end: false,
+    },
   ];
 
   const secondaryNav = [
@@ -89,6 +128,27 @@ export const NewSidebar: React.FC<NewSidebarProps> = ({
                 to={item.to}
                 end={item.end}
                 onClick={() => mobileOpen && handleDrawerToggle()} // Close on mobile click
+                className={getLinkClass}
+              >
+                <item.icon className="w-4 h-4 opacity-70 group-hover:opacity-100 transition-opacity" />
+                {item.name}
+              </NavLink>
+            ))}
+          </nav>
+        </div>
+
+        {/* Management Navigation */}
+        <div>
+          <h3 className="px-3 mb-2 text-xs font-semibold text-neutral-500 uppercase tracking-wider">
+            Management Console
+          </h3>
+          <nav className="space-y-1">
+            {managementNav.map((item) => (
+              <NavLink
+                key={item.name}
+                to={item.to}
+                end={item.end}
+                onClick={() => mobileOpen && handleDrawerToggle()}
                 className={getLinkClass}
               >
                 <item.icon className="w-4 h-4 opacity-70 group-hover:opacity-100 transition-opacity" />

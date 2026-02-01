@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package vectron.reranker.v1;
+
+option go_package = "github.com/pavandhadge/vectron/shared/proto/reranker";
+
+// RerankService provides intelligent reranking of search results
+// to improve relevance and correctness beyond simple distance metrics.
+service RerankService {
+  // Rerank takes a query and a list of candidate results from vector search,
+  // and returns a reordered list with enhanced relevance scores.
+  rpc Rerank(RerankRequest) returns (RerankResponse);
+  
+  // GetStrategy returns the currently active reranking strategy.
+  rpc GetStrategy(GetStrategyRequest) returns (GetStrategyResponse);
+  
+  // InvalidateCache clears cached reranking results (useful after feedback).
+  rpc InvalidateCache(InvalidateCacheRequest) returns (InvalidateCacheResponse);
+}
+
+// Candidate represents a single search result that needs reranking.
+message Candidate {
+  string id = 1;                    // Vector ID
+  float score = 2;                  // Original similarity score from vector search
+  repeated float vector = 3;        // Original vector (optional, for some strategies)
+  map<string, string> metadata = 4; // Associated metadata (e.g., title, content, tags)
+}
+
+// RerankRequest contains the query and candidates to rerank.
+message RerankRequest {
+  string query = 1;                 // Original user query
+  repeated Candidate candidates = 2; // Candidates from vector search (top-K)
+  int32 top_n = 3;                  // Number of results to return after reranking
+  map<string, string> options = 4;  // Optional strategy-specific parameters
+}
+
+// ScoredCandidate represents a reranked result with an enhanced score.
+message ScoredCandidate {
+  string id = 1;                    // Vector ID
+  float rerank_score = 2;           // New relevance score (0-1, higher is better)
+  float original_score = 3;         // Original similarity score
+  string explanation = 4;           // Optional explanation of why this scored high/low
+}
+
+// RerankResponse contains the reordered results.
+message RerankResponse {
+  repeated ScoredCandidate results = 1; // Reranked and sorted results
+  string strategy_used = 2;             // Which strategy was applied (rule/llm/rl)
+  bool from_cache = 3;                  // Whether result came from cache
+  int64 latency_ms = 4;                 // Processing time in milliseconds
+}
+
+// GetStrategyRequest is empty for now.
+message GetStrategyRequest {}
+
+// GetStrategyResponse returns info about the active strategy.
+message GetStrategyResponse {
+  string strategy_name = 1;   // e.g., "rule-based", "llm", "rl"
+  string version = 2;         // Strategy version
+  map<string, string> config = 3; // Strategy-specific config
+}
+
+// InvalidateCacheRequest can target specific queries or clear all.
+message InvalidateCacheRequest {
+  string query = 1;           // Specific query to invalidate (empty = all)
+  repeated string candidate_ids = 2; // Specific candidates to invalidate
+}
+
+// InvalidateCacheResponse confirms cache invalidation.
+message InvalidateCacheResponse {
+  int32 entries_cleared = 1;  // Number of cache entries removed
+}
