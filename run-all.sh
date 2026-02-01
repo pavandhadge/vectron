@@ -7,15 +7,22 @@
 cleanup() {
     echo " "
     echo "🛑 Stopping all services..."
-    # Kill all background jobs started by this script
+
+    # Kill background jobs
     kill $(jobs -p) 2>/dev/null
-    # Stop the etcd container
-    docker stop etcd > /dev/null
-    # Clean up temporary data directories
+
+    # Stop etcd container if running
+    if podman container exists etcd; then
+        podman stop etcd > /dev/null 2>&1
+    fi
+
+    # Clean temp dirs
     rm -rf /tmp/pd_dev_*
     rm -rf /tmp/worker_dev_*
+
     echo "✅ Cleanup complete."
 }
+
 
 # Trap the EXIT signal to call the cleanup function
 trap cleanup EXIT
@@ -56,14 +63,27 @@ echo "✅ Binaries built successfully."
 # --- Start Services ---
 
 # 1. Start Etcd
-echo "▶️  Starting etcd from Docker..."
-docker start etcd > /dev/null
-if [ $? -ne 0 ]; then
-    echo "⚠️  Could not start 'etcd' container. Please ensure you have an etcd container created."
-    echo "   You can create one with: docker run -d -p 2379:2379 --name etcd quay.io/coreos/etcd:v3.5.0 /usr/local/bin/etcd --advertise-client-urls http://0.0.0.0:2379 --listen-client-urls http://0.0.0.0:2379"
-    exit 1
+# 1. Start Etcd (Podman)
+echo "▶️  Starting etcd (Podman)..."
+
+ETCD_DATA_DIR="$HOME/.vectron/etcd"
+mkdir -p "$ETCD_DATA_DIR"
+
+if podman container exists etcd; then
+    podman start etcd > /dev/null
+else
+    podman run -d \
+        --name etcd \
+        -p 2379:2379 \
+        -v "$ETCD_DATA_DIR:/etcd-data:Z" \
+        quay.io/coreos/etcd:v3.5.0 \
+        /usr/local/bin/etcd \
+        --data-dir /etcd-data \
+        --listen-client-urls http://0.0.0.0:2379 \
+        --advertise-client-urls http://0.0.0.0:2379
 fi
-sleep 5 # Give etcd a moment to initialize
+
+sleep 5
 
 # 2. Start Placement Driver Cluster
 echo "▶️  Starting 3-node Placement Driver cluster..."

@@ -8,8 +8,9 @@ echo "🚀 Generating protobuf code..."
 # -------------------------------------------------
 PROTO_INCLUDE_PATHS="-I. \
 -Ishared/proto \
--I$(go env GOPATH)/pkg/mod/github.com/googleapis/googleapis@v0.0.0-20251219214406-347b0e45a6ec \
--I$(go env GOPATH)/pkg/mod/github.com/grpc-ecosystem/grpc-gateway/v2@v2.27.3"
+-I$(go env GOPATH)/pkg/mod/github.com/googleapis/googleapis@v0.0.0-20260131051631-c0fcb3562869 \
+-I$(go env GOPATH)/pkg/mod/github.com/grpc-ecosystem/grpc-gateway/v2@v2.27.7 \
+-I/usr/local/lib/node_modules/@google/gemini-cli/node_modules/google-gax/build/protos"
 
 # -------------------------------------------------
 # SERVICES
