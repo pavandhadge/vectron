@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pavandhadge/vectron/internal/graceful"
+	"github.com/pavandhadge/vectron/placementdriver/internal/graceful"
 	pdRaft "github.com/pavandhadge/vectron/placementdriver/internal/raft"
 	"github.com/pavandhadge/vectron/placementdriver/internal/server"
 	pb "github.com/pavandhadge/vectron/shared/proto/placementdriver"

@@ -24,14 +24,14 @@ type FeedbackItem struct {
 
 // FeedbackSession represents a complete feedback session
 type FeedbackSession struct {
-	ID           string                 `json:"id"`
-	Collection   string                 `json:"collection"`
-	Query        string                 `json:"query"`
-	UserID       string                 `json:"user_id"`
-	SessionID    string                 `json:"session_id"`
-	Items        []FeedbackItem         `json:"items"`
-	Context      map[string]string      `json:"context"`
-	CreatedAt    time.Time              `json:"created_at"`
+	ID         string            `json:"id"`
+	Collection string            `json:"collection"`
+	Query      string            `json:"query"`
+	UserID     string            `json:"user_id"`
+	SessionID  string            `json:"session_id"`
+	Items      []FeedbackItem    `json:"items"`
+	Context    map[string]string `json:"context"`
+	CreatedAt  time.Time         `json:"created_at"`
 }
 
 // Service handles feedback storage and retrieval
@@ -47,7 +47,7 @@ func NewService(dbPath string) (*Service, error) {
 	}
 
 	service := &Service{db: db}
-	
+
 	// Initialize database schema
 	if err := service.initSchema(); err != nil {
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
@@ -90,8 +90,9 @@ func (s *Service) initSchema() error {
 		CREATE INDEX IF NOT EXISTS idx_feedback_items_session_id ON feedback_items(session_id);
 		CREATE INDEX IF NOT EXISTS idx_feedback_items_result_id ON feedback_items(result_id);
 		CREATE INDEX IF NOT EXISTS idx_feedback_items_relevance_score ON feedback_items(relevance_score);
+		CREATE INDEX IF NOT EXISTS idx_feedback_items_session_position ON feedback_items(session_id, position);
 	`
-	
+
 	_, err := s.db.Exec(schema)
 	return err
 }
@@ -148,49 +149,86 @@ func (s *Service) StoreFeedback(ctx context.Context, session *FeedbackSession) (
 	return session.ID, nil
 }
 
-// GetFeedbackByCollection retrieves feedback for a specific collection
+// GetFeedbackByCollection retrieves feedback for a specific collection.
+// Optimized to use a JOIN query instead of N+1 queries.
 func (s *Service) GetFeedbackByCollection(ctx context.Context, collection string, limit int) ([]FeedbackSession, error) {
 	if limit <= 0 {
 		limit = 100 // Default limit
 	}
 
-	// Query feedback sessions
+	// Use a JOIN query to fetch sessions and items in one query
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, collection, query, user_id, session_id, created_at, additional_context
-		FROM feedback_sessions
-		WHERE collection = ?
-		ORDER BY created_at DESC
-		LIMIT ?
-	`, collection, limit)
+		SELECT 
+			fs.id, fs.collection, fs.query, fs.user_id, fs.session_id, fs.created_at, fs.additional_context,
+			fi.result_id, fi.relevance_score, fi.clicked, fi.position, fi.comment
+		FROM feedback_sessions fs
+		LEFT JOIN feedback_items fi ON fs.id = fi.session_id
+		WHERE fs.collection = ?
+		ORDER BY fs.created_at DESC, fi.position
+	`, collection)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query feedback sessions: %w", err)
 	}
 	defer rows.Close()
 
-	var sessions []FeedbackSession
+	sessionMap := make(map[string]*FeedbackSession)
+	var orderedIDs []string
+
 	for rows.Next() {
+		var sessionID string
 		var session FeedbackSession
 		var contextJSON sql.NullString
-		
-		err = rows.Scan(&session.ID, &session.Collection, &session.Query, 
-			&session.UserID, &session.SessionID, &session.CreatedAt, &contextJSON)
+		var item FeedbackItem
+		var resultID, comment sql.NullString
+		var relevanceScore sql.NullInt64
+		var clicked sql.NullBool
+		var position sql.NullInt64
+
+		err = rows.Scan(
+			&sessionID, &session.Collection, &session.Query,
+			&session.UserID, &session.SessionID, &session.CreatedAt, &contextJSON,
+			&resultID, &relevanceScore, &clicked, &position, &comment)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan feedback session: %w", err)
+			return nil, fmt.Errorf("failed to scan feedback data: %w", err)
 		}
 
-		// Parse context JSON
-		if contextJSON.Valid {
-			json.Unmarshal([]byte(contextJSON.String), &session.Context)
+		// Get or create session
+		sess, exists := sessionMap[sessionID]
+		if !exists {
+			session.ID = sessionID
+			if contextJSON.Valid {
+				json.Unmarshal([]byte(contextJSON.String), &session.Context)
+			}
+			session.Items = []FeedbackItem{}
+			sessionMap[sessionID] = &session
+			orderedIDs = append(orderedIDs, sessionID)
+			sess = &session
 		}
 
-		// Load feedback items for this session
-		items, err := s.getFeedbackItems(ctx, session.ID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load feedback items: %w", err)
+		// Add item if present
+		if resultID.Valid {
+			item.ResultID = resultID.String
+			item.RelevanceScore = int32(relevanceScore.Int64)
+			item.Clicked = clicked.Bool
+			item.Position = int32(position.Int64)
+			if comment.Valid {
+				item.Comment = comment.String
+			}
+			sess.Items = append(sess.Items, item)
 		}
-		session.Items = items
+	}
 
-		sessions = append(sessions, session)
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating feedback rows: %w", err)
+	}
+
+	// Build result in order (limited)
+	var sessions []FeedbackSession
+	for i, id := range orderedIDs {
+		if i >= limit {
+			break
+		}
+		sessions = append(sessions, *sessionMap[id])
 	}
 
 	return sessions, nil
@@ -239,28 +277,28 @@ func (s *Service) GetRelevanceStats(ctx context.Context, collection string) (*Re
 		JOIN feedback_sessions fs ON fi.session_id = fs.id
 		WHERE fs.collection = ?
 	`
-	
+
 	var stats RelevanceStats
 	var totalClicks int
-	
+
 	err := s.db.QueryRowContext(ctx, query, collection).Scan(
 		&stats.AverageRelevance, &stats.TotalFeedback, &totalClicks, &stats.TotalSessions,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get relevance stats: %w", err)
 	}
-	
+
 	if stats.TotalFeedback > 0 {
 		stats.ClickThroughRate = float64(totalClicks) / float64(stats.TotalFeedback)
 	}
-	
+
 	return &stats, nil
 }
 
 // RelevanceStats provides statistics about user feedback
 type RelevanceStats struct {
-	AverageRelevance  float64 `json:"average_relevance"`
-	ClickThroughRate  float64 `json:"click_through_rate"`
-	TotalFeedback     int     `json:"total_feedback"`
-	TotalSessions     int     `json:"total_sessions"`
+	AverageRelevance float64 `json:"average_relevance"`
+	ClickThroughRate float64 `json:"click_through_rate"`
+	TotalFeedback    int     `json:"total_feedback"`
+	TotalSessions    int     `json:"total_sessions"`
 }
