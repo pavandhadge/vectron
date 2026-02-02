@@ -14,10 +14,10 @@ import (
 type RobustMemoryCache struct {
 	config    CacheConfig
 	data      map[string]*CacheItem
-	lruList   *list.List                // For LRU eviction
-	lruIndex  map[string]*list.Element  // Quick access to list elements
-	lfuHeap   *lfuHeap                  // For LFU eviction
-	fifoQueue *list.List                // For FIFO eviction
+	lruList   *list.List               // For LRU eviction
+	lruIndex  map[string]*list.Element // Quick access to list elements
+	lfuHeap   *lfuHeap                 // For LFU eviction
+	fifoQueue *list.List               // For FIFO eviction
 	stats     CacheStats
 	mutex     sync.RWMutex
 	stopCh    chan struct{} // For background cleanup
@@ -48,35 +48,49 @@ func NewRobustMemoryCache(config CacheConfig, logger internal.Logger) *RobustMem
 }
 
 // Get retrieves a cached result by key
+// Uses RWMutex with optimistic locking for better concurrent read performance
 func (c *RobustMemoryCache) Get(key string) (*internal.RerankOutput, bool) {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-
+	// First, try with read lock only for lookups
+	c.mutex.RLock()
 	item, exists := c.data[key]
 	if !exists {
 		if c.config.StatsEnabled {
 			c.stats.Misses++
 		}
+		c.mutex.RUnlock()
 		return nil, false
 	}
 
 	// Check if expired
 	if item.IsExpired() {
-		c.deleteItemUnsafe(key)
-		if c.config.StatsEnabled {
-			c.stats.Misses++
-			c.stats.ExpiredItems++
+		c.mutex.RUnlock()
+		// Upgrade to write lock to delete
+		c.mutex.Lock()
+		// Double-check after acquiring write lock
+		if item2, stillExists := c.data[key]; stillExists && item2.IsExpired() {
+			c.deleteItemUnsafe(key)
+			if c.config.StatsEnabled {
+				c.stats.Misses++
+				c.stats.ExpiredItems++
+			}
 		}
+		c.mutex.Unlock()
 		return nil, false
 	}
 
-	// Update access patterns for eviction policies
+	// Touch and update stats under read lock (Touch is thread-safe for AccessAt)
 	item.Touch()
-	c.updateEvictionPolicy(key, item)
-
 	if c.config.StatsEnabled {
 		c.stats.Hits++
 	}
+	c.mutex.RUnlock()
+
+	// Update eviction policy with write lock
+	c.mutex.Lock()
+	if newItem, stillExists := c.data[key]; stillExists {
+		c.updateEvictionPolicy(key, newItem)
+	}
+	c.mutex.Unlock()
 
 	return item.Value, true
 }

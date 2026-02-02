@@ -75,6 +75,7 @@ func NewPebbleDB() *PebbleDB {
 }
 
 // Search finds the k-nearest neighbors to a query vector using the HNSW index.
+// Optimized to use batch existence checks instead of N+1 queries.
 func (r *PebbleDB) Search(query []float32, k int) ([]string, []float32, error) {
 	if r.hnsw == nil {
 		return nil, nil, errors.New("hnsw index not initialized")
@@ -84,15 +85,21 @@ func (r *PebbleDB) Search(query []float32, k int) ([]string, []float32, error) {
 	ids, scores := r.hnsw.Search(query, k)
 
 	// The HNSW index might contain deleted items, so we need to verify existence.
-	// A more optimized approach might involve filtering within the HNSW search itself.
+	// Optimized: Use batch existence check instead of N+1 queries
+	keys := make([][]byte, len(ids))
+	for i, id := range ids {
+		keys[i] = vectorKey(id)
+	}
+
+	existenceMap, err := r.ExistsBatch(keys)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to check existence of vectors: %w", err)
+	}
+
 	var existingIDs []string
 	var existingScores []float32
 	for i, id := range ids {
-		exists, err := r.Exists(vectorKey(id))
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to check existence of vector %s: %w", id, err)
-		}
-		if exists {
+		if existenceMap[string(keys[i])] {
 			existingIDs = append(existingIDs, id)
 			existingScores = append(existingScores, scores[i])
 		}

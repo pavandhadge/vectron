@@ -50,6 +50,37 @@ func (r *PebbleDB) Exists(key []byte) (bool, error) {
 	return true, nil
 }
 
+// ExistsBatch checks if multiple keys exist in the database in a single snapshot.
+// Returns a map of key string to existence boolean.
+func (r *PebbleDB) ExistsBatch(keys [][]byte) (map[string]bool, error) {
+	if r.db == nil {
+		return nil, errors.New("db not initialized")
+	}
+
+	results := make(map[string]bool, len(keys))
+
+	// Use a snapshot for consistent reads
+	snap := r.db.NewSnapshot()
+	defer snap.Close()
+
+	for _, key := range keys {
+		_, closer, err := snap.Get(key)
+		if err != nil {
+			if errors.Is(err, pebble.ErrNotFound) {
+				results[string(key)] = false
+				continue
+			}
+			return nil, err
+		}
+		if closer != nil {
+			closer.Close()
+		}
+		results[string(key)] = true
+	}
+
+	return results, nil
+}
+
 // NewIterator creates a new iterator over a given key prefix.
 func (r *PebbleDB) NewIterator(prefix []byte) (Iterator, error) {
 	if r.db == nil {

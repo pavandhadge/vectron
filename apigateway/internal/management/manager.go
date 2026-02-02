@@ -123,11 +123,11 @@ type WorkerInfo struct {
 
 // WorkerStats contains worker performance statistics - matches frontend
 type WorkerStats struct {
-	VectorCount int64      `json:"vector_count"`
-	MemoryBytes int64      `json:"memory_bytes"`
-	CPUUsage    float64    `json:"cpu_usage"`
-	DiskUsage   int64      `json:"disk_usage"`
-	Uptime      int64      `json:"uptime"`
+	VectorCount int64       `json:"vector_count"`
+	MemoryBytes int64       `json:"memory_bytes"`
+	CPUUsage    float64     `json:"cpu_usage"`
+	DiskUsage   int64       `json:"disk_usage"`
+	Uptime      int64       `json:"uptime"`
 	ShardInfo   []ShardInfo `json:"shard_info"`
 }
 
@@ -144,14 +144,14 @@ type ShardInfo struct {
 
 // CollectionInfo represents collection details with statistics - matches frontend
 type CollectionInfo struct {
-	Name        string          `json:"name"`
-	Dimension   int32           `json:"dimension"`
-	Distance    string          `json:"distance"`
-	VectorCount int64           `json:"vector_count"`
-	SizeBytes   int64           `json:"size_bytes"`
-	ShardCount  int             `json:"shard_count"`
-	Status      string          `json:"status"`
-	CreatedAt   int64           `json:"created_at"`
+	Name        string            `json:"name"`
+	Dimension   int32             `json:"dimension"`
+	Distance    string            `json:"distance"`
+	VectorCount int64             `json:"vector_count"`
+	SizeBytes   int64             `json:"size_bytes"`
+	ShardCount  int               `json:"shard_count"`
+	Status      string            `json:"status"`
+	CreatedAt   int64             `json:"created_at"`
 	Shards      []CollectionShard `json:"shards"`
 }
 
@@ -208,76 +208,116 @@ func (m *Manager) RecordRequest(path, method string, latency time.Duration, isEr
 }
 
 // GetSystemHealth returns overall system health
+// Health checks run concurrently for better performance
 func (m *Manager) GetSystemHealth(ctx context.Context) (*SystemHealth, error) {
 	health := &SystemHealth{
 		OverallStatus: "healthy",
-		Services:      make([]ServiceStatus, 0),
+		Services:      make([]ServiceStatus, 0, 3),
 		Alerts:        make([]Alert, 0),
 		Timestamp:     time.Now().UnixMilli(),
 	}
 
 	now := time.Now().UnixMilli()
 
-	// Check Placement Driver
-	pdStart := time.Now()
-	_, err := m.pdClient.ListCollections(ctx, &placementpb.ListCollectionsRequest{})
-	pdStatus := ServiceStatus{
-		Name:         "Placement Driver",
-		Status:       "up",
-		ResponseTime: time.Since(pdStart).Milliseconds(),
-		Endpoint:     "placement-driver:6300",
-		LastCheck:    now,
+	// Run health checks concurrently for better performance
+	type checkResult struct {
+		status ServiceStatus
+		alert  *Alert
 	}
-	if err != nil {
-		pdStatus.Status = "down"
-		pdStatus.Error = err.Error()
-		health.OverallStatus = "degraded"
-		health.Alerts = append(health.Alerts, Alert{
-			ID:        fmt.Sprintf("pd-down-%d", now),
-			Level:     "critical",
-			Title:     "Placement Driver Unavailable",
-			Message:   fmt.Sprintf("Placement Driver is not responding: %v", err),
-			Timestamp: now,
-			Source:    "management",
-		})
-	}
-	health.Services = append(health.Services, pdStatus)
 
-	// Check Auth Service
-	authStart := time.Now()
-	_, err = m.authClient.GetUserProfile(ctx, &authpb.GetUserProfileRequest{})
-	authStatus := ServiceStatus{
-		Name:         "Auth Service",
-		Status:       "up",
-		ResponseTime: time.Since(authStart).Milliseconds(),
-		Endpoint:     "auth:50051",
-		LastCheck:    now,
-	}
-	if err != nil {
-		if s, ok := status.FromError(err); ok && s.Code() != codes.Unauthenticated {
-			authStatus.Status = "degraded"
-			authStatus.Error = err.Error()
-			health.Alerts = append(health.Alerts, Alert{
-				ID:        fmt.Sprintf("auth-degraded-%d", now),
-				Level:     "warning",
-				Title:     "Auth Service Degraded",
-				Message:   fmt.Sprintf("Auth Service is experiencing issues: %v", err),
+	results := make(chan checkResult, 3)
+	var wg sync.WaitGroup
+
+	// Check Placement Driver
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		pdStart := time.Now()
+		_, err := m.pdClient.ListCollections(ctx, &placementpb.ListCollectionsRequest{})
+		pdStatus := ServiceStatus{
+			Name:         "Placement Driver",
+			Status:       "up",
+			ResponseTime: time.Since(pdStart).Milliseconds(),
+			Endpoint:     "placement-driver:6300",
+			LastCheck:    now,
+		}
+		var alert *Alert
+		if err != nil {
+			pdStatus.Status = "down"
+			pdStatus.Error = err.Error()
+			health.OverallStatus = "degraded"
+			alert = &Alert{
+				ID:        fmt.Sprintf("pd-down-%d", now),
+				Level:     "critical",
+				Title:     "Placement Driver Unavailable",
+				Message:   fmt.Sprintf("Placement Driver is not responding: %v", err),
 				Timestamp: now,
 				Source:    "management",
-			})
+			}
+		}
+		results <- checkResult{status: pdStatus, alert: alert}
+	}()
+
+	// Check Auth Service
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		authStart := time.Now()
+		_, err := m.authClient.GetUserProfile(ctx, &authpb.GetUserProfileRequest{})
+		authStatus := ServiceStatus{
+			Name:         "Auth Service",
+			Status:       "up",
+			ResponseTime: time.Since(authStart).Milliseconds(),
+			Endpoint:     "auth:50051",
+			LastCheck:    now,
+		}
+		var alert *Alert
+		if err != nil {
+			if s, ok := status.FromError(err); ok && s.Code() != codes.Unauthenticated {
+				authStatus.Status = "degraded"
+				authStatus.Error = err.Error()
+				alert = &Alert{
+					ID:        fmt.Sprintf("auth-degraded-%d", now),
+					Level:     "warning",
+					Title:     "Auth Service Degraded",
+					Message:   fmt.Sprintf("Auth Service is experiencing issues: %v", err),
+					Timestamp: now,
+					Source:    "management",
+				}
+			}
+		}
+		results <- checkResult{status: authStatus, alert: alert}
+	}()
+
+	// API Gateway (self) - no check needed
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		results <- checkResult{
+			status: ServiceStatus{
+				Name:         "API Gateway",
+				Status:       "up",
+				ResponseTime: 0,
+				Endpoint:     "apigateway:10012",
+				LastCheck:    now,
+			},
+			alert: nil,
+		}
+	}()
+
+	// Close results channel when all goroutines complete
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect results
+	for result := range results {
+		health.Services = append(health.Services, result.status)
+		if result.alert != nil {
+			health.Alerts = append(health.Alerts, *result.alert)
 		}
 	}
-	health.Services = append(health.Services, authStatus)
-
-	// Check API Gateway (self)
-	gatewayStatus := ServiceStatus{
-		Name:         "API Gateway",
-		Status:       "up",
-		ResponseTime: 0,
-		Endpoint:     "apigateway:10012",
-		LastCheck:    now,
-	}
-	health.Services = append(health.Services, gatewayStatus)
 
 	// Get collections count
 	collectionsRes, err := m.pdClient.ListCollections(ctx, &placementpb.ListCollectionsRequest{})
@@ -357,11 +397,11 @@ func (m *Manager) GetGatewayStats() *GatewayStats {
 	}
 
 	return &GatewayStats{
-		Uptime:            uptime,
-		TotalRequests:     m.requestCount,
-		RequestsPerSecond: rps,
-		ActiveConnections: 0,
-		ErrorRate:         errorRate,
+		Uptime:              uptime,
+		TotalRequests:       m.requestCount,
+		RequestsPerSecond:   rps,
+		ActiveConnections:   0,
+		ErrorRate:           errorRate,
 		AverageResponseTime: 0,
 		RateLimit: RateLimitInfo{
 			Enabled:     true,
@@ -444,7 +484,7 @@ func (m *Manager) GetCollections(ctx context.Context) ([]CollectionInfo, error) 
 			for _, replicaID := range shard.Replicas {
 				workerIDs = append(workerIDs, fmt.Sprintf("worker-%d", replicaID))
 			}
-			
+
 			info.Shards = append(info.Shards, CollectionShard{
 				ShardID:     uint64(shard.ShardId),
 				LeaderID:    fmt.Sprintf("worker-%d", shard.LeaderId),
