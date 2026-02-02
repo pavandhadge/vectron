@@ -66,6 +66,7 @@ type PebbleDB struct {
 	opts      *Options
 	stop      chan struct{}
 	wg        sync.WaitGroup
+	path      string // The path to the database directory
 }
 
 // NewPebbleDB creates a new, uninitialized instance of PebbleDB.

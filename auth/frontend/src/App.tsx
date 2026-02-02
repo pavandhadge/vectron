@@ -14,6 +14,7 @@ import BillingPage from "./pages/BillingPage";
 import ProfilePage from "./pages/ProfilePage";
 import SDKDownloadPage from "./pages/SDKDownloadPage";
 import CollectionsPage from "./pages/CollectionsPage";
+import VectorOperationsPage from "./pages/VectorOperationsPage";
 
 // Management Console Pages
 import ManagementDashboard from "./pages/ManagementDashboard";
@@ -44,6 +45,7 @@ function App() {
             <Route path="profile" element={<ProfilePage />} />
             <Route path="billing" element={<BillingPage />} />
             <Route path="collections" element={<CollectionsPage />} />
+            <Route path="vectors" element={<VectorOperationsPage />} />
             <Route path="sdk" element={<SDKDownloadPage />} />
             
             {/* Management Console Routes */}

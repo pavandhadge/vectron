@@ -284,3 +284,38 @@ func (c *Client) GetAPIKeyDataByPrefix(ctx context.Context, prefix string) (*API
 	}
 	return &keyData, nil
 }
+
+// --- User Account Deletion ---
+
+// DeleteUser deletes a user and all associated API keys
+func (c *Client) DeleteUser(ctx context.Context, userID string) error {
+	// Get user data to find the email
+	userData, err := c.GetUserByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	// Delete user from etcd
+	userKey := fmt.Sprintf("%s%s", userPrefix, userData.Email)
+	_, err = c.Delete(ctx, userKey)
+	if err != nil {
+		return fmt.Errorf("failed to delete user: %w", err)
+	}
+
+	// Delete all API keys associated with this user
+	keys, err := c.ListAPIKeys(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("failed to list user API keys: %w", err)
+	}
+
+	for _, key := range keys {
+		keyKey := fmt.Sprintf("%s%s", apiKeyPrefix, key.KeyPrefix)
+		_, err = c.Delete(ctx, keyKey)
+		if err != nil {
+			// Log but continue - don't fail if one key deletion fails
+			fmt.Printf("Warning: failed to delete API key %s: %v\n", key.KeyPrefix, err)
+		}
+	}
+
+	return nil
+}

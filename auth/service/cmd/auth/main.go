@@ -2,12 +2,11 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
@@ -19,6 +18,18 @@ import (
 	"github.com/pavandhadge/vectron/auth/service/internal/middleware"
 	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
 )
+
+// splitOrigins splits a comma-separated list of origins
+func splitOrigins(origins string) []string {
+	var result []string
+	for _, o := range strings.Split(origins, ",") {
+		o = strings.TrimSpace(o)
+		if o != "" {
+			result = append(result, o)
+		}
+	}
+	return result
+}
 
 var (
 	grpcPort      string = ":8081"
@@ -38,16 +49,17 @@ func init() {
 		etcdEndpoints = os.Getenv("ETCD_ENDPOINTS")
 	}
 
-	// In a real production environment, this should be loaded from a secure
-	// configuration management system (e.g., Vault, AWS KMS, etc.), not generated on the fly.
+	// JWT_SECRET is REQUIRED for production. The service will fail to start without it.
+	// In production, this should be loaded from a secure secret management system
+	// (e.g., HashiCorp Vault, AWS Secrets Manager, Kubernetes Secrets, etc.)
 	jwtSecret = os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
-		log.Println("WARNING: JWT_SECRET environment variable not set. Using a temporary, insecure secret.")
-		key := make([]byte, 32)
-		if _, err := rand.Read(key); err != nil {
-			log.Fatalf("Failed to generate random key for JWT secret: %v", err)
-		}
-		jwtSecret = hex.EncodeToString(key)
+		log.Fatalf("FATAL: JWT_SECRET environment variable is required but not set. " +
+			"Please set a secure JWT secret (min 32 characters) before starting the service. " +
+			"Example: export JWT_SECRET=$(openssl rand -base64 32)")
+	}
+	if len(jwtSecret) < 32 {
+		log.Fatalf("FATAL: JWT_SECRET must be at least 32 characters long for security. Current length: %d", len(jwtSecret))
 	}
 }
 
@@ -86,8 +98,20 @@ func runGrpcServer(store *etcdclient.Client) error {
 		"/vectron.auth.v1.AuthService/GetAuthDetailsForSDK",
 	})
 
+	// Setup rate limiting for auth endpoints
+	rateLimiter := middleware.NewRateLimiter()
+	// Strict rate limits for auth endpoints to prevent brute force
+	rateLimiter.SetLimit("/vectron.auth.v1.AuthService/Login", 5, time.Minute)         // 5 login attempts per minute
+	rateLimiter.SetLimit("/vectron.auth.v1.AuthService/RegisterUser", 3, time.Minute)  // 3 registrations per minute
+	rateLimiter.SetLimit("/vectron.auth.v1.AuthService/CreateAPIKey", 10, time.Minute) // 10 API keys per minute
+	rateLimiter.SetLimit("/vectron.auth.v1.AuthService/CreateSDKJWT", 10, time.Minute) // 10 SDK JWTs per minute
+	go rateLimiter.Cleanup(5 * time.Minute)                                            // Cleanup old entries every 5 minutes
+
 	s := grpc.NewServer(
-		grpc.UnaryInterceptor(authInterceptor.Unary()),
+		grpc.ChainUnaryInterceptor(
+			rateLimiter.Unary(),
+			authInterceptor.Unary(),
+		),
 	)
 
 	authServer := authhandler.NewAuthServer(store, jwtSecret)
@@ -108,13 +132,42 @@ func runHttpServer() error {
 		return err
 	}
 
-	// Wrap mux with CORS middleware to allow all origins
+	// Production CORS middleware - configured via environment variables
+	// By default, only allows same-origin requests for security
+	allowedOrigins := os.Getenv("CORS_ALLOWED_ORIGINS")
+	if allowedOrigins == "" {
+		// Default: same-origin only for production security
+		allowedOrigins = "http://localhost:10011,http://127.0.0.1:10011"
+	}
+
 	corsHandler := func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
+			origin := r.Header.Get("Origin")
+
+			// Check if origin is allowed
+			isAllowed := false
+			if allowedOrigins == "*" {
+				// Wildcard is allowed but ONLY if credentials are not used
+				isAllowed = true
+			} else {
+				for _, allowed := range splitOrigins(allowedOrigins) {
+					if origin == allowed || allowed == "*" {
+						isAllowed = true
+						break
+					}
+				}
+			}
+
+			if isAllowed {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+			}
+
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
 			w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Content-Length, X-CSRF-Token, X-API-Key")
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			// Credentials are only allowed with specific origins, not with wildcard
+			if allowedOrigins != "*" {
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+			}
 			if r.Method == "OPTIONS" {
 				w.WriteHeader(http.StatusOK)
 				return

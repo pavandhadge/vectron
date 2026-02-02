@@ -22,6 +22,11 @@ service VectronService {
     };
   }
 
+  // Delete a collection and all its data
+  rpc DeleteCollection(DeleteCollectionRequest) returns (DeleteCollectionResponse) {
+    option (google.api.http) = {delete: "/v1/collections/{name}"};
+  }
+
   // Upsert vectors
   rpc Upsert(UpsertRequest) returns (UpsertResponse) {
     option (google.api.http) = {
@@ -86,6 +91,14 @@ message CreateCollectionRequest {
 }
 
 message CreateCollectionResponse {
+  bool success = 1;
+}
+
+message DeleteCollectionRequest {
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message DeleteCollectionResponse {
   bool success = 1;
 }
 

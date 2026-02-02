@@ -11,12 +11,12 @@ import (
 	"log"
 	"net"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
+	"time"
 
+	"github.com/pavandhadge/vectron/internal/graceful"
 	pdRaft "github.com/pavandhadge/vectron/placementdriver/internal/raft"
 	"github.com/pavandhadge/vectron/placementdriver/internal/server"
 	pb "github.com/pavandhadge/vectron/shared/proto/placementdriver"
@@ -44,7 +44,7 @@ func init() {
 }
 
 // Start configures and runs the core components of the placement driver node.
-func Start(nodeID, clusterID uint64, raftAddr, grpcAddr, dataDir string, initialMembers map[uint64]string) {
+func Start(nodeID, clusterID uint64, raftAddr, grpcAddr, dataDir string, initialMembers map[uint64]string, shutdownHandler *graceful.ShutdownHandler) {
 	// Create a dedicated directory for this node's data.
 	nodeDataDir := filepath.Join(dataDir, fmt.Sprintf("node-%d", nodeID))
 	if err := os.MkdirAll(nodeDataDir, 0750); err != nil {
@@ -64,6 +64,9 @@ func Start(nodeID, clusterID uint64, raftAddr, grpcAddr, dataDir string, initial
 		log.Fatalf("failed to create raft node: %v", err)
 	}
 
+	// Register Raft node for graceful shutdown
+	shutdownHandler.Register(graceful.NewRaftNode(func() { raftNode.Stop() }, "Raft Node"))
+
 	// The FSM (Finite State Machine) holds the application state (workers, collections, etc.).
 	// It is managed by the Raft node.
 	fsm := raftNode.GetFSM()
@@ -72,18 +75,38 @@ func Start(nodeID, clusterID uint64, raftAddr, grpcAddr, dataDir string, initial
 	}
 
 	// Create the gRPC server, which provides the PlacementService API.
+	// Add timeout interceptor for all requests
 	grpcServer := server.NewServer(raftNode, fsm)
 	lis, err := net.Listen("tcp", grpcAddr)
 	if err != nil {
 		log.Fatalf("failed to listen on %s: %v", grpcAddr, err)
 	}
-	s := grpc.NewServer()
+
+	// Create gRPC server with timeout interceptor
+	s := grpc.NewServer(
+		grpc.UnaryInterceptor(graceful.TimeoutInterceptor(30*time.Second)),
+		grpc.StreamInterceptor(graceful.TimeoutInterceptorStream(30*time.Second)),
+	)
 	pb.RegisterPlacementServiceServer(s, grpcServer)
 
+	// Register gRPC server for graceful shutdown
+	shutdownHandler.Register(graceful.NewGRPCServer(s, grpcAddr))
+
+	// Start the reconciler for automatic shard management
+	reconciler := server.NewReconciler(grpcServer, server.DefaultReconciliationConfig())
+	reconciler.Start()
+
+	// Register reconciler for graceful shutdown
+	shutdownHandler.Register(graceful.NewReconciler(func() { reconciler.Stop() }, "Shard Reconciler"))
+
 	log.Printf("gRPC server listening at %v", lis.Addr())
-	if err := s.Serve(lis); err != nil {
-		log.Fatalf("failed to serve gRPC: %v", err)
-	}
+
+	// Start serving in a goroutine
+	go func() {
+		if err := s.Serve(lis); err != nil {
+			log.Fatalf("failed to serve gRPC: %v", err)
+		}
+	}()
 }
 
 func main() {
@@ -98,15 +121,15 @@ func main() {
 		log.Fatalf("failed to parse initial members: %v", err)
 	}
 
-	// Run the Start function in a goroutine so it doesn't block.
-	go Start(nodeID, clusterID, raftAddr, grpcAddr, dataDir, initialMembers)
+	// Create graceful shutdown handler with 30 second timeout
+	shutdownHandler := graceful.NewShutdownHandler(30 * time.Second)
+	shutdownHandler.Listen()
 
-	// Wait for an interrupt signal to gracefully shut down.
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
-	<-quit
-	log.Println("shutting down server...")
-	// Note: A real implementation would need to gracefully stop the Raft node and gRPC server.
+	// Start the server
+	Start(nodeID, clusterID, raftAddr, grpcAddr, dataDir, initialMembers, shutdownHandler)
+
+	// Block forever (shutdown handler will handle signals)
+	select {}
 }
 
 // parseInitialMembers converts the comma-separated string of initial members

@@ -8,7 +8,10 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -44,6 +47,7 @@ func (r *PebbleDB) Init(path string, opts *Options) error {
 	}
 
 	var err error
+	r.path = path
 	r.db, err = pebble.Open(path, dbOpts)
 	if err != nil {
 		return fmt.Errorf("failed to open pebble db at %s: %w", path, err)
@@ -259,12 +263,110 @@ func (r *PebbleDB) Flush() error {
 	return r.db.Flush()
 }
 
-// Backup is not yet implemented.
+// Backup creates a checkpoint of the database at the specified path.
 func (r *PebbleDB) Backup(path string) error {
-	return errors.New("backup not implemented")
+	if r.db == nil {
+		return errors.New("db not initialized")
+	}
+	return r.db.Checkpoint(path)
 }
 
-// Restore is not yet implemented.
+// Restore closes the current database, restores from a backup, and reopens.
 func (r *PebbleDB) Restore(backupPath string) error {
-	return errors.New("restore not implemented")
+	if r.db == nil {
+		return errors.New("db not initialized")
+	}
+	if r.path == "" {
+		return errors.New("db path not set")
+	}
+
+	// Close the current database
+	if err := r.Close(); err != nil {
+		return fmt.Errorf("failed to close db: %w", err)
+	}
+
+	// Remove the current database directory
+	if err := os.RemoveAll(r.path); err != nil {
+		return fmt.Errorf("failed to remove current db: %w", err)
+	}
+
+	// Copy the backup to the current database location
+	if err := copyDir(backupPath, r.path); err != nil {
+		return fmt.Errorf("failed to restore backup: %w", err)
+	}
+
+	// Reopen the database
+	dbOpts := &pebble.Options{}
+	if r.opts != nil {
+		if r.opts.MaxOpenFiles > 0 {
+			dbOpts.MaxOpenFiles = r.opts.MaxOpenFiles
+		}
+		if r.opts.WriteBufferSize > 0 {
+			dbOpts.MemTableSize = r.opts.WriteBufferSize
+		}
+		if r.opts.CacheSize > 0 {
+			dbOpts.Cache = pebble.NewCache(r.opts.CacheSize)
+		}
+	}
+
+	var err error
+	r.db, err = pebble.Open(r.path, dbOpts)
+	if err != nil {
+		return fmt.Errorf("failed to reopen db: %w", err)
+	}
+
+	r.writeOpts = pebble.Sync
+	r.stop = make(chan struct{})
+
+	// Reload the HNSW index
+	if err := r.loadHNSW(r.opts); err != nil {
+		return fmt.Errorf("failed to load HNSW index: %w", err)
+	}
+
+	// Restart persistence loop if WAL is enabled
+	if r.opts != nil && r.opts.HNSWConfig.WALEnabled {
+		r.wg.Add(1)
+		go r.persistenceLoop(5 * time.Minute)
+	}
+
+	return nil
+}
+
+// copyDir recursively copies a directory from src to dst.
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relPath, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		dstPath := filepath.Join(dst, relPath)
+
+		if info.IsDir() {
+			return os.MkdirAll(dstPath, info.Mode())
+		}
+
+		return copyFile(path, dstPath)
+	})
+}
+
+// copyFile copies a single file from src to dst.
+func copyFile(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	_, err = io.Copy(dstFile, srcFile)
+	return err
 }

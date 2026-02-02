@@ -37,6 +37,12 @@ export const NewSidebar: React.FC<NewSidebarProps> = ({
       icon: Database,
       end: false,
     },
+    {
+      name: "Vector Operations",
+      to: "/dashboard/vectors",
+      icon: Code,
+      end: false,
+    },
     { name: "API Keys", to: "/dashboard/keys", icon: Key, end: false },
     { name: "SDK", to: "/dashboard/sdk", icon: Code, end: false },
   ];

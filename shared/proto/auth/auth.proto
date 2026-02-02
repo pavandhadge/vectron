@@ -56,6 +56,22 @@ service AuthService {
     };
   }
 
+  // Delete the current user's account (requires JWT authentication and optional password confirmation).
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse) {
+    option (google.api.http) = {
+      delete: "/v1/user"
+      body: "*"
+    };
+  }
+
+  // Refresh the current user's JWT token (requires valid JWT).
+  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/refresh"
+      body: "*"
+    };
+  }
+
   // --- API Key Management (requires JWT authentication) ---
 
   // Create a new API key for the authenticated user.
@@ -206,4 +222,22 @@ message GetAuthDetailsForSDKResponse {
   string user_id = 1;
   Plan plan = 2;
   bool success = 3;
+}
+
+// --- User Account Deletion ---
+message DeleteUserRequest {
+  // Optional: Password confirmation for extra security
+  string password = 1;
+}
+
+message DeleteUserResponse {
+  bool success = 1;
+}
+
+// --- Token Refresh ---
+message RefreshTokenRequest {} // User ID extracted from current JWT
+
+message RefreshTokenResponse {
+  string jwt_token = 1 [json_name = "jwtToken"];
+  int64 expires_at = 2 [json_name = "expiresAt"];
 }

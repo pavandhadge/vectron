@@ -32,11 +32,21 @@ func NewAuthServer(store *etcdclient.Client, jwtSecret string) *AuthServer {
 // --- User Account Management ---
 
 func (s *AuthServer) RegisterUser(ctx context.Context, req *authpb.RegisterUserRequest) (*authpb.RegisterUserResponse, error) {
-	if req.Email == "" || req.Password == "" {
-		return nil, status.Error(codes.InvalidArgument, "Email and Password are required")
+	// Validate email format
+	if err := middleware.ValidateEmail(req.Email); err != nil {
+		return nil, err
 	}
 
-	userData, err := s.store.CreateUser(ctx, req.Email, req.Password)
+	// Validate password strength
+	if err := middleware.ValidatePasswordStrict(req.Password); err != nil {
+		return nil, err
+	}
+
+	// Normalize email
+	email := middleware.NormalizeEmail(req.Email)
+
+	// Create user
+	userData, err := s.store.CreateUser(ctx, email, req.Password)
 	if err != nil {
 		return nil, status.Errorf(codes.AlreadyExists, "failed to register user: %v", err)
 	}
@@ -65,7 +75,7 @@ func (s *AuthServer) Login(ctx context.Context, req *authpb.LoginRequest) (*auth
 	// Create JWT token (Login JWT) - does NOT contain APIKey claim, but contains Plan
 	claims := &middleware.Claims{
 		UserID: userData.ID,
-		APIKey: "", // APIKey claim is empty for Login JWT
+		APIKey: "",                     // APIKey claim is empty for Login JWT
 		Plan:   userData.Plan.String(), // Include Plan in Login JWT
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
@@ -158,11 +168,16 @@ func (s *AuthServer) CreateAPIKey(ctx context.Context, req *authpb.CreateAPIKeyR
 	if err != nil {
 		return nil, err
 	}
-	if req.Name == "" {
-		return nil, status.Error(codes.InvalidArgument, "Name is required")
+
+	// Validate API key name
+	if err := middleware.ValidateAPIKeyName(req.Name); err != nil {
+		return nil, err
 	}
 
-	fullKey, keyData, err := s.store.CreateAPIKey(ctx, userID, req.Name)
+	// Sanitize the name
+	name := middleware.SanitizeString(req.Name)
+
+	fullKey, keyData, err := s.store.CreateAPIKey(ctx, userID, name)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create key: %v", err)
 	}
@@ -235,7 +250,6 @@ func (s *AuthServer) CreateSDKJWT(ctx context.Context, req *authpb.CreateSDKJWTR
 	if keyData == nil || keyData.UserID != userID {
 		return nil, status.Errorf(codes.PermissionDenied, "invalid API key ID or not owned by user")
 	}
-
 
 	// Retrieve user data to get the plan
 	userData, err := s.store.GetUserByID(ctx, userID)

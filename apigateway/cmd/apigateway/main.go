@@ -44,13 +44,13 @@ type LeaderInfo struct {
 // forwarding requests to the appropriate backend services (placement driver or workers).
 type gatewayServer struct {
 	pb.UnimplementedVectronServiceServer
-	pdAddrs          []string
-	leader           *LeaderInfo
-	leaderMu         sync.RWMutex
-	authClient       authpb.AuthServiceClient
-	rerankerClient   reranker.RerankServiceClient
-	feedbackService  *feedback.Service
-	managementMgr    *management.Manager
+	pdAddrs         []string
+	leader          *LeaderInfo
+	leaderMu        sync.RWMutex
+	authClient      authpb.AuthServiceClient
+	rerankerClient  reranker.RerankServiceClient
+	feedbackService *feedback.Service
+	managementMgr   *management.Manager
 }
 
 func (s *gatewayServer) getPlacementClient() (placementpb.PlacementServiceClient, error) {
@@ -245,6 +245,39 @@ func (s *gatewayServer) CreateCollection(ctx context.Context, req *pb.CreateColl
 		}
 	}
 	return &pb.CreateCollectionResponse{Success: res.Success}, nil
+}
+
+func (s *gatewayServer) DeleteCollection(ctx context.Context, req *pb.DeleteCollectionRequest) (*pb.DeleteCollectionResponse, error) {
+	if req.Name == "" {
+		return nil, status.Error(codes.InvalidArgument, "collection name cannot be empty")
+	}
+
+	placementClient, err := s.getPlacementClient()
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
+	}
+
+	pdReq := &placementpb.DeleteCollectionRequest{
+		Name: req.Name,
+	}
+
+	res, err := placementClient.DeleteCollection(ctx, pdReq)
+	if err != nil {
+		if st, ok := status.FromError(err); ok && (st.Code() == codes.Unavailable || st.Code() == codes.Internal) {
+			placementClient, err = s.updateLeader()
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "could not update placement driver leader: %v", err)
+			}
+			res, err = placementClient.DeleteCollection(ctx, pdReq)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, err
+		}
+	}
+
+	return &pb.DeleteCollectionResponse{Success: res.Success}, nil
 }
 
 func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.UpsertResponse, error) {
@@ -468,12 +501,12 @@ func (s *gatewayServer) GetCollectionStatus(ctx context.Context, req *pb.GetColl
 func metricsMiddleware(mgr *management.Manager, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		
+
 		// Create a response writer wrapper to capture status code
 		wrapped := &responseRecorder{ResponseWriter: w, statusCode: http.StatusOK}
-		
+
 		next.ServeHTTP(wrapped, r)
-		
+
 		// Record the request
 		duration := time.Since(start)
 		isError := wrapped.statusCode >= 400
@@ -495,15 +528,15 @@ func (rr *responseRecorder) WriteHeader(code int) {
 // managementHandlers returns a handler for management endpoints
 func managementHandlers(mgr *management.Manager) http.Handler {
 	mux := http.NewServeMux()
-	
+
 	// System health
 	mux.HandleFunc("/v1/system/health", mgr.HandleSystemHealth)
-	
+
 	// Admin endpoints
 	mux.HandleFunc("/v1/admin/stats", mgr.HandleGatewayStats)
 	mux.HandleFunc("/v1/admin/workers", mgr.HandleWorkers)
 	mux.HandleFunc("/v1/admin/collections", mgr.HandleCollections)
-	
+
 	// Alerts
 	mux.HandleFunc("/v1/alerts", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/resolve") {
@@ -512,7 +545,7 @@ func managementHandlers(mgr *management.Manager) http.Handler {
 			mgr.HandleAlerts(w, r)
 		}
 	})
-	
+
 	return mux
 }
 
@@ -611,9 +644,9 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 	// Create a combined HTTP handler that routes to either management or gRPC gateway
 	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Check if this is a management endpoint
-		if strings.HasPrefix(r.URL.Path, "/v1/system/") || 
-		   strings.HasPrefix(r.URL.Path, "/v1/admin/") || 
-		   strings.HasPrefix(r.URL.Path, "/v1/alerts") {
+		if strings.HasPrefix(r.URL.Path, "/v1/system/") ||
+			strings.HasPrefix(r.URL.Path, "/v1/admin/") ||
+			strings.HasPrefix(r.URL.Path, "/v1/alerts") {
 			managementHandlers(managementMgr).ServeHTTP(w, r)
 		} else {
 			mux.ServeHTTP(w, r)
