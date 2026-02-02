@@ -17,7 +17,7 @@ import (
 	vectron "github.com/pavandhadge/vectron/clientlibs/go"
 )
 
-const e2eJwtSecret = "e2e-super-secret-jwt-key"
+const e2eJwtSecret = "e2e-super-secret-jwt-key-for-testing-vectron-only"
 
 func TestE2E_FullSystem_WithAuth(t *testing.T) {
 	// This test orchestrates a full end-to-end scenario, including:
@@ -138,12 +138,17 @@ func TestE2E_FullSystem_WithAuth(t *testing.T) {
 			"RULE_METADATA_PENALTIES=deprecated:0.5",
 		},
 		"./bin/reranker",
-		fmt.Sprintf("--port=%s", rerankerAddr),
+		fmt.Sprintf("--port=%d", rerankerPort), // Pass just the port number
 		"--strategy=rule",
 		"--cache=memory",
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { reranker.Stop(t) })
+
+	// Create temp directory for apigateway feedback database
+	gatewayDataDir, err := os.MkdirTemp("", "gateway_e2e_full_test-")
+	require.NoError(t, err)
+	defer os.RemoveAll(gatewayDataDir)
 
 	gatewayPort := GetFreePort()
 	t.Logf("DEBUG: In test, gatewayPort obtained: %d", gatewayPort)
@@ -154,6 +159,7 @@ func TestE2E_FullSystem_WithAuth(t *testing.T) {
 		fmt.Sprintf("PLACEMENT_DRIVER=%s", allPdGrpcAddrs), // Use allPdGrpcAddrs for PLACEMENT_DRIVER env var
 		fmt.Sprintf("AUTH_SERVICE_ADDR=%s", authSvcAddr),
 		fmt.Sprintf("RERANKER_SERVICE_ADDR=%s", rerankerAddr),
+		fmt.Sprintf("FEEDBACK_DB_PATH=%s/feedback.db", gatewayDataDir), // Use temp directory for feedback DB
 	}
 	gateway, err := StartService(ctx, "apigateway",
 		gatewayEnv,
@@ -187,8 +193,8 @@ func TestE2E_FullSystem_WithAuth(t *testing.T) {
 	userEmail := fmt.Sprintf("e2e-user-%s@example.com", uuid.New().String())
 	userPassword := "e2e-password-strong!"
 
-	// Register User
-	regResp, err := authClient.Client.RegisterUser(authClient.NewAuthenticatedContext(ctx), &authpb.RegisterUserRequest{
+	// Register User (no authentication needed for registration)
+	regResp, err := authClient.Client.RegisterUser(ctx, &authpb.RegisterUserRequest{
 		Email:    userEmail,
 		Password: userPassword,
 	})

@@ -15,8 +15,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	// This assumes the generated protobuf code is in this package path.
-	apigateway "github.com/pavandhadge/vectron/clientlibs/go/proto/apigateway"
+	// Use shared proto definitions to avoid conflicts
+	apigateway "github.com/pavandhadge/vectron/shared/proto/apigateway"
 	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
 )
 
@@ -36,9 +36,9 @@ type SearchResult struct {
 
 // Client is the primary entrypoint for interacting with the Vectron API.
 type Client struct {
-	conn       *grpc.ClientConn
-	client     apigateway.VectronServiceClient
-	jwtToken   string
+	conn     *grpc.ClientConn
+	client   apigateway.VectronServiceClient
+	jwtToken string
 }
 
 // NewClient creates a new Vectron client.
@@ -54,9 +54,9 @@ func NewClient(host string, jwtToken string) (*Client, error) {
 	}
 
 	return &Client{
-		conn:       conn,
-		client:     apigateway.NewVectronServiceClient(conn),
-		jwtToken:   jwtToken,
+		conn:     conn,
+		client:   apigateway.NewVectronServiceClient(conn),
+		jwtToken: jwtToken,
 	}, nil
 }
 
