@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
-  ChevronRight,
   Terminal,
   Zap,
   Layers,
@@ -12,13 +11,11 @@ import {
   Check,
   Copy,
   ArrowRight,
-  Server,
   Database,
   Box,
   Brain,
   Search,
   Sparkles,
-  MessageSquare,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 

@@ -4,11 +4,12 @@
 
 **Vectron** is a distributed vector database for high-performance similarity search, built with Go microservices using Raft consensus. Think of it as a self-hosted, scalable alternative to Pinecone or Weaviate.
 
-**Architecture:** 3 core services + Auth
-- **API Gateway** (`/apigateway/`) - Public entry point, JWT auth, rate limiting
+**Architecture:** 4 core services + Auth + Reranker
+- **API Gateway** (`/apigateway/`) - Public entry point, JWT auth, rate limiting, feedback system
 - **Placement Driver** (`/placementdriver/`) - Cluster coordinator (Raft-based)
 - **Worker** (`/worker/`) - Data nodes with HNSW indexing + PebbleDB storage
-- **Auth Service** (`/auth/service/`) - User/API key management with etcd
+- **Reranker** (`/reranker/`) - Intelligent search result reranking with caching
+- **Auth Service** (`/auth/service/`) - User/API key management with etcd + Management Console
 
 ---
 
@@ -20,6 +21,7 @@
 │   ├── cmd/apigateway/      # main.go, config.go
 │   └── internal/
 │       ├── middleware/      # auth.go, ratelimit.go
+│       ├── feedback/        # Feedback system (SQLite)
 │       └── translator/      # Protocol translation
 ├── placementdriver/         # Cluster coordinator
 │   ├── cmd/placementdriver/ # main.go
@@ -33,6 +35,14 @@
 │       ├── shard/           # Shard state machine & manager
 │       ├── storage/         # PebbleDB interface
 │       └── idxhnsw/         # HNSW index implementation
+├── reranker/                # Reranking service
+│   ├── cmd/reranker/        # main.go
+│   └── internal/
+│       ├── cache/           # Memory & Redis cache
+│       ├── strategies/
+│       │   └── rule/        # Rule-based reranking
+│       ├── grpc.go          # gRPC handlers
+│       └── strategy.go      # Strategy interface
 ├── auth/
 │   ├── service/             # Go auth service
 │   │   ├── cmd/auth/
@@ -40,7 +50,13 @@
 │   │       ├── handler/     # gRPC handlers
 │   │       ├── etcd/        # etcd client
 │   │       └── middleware/  # JWT middleware
-│   └── frontend/            # React TypeScript SPA
+│   └── frontend/            # React TypeScript SPA + Management Console
+│       └── src/pages/
+│           ├── ManagementDashboard.tsx
+│           ├── CollectionsManagement.tsx
+│           ├── WorkersManagement.tsx
+│           ├── ApiGatewayManagement.tsx
+│           └── SystemHealthPage.tsx
 ├── clientlibs/              # Official SDKs
 │   ├── go/client.go         # Go client (291 lines)
 │   ├── python/              # Python client
@@ -50,7 +66,8 @@
 │       ├── apigateway/
 │       ├── auth/
 │       ├── worker/
-│       └── placementdriver/
+│       ├── placementdriver/
+│       └── reranker/
 └── docs/                    # Comprehensive documentation
 ```
 
@@ -63,18 +80,23 @@
 - `/placementdriver/cmd/placementdriver/main.go` - Placement Driver
 - `/worker/cmd/worker/main.go` - Worker service
 - `/auth/service/cmd/auth/main.go` - Auth service
+- `/reranker/cmd/reranker/main.go` - Reranker service
 
 ### Core Logic
 - `/placementdriver/internal/fsm/fsm.go` - Cluster state management (467 lines)
 - `/worker/internal/shard/state_machine.go` - Per-shard state (262 lines)
 - `/worker/internal/idxhnsw/hnsw.go` - HNSW index (171 lines)
 - `/auth/service/internal/handler/auth.go` - Auth handlers (314 lines)
+- `/reranker/internal/strategies/rule/rule.go` - Rule-based reranking (425 lines)
+- `/reranker/internal/cache/memory.go` - In-memory cache (395 lines)
+- `/apigateway/internal/feedback/service.go` - Feedback system (266 lines)
 
 ### Protocol Buffers
-- `/shared/proto/apigateway/apigateway.proto` - Public API
+- `/shared/proto/apigateway/apigateway.proto` - Public API (includes feedback)
 - `/shared/proto/placementdriver/placementdriver.proto` - Internal coordination
 - `/shared/proto/worker/worker.proto` - Worker operations
 - `/shared/proto/auth/auth.proto` - Auth operations
+- `/shared/proto/reranker/reranker.proto` - Reranker service
 
 ---
 
@@ -89,6 +111,7 @@ make build-apigateway
 make build-placementdriver
 make build-worker
 make build-auth
+make build-reranker    # NEW: Build reranker service
 
 # Generate protobuf code
 bash generate-all.sh
@@ -98,17 +121,32 @@ bash generate-all.sh
 ./bin/worker --node-id=1 --grpc-addr=localhost:9090 --raft-addr=localhost:9191 --pd-addrs=localhost:6001
 ./bin/apigateway
 ./bin/authsvc
+./bin/reranker         # NEW: Run reranker service
 ```
 
 ---
 
 ## Data Flow
 
+### Basic Search Flow
 1. **Client Request** → API Gateway (gRPC or HTTP)
 2. **Auth Check** → JWT validation via AuthInterceptor
 3. **Routing** → Query Placement Driver for worker addresses
 4. **Execution** → Forward to appropriate Worker nodes
-5. **Response** → Aggregate results (if needed) and return to client
+5. **Reranking** → (Optional) Send results to Reranker for intelligent reranking
+6. **Response** → Return enhanced results to client
+
+### Feedback Flow
+1. **Client Rates Results** → POST `/v1/feedback` to API Gateway
+2. **Storage** → Feedback stored in SQLite database
+3. **Analytics** → Used to improve reranking rules over time
+4. **Cache Invalidation** → Trigger reranker cache refresh
+
+### Management Console Flow
+1. **Admin Login** → Auth frontend (React SPA)
+2. **View Dashboard** → ManagementDashboard.tsx shows system overview
+3. **Monitor** → Collections, Workers, API Gateway metrics
+4. **Manage** → Create/delete collections, monitor worker health
 
 ---
 
@@ -132,6 +170,24 @@ bash generate-all.sh
 ### JWT Types
 - **Login JWT** - Frontend sessions (24hr expiry, UserID + Plan)
 - **SDK JWT** - API access (7 day expiry, contains APIKey ID)
+
+### Reranker Strategies
+- **Rule-Based** (Implemented) - TF-IDF scoring, keyword matching, metadata boosting, recency weighting
+- **LLM-Based** (Planned) - OpenAI/Grok integration for semantic understanding
+- **RL-Based** (Planned) - Reinforcement learning with ONNX models
+- **Cache** - Memory (LRU/LFU/FIFO/TTL) or Redis backend
+
+### Feedback System
+- Relevance scoring (1-5 scale)
+- Click tracking with position bias analysis
+- SQLite storage with session tracking
+- Statistics API for rule improvement
+
+### Management Console
+- React-based dashboard in auth frontend
+- Real-time monitoring (auto-refresh 30s)
+- Service health, collections, workers, API metrics
+- CRUD operations for collections
 
 ---
 
@@ -173,6 +229,20 @@ GRPC_PORT=:8081
 HTTP_PORT=:8082
 ETCD_ENDPOINTS=localhost:2379
 JWT_SECRET=<generated>
+```
+
+### Reranker Service
+```
+RERANKER_GRPC_ADDR=:50051          # gRPC server address
+RERANKER_STRATEGY=rule              # Strategy: rule, llm, rl
+RERANKER_CACHE_TYPE=memory          # Cache: memory, redis
+RERANKER_CACHE_SIZE=10000           # Max cache entries
+RERANKER_REDIS_ADDR=localhost:6379  # Redis address (if using redis)
+```
+
+### Feedback System (API Gateway)
+```
+FEEDBACK_DB_PATH=./feedback.db     # SQLite database path
 ```
 
 ---
@@ -308,6 +378,14 @@ Full documentation in `/docs/`:
 - `APIGateway_Service.md` - Gateway details
 - `Auth_Service.md` - Auth implementation
 - `PlacementDriver_Service.md` - PD internals
+- `Feedback_System.md` - Feedback collection & analytics
+- `APIGateway_Reranker_Integration.md` - Gateway-reranker integration
+
+Reranker documentation:
+- `/reranker/README.md` - Reranker overview
+- `/reranker/STRUCTURE.md` - Directory structure
+- `/reranker/CACHE.md` - Cache configuration
+- `/reranker/TODO.md` - Implementation roadmap
 
 ---
 
@@ -326,6 +404,11 @@ Full documentation in `/docs/`:
 | Worker storage | `/worker/internal/storage/storage.go` |
 | Auth handlers | `/auth/service/internal/handler/auth.go` |
 | Go client | `/clientlibs/go/client.go` |
+| Reranker | `/reranker/cmd/reranker/main.go` |
+| Rule-based reranking | `/reranker/internal/strategies/rule/rule.go` |
+| Memory cache | `/reranker/internal/cache/memory.go` |
+| Feedback service | `/apigateway/internal/feedback/service.go` |
+| Management API | `/auth/frontend/src/services/managementApi.ts` |
 
 ---
 

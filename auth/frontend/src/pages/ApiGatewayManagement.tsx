@@ -4,7 +4,6 @@ import {
   BarChart3,
   Clock,
   RefreshCw,
-  Server,
   Users,
   Zap,
   Globe,
@@ -12,7 +11,6 @@ import {
   EyeOff,
   TrendingUp,
   AlertCircle,
-  CheckCircle,
 } from "lucide-react";
 import { GatewayStats, GatewayEndpoint } from "../api-types";
 import { managementApi } from "../services/managementApi";

@@ -1,22 +1,17 @@
 import React, { useState, useEffect } from "react";
 import {
-  Activity,
   CheckCircle,
-  Clock,
-  Cpu,
   Database,
-  HardDrive,
   MemoryStick,
   RefreshCw,
   Server,
   XCircle,
   Eye,
   EyeOff,
-  Zap,
   AlertCircle,
   X,
 } from "lucide-react";
-import { WorkerNode, WorkerStats, ShardInfo } from "../api-types";
+import { WorkerNode } from "../api-types";
 import { managementApi } from "../services/managementApi";
 
 interface WorkersManagementProps {}
@@ -260,7 +255,7 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
     
     const interval = setInterval(() => {
       fetchWorkers();
-    }, 30000); // Refresh every 30 seconds
+    }, 30000);
 
     return () => clearInterval(interval);
   }, [autoRefresh]);
@@ -281,7 +276,6 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
     return `${Math.floor(seconds / 60)}m`;
   };
 
-  // Calculate summary statistics
   const healthyWorkers = workers.filter(w => w.healthy).length;
   const totalVectors = workers.reduce((sum, w) => sum + (w.stats?.vector_count || 0), 0);
   const totalMemory = workers.reduce((sum, w) => sum + (w.stats?.memory_bytes || 0), 0);

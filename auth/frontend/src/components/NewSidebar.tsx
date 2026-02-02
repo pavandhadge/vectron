@@ -1,4 +1,3 @@
-import React from "react";
 import { NavLink, Link } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -9,14 +8,11 @@ import {
   CreditCard,
   LogOut,
   Code,
-  ChevronRight,
   X,
   Server,
   Activity,
   Globe,
-  Shield,
   BarChart3,
-  Users,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 
 interface DialogProps {
@@ -34,13 +34,6 @@ export const Dialog: React.FC<DialogProps> = ({
       document.body.style.overflow = "unset";
     };
   }, [open, onClose]);
-
-  // Handle Click Outside (Backdrop)
-  const handleBackdropClick = (e: React.MouseEvent) => {
-    if (dialogRef.current && !dialogRef.current.contains(e.target as Node)) {
-      onClose();
-    }
-  };
 
   if (!open) return null;
 

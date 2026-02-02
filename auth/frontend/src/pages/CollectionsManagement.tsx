@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   Database,
   Plus,
@@ -14,10 +14,10 @@ import {
   X,
   Layers,
 } from "lucide-react";
-import { Collection, CollectionShard } from "../api-types";
+import { Collection } from "../api-types";
 import { managementApi } from "../services/managementApi";
 
-interface CollectionsManagementProps {}
+
 
 interface CreateCollectionModalProps {
   onClose: () => void;
@@ -33,9 +33,10 @@ interface DeleteConfirmModalProps {
   collection: Collection;
   onClose: () => void;
   onConfirm: () => void;
+  error: string | null;
 }
 
-const CreateCollectionModal: React.FC<CreateCollectionModalProps> = ({ onClose, onCreated }) => {
+const CreateCollectionModal = ({ onClose, onCreated }: CreateCollectionModalProps) => {
   const [name, setName] = useState("");
   const [dimension, setDimension] = useState(1536);
   const [distance, setDistance] = useState("cosine");
@@ -146,7 +147,7 @@ const CreateCollectionModal: React.FC<CreateCollectionModalProps> = ({ onClose, 
   );
 };
 
-const CollectionDetailsModal: React.FC<CollectionDetailsModalProps> = ({ collection, onClose }) => {
+const CollectionDetailsModal = ({ collection, onClose }: CollectionDetailsModalProps) => {
   const formatBytes = (bytes: number) => {
     const sizes = ["B", "KB", "MB", "GB", "TB"];
     if (bytes === 0) return "0 B";
@@ -329,7 +330,7 @@ const CollectionDetailsModal: React.FC<CollectionDetailsModalProps> = ({ collect
   );
 };
 
-const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({ collection, onClose, onConfirm }) => {
+const DeleteConfirmModal = ({ collection, onClose, onConfirm, error }: DeleteConfirmModalProps) => {
   const [confirmText, setConfirmText] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -358,6 +359,15 @@ const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({ collection, onC
         </div>
 
         <div className="p-6 space-y-4">
+          {error && (
+            <div className="flex items-center gap-3 p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
+              <XCircle className="w-6 h-6 text-red-400 flex-shrink-0" />
+              <div>
+                <h3 className="text-red-400 font-semibold">Error</h3>
+                <p className="text-red-300 text-sm mt-1">{error}</p>
+              </div>
+            </div>
+          )}
           <div className="flex items-center gap-3 p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
             <AlertTriangle className="w-6 h-6 text-red-400 flex-shrink-0" />
             <div>
@@ -405,7 +415,7 @@ const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({ collection, onC
   );
 };
 
-const CollectionsManagement: React.FC<CollectionsManagementProps> = () => {
+const CollectionsManagement = () => {
   const [collections, setCollections] = useState<Collection[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -414,6 +424,7 @@ const CollectionsManagement: React.FC<CollectionsManagementProps> = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null);
   const [collectionToDelete, setCollectionToDelete] = useState<Collection | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const fetchCollections = async () => {
     try {
@@ -445,13 +456,16 @@ const CollectionsManagement: React.FC<CollectionsManagementProps> = () => {
   const handleDeleteCollection = async () => {
     if (!collectionToDelete) return;
 
+    setDeleteError(null);
     try {
       await managementApi.deleteCollection(collectionToDelete.name);
       await fetchCollections(); // Refresh the list
       setCollectionToDelete(null);
+      setDeleteError(null);
     } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to delete collection. Please try again.";
+      setDeleteError(errorMessage);
       console.error("Error deleting collection:", err);
-      // Could add toast notification here
     }
   };
 
@@ -475,18 +489,6 @@ const CollectionsManagement: React.FC<CollectionsManagementProps> = () => {
     }
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "active":
-        return "text-green-400";
-      case "creating":
-        return "text-yellow-400";
-      case "error":
-        return "text-red-400";
-      default:
-        return "text-neutral-400";
-    }
-  };
 
   const filteredCollections = collections.filter(collection =>
     collection.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -750,8 +752,12 @@ const CollectionsManagement: React.FC<CollectionsManagementProps> = () => {
       {collectionToDelete && (
         <DeleteConfirmModal
           collection={collectionToDelete}
-          onClose={() => setCollectionToDelete(null)}
+          onClose={() => {
+            setCollectionToDelete(null);
+            setDeleteError(null);
+          }}
           onConfirm={handleDeleteCollection}
+          error={deleteError}
         />
       )}
     </div>

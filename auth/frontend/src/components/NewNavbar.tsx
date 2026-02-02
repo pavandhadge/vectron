@@ -1,6 +1,4 @@
-import React from "react";
 import { useAuth } from "../contexts/AuthContext";
-import { useNavigate } from "react-router-dom";
 import { Menu, Search, Bell, HelpCircle, Command } from "lucide-react";
 
 interface NewNavbarProps {

@@ -19,16 +19,18 @@ bash generate-all.sh
 ./bin/worker --node-id=1 --grpc-addr=localhost:9090 --pd-addrs=localhost:6001
 ./bin/apigateway
 ./bin/authsvc
+./bin/reranker  # Optional: Intelligent result reranking
 ```
 
 ## 📋 What's Inside
 
 | Component | Purpose | Tech |
 |-----------|---------|------|
-| **API Gateway** | Public API entry point with auth & routing | gRPC + HTTP/REST |
+| **API Gateway** | Public API entry point with auth, feedback & routing | gRPC + HTTP/REST + SQLite |
 | **Placement Driver** | Cluster coordinator with Raft consensus | Dragonboat |
 | **Worker** | Data nodes with HNSW indexing | PebbleDB + HNSW |
-| **Auth Service** | JWT-based authentication & API key management | etcd + bcrypt |
+| **Reranker** | Intelligent search result reranking with caching | Rule-based/LLM/RL + Redis |
+| **Auth Service** | JWT-based authentication, API key management + Management Console | etcd + bcrypt + React |
 
 ## 📚 Documentation
 
@@ -42,27 +44,52 @@ bash generate-all.sh
 - [Placement Driver](docs/PlacementDriver_Service.md)
 - [Worker](docs/Worker_Service.md)
 - [Auth Service](docs/Auth_Service.md)
+- [Feedback System](docs/Feedback_System.md)
+- [Reranker Integration](docs/APIGateway_Reranker_Integration.md)
+- [Reranker](reranker/README.md)
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│   Clients   │────▶│ API Gateway  │────▶│    Auth     │
-│  (Go/Python)│     │  (gRPC/HTTP) │     │   Service   │
-└─────────────┘     └──────┬───────┘     └─────────────┘
-                           │
-                           ▼
-                  ┌─────────────────┐
-                  │ Placement Driver│
-                  │   (Raft Leader) │
-                  └────────┬────────┘
-                           │
-              ┌────────────┼────────────┐
-              ▼            ▼            ▼
-        ┌─────────┐  ┌─────────┐  ┌─────────┐
-        │ Worker 1│  │ Worker 2│  │ Worker N│
-        │(Shard A)│  │(Shard B)│  │(Shard C)│
-        └─────────┘  └─────────┘  └─────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                              CLIENT                                      │
+│                     (Go / Python / JavaScript)                          │
+└───────────────────────────────┬─────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         API GATEWAY                                      │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐ │
+│  │ REST API        │  │ Feedback API    │  │ Reranker Integration    │ │
+│  │ (/v1/...)       │  │ (/v1/feedback)  │  │ (gRPC to Reranker)      │ │
+│  └─────────────────┘  └─────────────────┘  └─────────────────────────┘ │
+└───────────────────────┬────────────────────────────────────────────────┘
+                        │
+        ┌───────────────┼───────────────┐
+        ▼               ▼               ▼
+┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+│   WORKER     │ │  RERANKER    │ │   AUTH       │
+│  (Vector DB) │ │ (Reranking)  │ │  (Frontend)  │
+└──────────────┘ └──────────────┘ └──────────────┘
+                        │
+                        ▼
+               ┌──────────────┐
+               │  FEEDBACK    │
+               │  (SQLite)    │
+               └──────────────┘
+                        │
+                        ▼
+               ┌─────────────────┐
+               │ Placement Driver│
+               │   (Raft Leader) │
+               └────────┬────────┘
+                        │
+           ┌────────────┼────────────┐
+           ▼            ▼            ▼
+     ┌─────────┐  ┌─────────┐  ┌─────────┐
+     │ Worker 1│  │ Worker 2│  │ Worker N│
+     │(Shard A)│  │(Shard B)│  │(Shard C)│
+     └─────────┘  └─────────┘  └─────────┘
 ```
 
 ## 💻 Client Libraries
@@ -95,12 +122,15 @@ const results = await client.search('my-collection', [0.1, 0.2, ...], 10);
 
 ```
 vectron/
-├── apigateway/          # API Gateway service
+├── apigateway/          # API Gateway service + Feedback system
 ├── placementdriver/     # Cluster coordinator
 ├── worker/              # Data nodes
-├── auth/                # Auth service + frontend
+├── reranker/            # Intelligent reranking service
+│   ├── cmd/reranker/    # Main entry
+│   └── internal/        # Rule strategies, cache
+├── auth/                # Auth service + Management Console
 │   ├── service/         # Go backend
-│   └── frontend/        # React SPA
+│   └── frontend/        # React SPA with Management Dashboard
 ├── clientlibs/          # Official SDKs
 │   ├── go/
 │   ├── python/
@@ -130,6 +160,7 @@ make build-apigateway
 make build-worker
 make build-placementdriver
 make build-auth
+make build-reranker
 
 # Clean build artifacts
 make clean
@@ -164,20 +195,30 @@ go test -v e2e_test.go e2e_test_helpers_test.go
 
 ## ⚠️ Current Status
 
-**Active Development**: Core services are functional. See [TODO_AND_MISSING_FEATURES.md](TODO_AND_MISSING_FEATURES.md) for detailed status.
+**Active Development**: Core services + Reranker + Management Console are functional. See [TODO_AND_MISSING_FEATURES.md](TODO_AND_MISSING_FEATURES.md) for detailed status.
+
+### What's Working ✅
+- Vector storage and similarity search (HNSW)
+- Distributed Raft consensus (Placement Driver + Workers)
+- JWT-based authentication with API key management
+- **NEW**: Reranker service with rule-based reranking and caching
+- **NEW**: Feedback system for result ratings (1-5 scale)
+- **NEW**: Management Console for cluster monitoring
 
 ### Known Issues
 - Broken test files need fixing (see TODO file)
-- Auth system implementation in progress
+- Auth system JWT implementation in progress
 - Cross-shard search aggregation not yet implemented
 - TLS/SSL support pending
+- Management Console uses mock data (backend APIs needed)
 
 ### Next Priorities
 1. Fix broken tests
 2. Complete auth system
 3. Add TLS support
 4. Docker Compose setup
-5. Cross-shard search
+5. Backend APIs for Management Console
+6. Cross-shard search
 
 ## 🤝 Contributing
 

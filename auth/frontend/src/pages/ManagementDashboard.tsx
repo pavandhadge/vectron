@@ -1,19 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Activity,
   Server,
   Database,
-  Users,
   AlertTriangle,
   CheckCircle,
   XCircle,
   TrendingUp,
-  Clock,
   Cpu,
   HardDrive,
   Wifi,
 } from 'lucide-react';
-import { SystemHealth, SystemMetrics } from '../api-types';
+import type { SystemHealth } from '../api-types';
 import { managementApi } from '../services/managementApi';
 
 interface StatCardProps {
@@ -24,7 +22,7 @@ interface StatCardProps {
   trend?: 'up' | 'down' | 'neutral';
 }
 
-const StatCard: React.FC<StatCardProps> = ({ title, value, change, icon: Icon, trend = 'neutral' }) => (
+const StatCard = ({ title, value, change, icon: Icon, trend = 'neutral' }: StatCardProps) => (
   <div className="bg-neutral-900/50 border border-neutral-800 rounded-lg p-6 hover:bg-neutral-900/70 transition-colors">
     <div className="flex items-center justify-between mb-4">
       <div className="flex items-center gap-3">
@@ -56,13 +54,13 @@ interface ServiceStatusProps {
   lastCheck: number;
 }
 
-const ServiceStatusCard: React.FC<ServiceStatusProps> = ({
+const ServiceStatusCard = ({
   name,
   status,
-  endpoint,
+  endpoint: _endpoint,
   responseTime,
   lastCheck,
-}) => {
+}: ServiceStatusProps) => {
   const statusConfig = {
     up: { icon: CheckCircle, color: 'text-green-400', bg: 'bg-green-500/10' },
     down: { icon: XCircle, color: 'text-red-400', bg: 'bg-red-500/10' },
@@ -98,10 +96,10 @@ const ServiceStatusCard: React.FC<ServiceStatusProps> = ({
   );
 };
 
-export const ManagementDashboard: React.FC = () => {
+export const ManagementDashboard = () => {
   const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
   const [loading, setLoading] = useState(true);
-  const [refreshInterval, setRefreshInterval] = useState<number | null>(null);
+  const [refreshInterval, setRefreshInterval] = useState<ReturnType<typeof setInterval> | null>(null);
 
   const fetchData = async () => {
     try {
@@ -250,12 +248,6 @@ export const ManagementDashboard: React.FC = () => {
             <div className="flex items-center justify-between">
               <span className="text-neutral-400">Used</span>
               <span className="text-white font-medium">{formatBytes(metrics.memory_used)}</span>
-            </div>
-            <div className="w-full bg-neutral-800 rounded-full h-2">
-              <div
-                className="h-2 rounded-full bg-blue-500"
-                style={{ width: '65%' }}
-              />
             </div>
           </div>
         </div>

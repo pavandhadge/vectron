@@ -1,7 +1,7 @@
 // This file is the main entry point for the API Gateway service.
 // It sets up and runs the gRPC server and the HTTP/JSON gateway,
 // which exposes the public Vectron API to clients. It handles request
-// forwarding to the appropriate worker nodes after consulting the placement driver.
+// forwarding to the appropriate backend services (placement driver or workers).
 
 package main
 
@@ -15,15 +15,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pavandhadge/vectron/apigateway/internal/feedback"
+	"github.com/pavandhadge/vectron/apigateway/internal/management"
 	"github.com/pavandhadge/vectron/apigateway/internal/middleware"
 	"github.com/pavandhadge/vectron/apigateway/internal/translator"
-	"github.com/pavandhadge/vectron/apigateway/internal/feedback"
 	pb "github.com/pavandhadge/vectron/shared/proto/apigateway"
+	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
 	placementpb "github.com/pavandhadge/vectron/shared/proto/placementdriver"
 	reranker "github.com/pavandhadge/vectron/shared/proto/reranker"
 	workerpb "github.com/pavandhadge/vectron/shared/proto/worker"
-
-	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
@@ -44,12 +44,13 @@ type LeaderInfo struct {
 // forwarding requests to the appropriate backend services (placement driver or workers).
 type gatewayServer struct {
 	pb.UnimplementedVectronServiceServer
-	pdAddrs        []string
-	leader         *LeaderInfo
-	leaderMu       sync.RWMutex
-	authClient     authpb.AuthServiceClient
-	rerankerClient reranker.RerankServiceClient
-	feedbackService *feedback.Service
+	pdAddrs          []string
+	leader           *LeaderInfo
+	leaderMu         sync.RWMutex
+	authClient       authpb.AuthServiceClient
+	rerankerClient   reranker.RerankServiceClient
+	feedbackService  *feedback.Service
+	managementMgr    *management.Manager
 }
 
 func (s *gatewayServer) getPlacementClient() (placementpb.PlacementServiceClient, error) {
@@ -61,18 +62,12 @@ func (s *gatewayServer) getPlacementClient() (placementpb.PlacementServiceClient
 	s.leaderMu.RUnlock()
 	return s.updateLeader()
 }
-func (s *gatewayServer) UpdateUserProfile(ctx context.Context, req *pb.UpdateUserProfileRequest) (*pb.UpdateUserProfileResponse, error) {
-	// The auth interceptor has already validated the JWT and put the user ID in the context.
-	// We can retrieve it here if needed, but for updating the user's own profile,
-	// the auth service will handle the validation based on the JWT it receives.
 
-	// Forward the request to the auth service.
+func (s *gatewayServer) UpdateUserProfile(ctx context.Context, req *pb.UpdateUserProfileRequest) (*pb.UpdateUserProfileResponse, error) {
 	authReq := &authpb.UpdateUserProfileRequest{
 		Plan: req.Plan,
 	}
 
-	// We need to pass the JWT from the incoming request to the auth service.
-	// The easiest way is to extract the token from the metadata and pass it along.
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return nil, status.Errorf(codes.Unauthenticated, "missing metadata")
@@ -82,7 +77,6 @@ func (s *gatewayServer) UpdateUserProfile(ctx context.Context, req *pb.UpdateUse
 		return nil, status.Errorf(codes.Unauthenticated, "missing authorization header")
 	}
 
-	// Create a new context with the authorization header for the downstream call.
 	authCtx := metadata.AppendToOutgoingContext(context.Background(), "authorization", authHeader[0])
 
 	authResp, err := s.authClient.UpdateUserProfile(authCtx, authReq)
@@ -95,7 +89,6 @@ func (s *gatewayServer) UpdateUserProfile(ctx context.Context, req *pb.UpdateUse
 	}, nil
 }
 
-// SubmitFeedback handles the RPC for submitting search result feedback
 func (s *gatewayServer) SubmitFeedback(ctx context.Context, req *pb.SubmitFeedbackRequest) (*pb.SubmitFeedbackResponse, error) {
 	if req.Collection == "" {
 		return nil, status.Error(codes.InvalidArgument, "collection name cannot be empty")
@@ -104,7 +97,6 @@ func (s *gatewayServer) SubmitFeedback(ctx context.Context, req *pb.SubmitFeedba
 		return nil, status.Error(codes.InvalidArgument, "feedback items cannot be empty")
 	}
 
-	// Convert proto feedback to internal format
 	feedbackItems := make([]feedback.FeedbackItem, len(req.FeedbackItems))
 	for i, item := range req.FeedbackItems {
 		if item.RelevanceScore < 1 || item.RelevanceScore > 5 {
@@ -119,7 +111,6 @@ func (s *gatewayServer) SubmitFeedback(ctx context.Context, req *pb.SubmitFeedba
 		}
 	}
 
-	// Create feedback session
 	session := &feedback.FeedbackSession{
 		Collection: req.Collection,
 		Query:      req.Query,
@@ -127,7 +118,6 @@ func (s *gatewayServer) SubmitFeedback(ctx context.Context, req *pb.SubmitFeedba
 		Context:    req.Context,
 	}
 
-	// Extract user info from context if available
 	if userID, ok := req.Context["user_id"]; ok {
 		session.UserID = userID
 	}
@@ -135,7 +125,6 @@ func (s *gatewayServer) SubmitFeedback(ctx context.Context, req *pb.SubmitFeedba
 		session.SessionID = sessionID
 	}
 
-	// Store feedback
 	feedbackID, err := s.feedbackService.StoreFeedback(ctx, session)
 	if err != nil {
 		log.Printf("Failed to store feedback: %v", err)
@@ -154,7 +143,6 @@ func (s *gatewayServer) updateLeader() (placementpb.PlacementServiceClient, erro
 	s.leaderMu.Lock()
 	defer s.leaderMu.Unlock()
 
-	// Close existing connection if any
 	if s.leader != nil && s.leader.conn != nil {
 		s.leader.conn.Close()
 	}
@@ -167,7 +155,6 @@ func (s *gatewayServer) updateLeader() (placementpb.PlacementServiceClient, erro
 		}
 
 		client := placementpb.NewPlacementServiceClient(conn)
-		// Use ListCollections as a way to check for leadership.
 		_, err = client.ListCollections(context.Background(), &placementpb.ListCollectionsRequest{})
 		if err != nil {
 			conn.Close()
@@ -183,15 +170,12 @@ func (s *gatewayServer) updateLeader() (placementpb.PlacementServiceClient, erro
 	return nil, status.Error(codes.Unavailable, "no placement driver leader found")
 }
 
-// forwardToWorker is a helper function that encapsulates the logic for service discovery and request forwarding.
-// It queries the placement driver to find the correct worker for a given collection and vector ID,
-// establishes a connection, and then executes a callback function with the worker client.
 func (s *gatewayServer) forwardToWorker(ctx context.Context, collection string, vectorID string, call func(workerpb.WorkerServiceClient, uint64) (interface{}, error)) (interface{}, error) {
 	placementClient, err := s.getPlacementClient()
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
 	}
-	// 1. Ask the placement driver for the worker address.
+
 	resp, err := placementClient.GetWorker(ctx, &placementpb.GetWorkerRequest{
 		Collection: collection,
 		VectorId:   vectorID,
@@ -217,22 +201,16 @@ func (s *gatewayServer) forwardToWorker(ctx context.Context, collection string, 
 		return nil, status.Errorf(codes.NotFound, "collection %q not found", collection)
 	}
 
-	// 2. Connect to the worker.
 	conn, err := grpc.Dial(resp.GetGrpcAddress(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "worker for collection %q at %s is unreachable: %v", collection, resp.GetGrpcAddress(), err)
 	}
 	defer conn.Close()
 
-	// 3. Execute the call on the worker.
 	client := workerpb.NewWorkerServiceClient(conn)
 	return call(client, uint64(resp.ShardId))
 }
 
-// ================ RPCs IMPLEMENTED ================
-
-// CreateCollection handles the RPC for creating a new collection.
-// It validates the request and forwards it to the placement driver.
 func (s *gatewayServer) CreateCollection(ctx context.Context, req *pb.CreateCollectionRequest) (*pb.CreateCollectionResponse, error) {
 	if req.Name == "" {
 		return nil, status.Error(codes.InvalidArgument, "collection name cannot be empty")
@@ -246,7 +224,6 @@ func (s *gatewayServer) CreateCollection(ctx context.Context, req *pb.CreateColl
 		return nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
 	}
 
-	// This is a metadata operation, so it goes to the placement driver.
 	pdReq := &placementpb.CreateCollectionRequest{
 		Name:      req.Name,
 		Dimension: req.Dimension,
@@ -270,8 +247,6 @@ func (s *gatewayServer) CreateCollection(ctx context.Context, req *pb.CreateColl
 	return &pb.CreateCollectionResponse{Success: res.Success}, nil
 }
 
-// Upsert handles the RPC for upserting points into a collection.
-// It iterates through the points and forwards each one to the appropriate worker.
 func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.UpsertResponse, error) {
 	if req.Collection == "" {
 		return nil, status.Error(codes.InvalidArgument, "collection name cannot be empty")
@@ -289,7 +264,6 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 			return nil, status.Error(codes.InvalidArgument, "point vector cannot be empty")
 		}
 
-		// Get worker for this specific point and forward the request.
 		_, err := s.forwardToWorker(ctx, req.Collection, point.Id, func(client workerpb.WorkerServiceClient, shardID uint64) (interface{}, error) {
 			workerReq := translator.ToWorkerStoreVectorRequestFromPoint(point, shardID)
 			_, err := client.StoreVector(ctx, workerReq)
@@ -297,9 +271,6 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 		})
 
 		if err != nil {
-			// In a real implementation, we might want to collect errors
-			// and continue, or implement rollback logic.
-			// For now, we fail on the first error.
 			return nil, status.Errorf(codes.Internal, "failed to upsert point %s: %v", point.Id, err)
 		}
 		upsertedCount++
@@ -308,8 +279,6 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 	return &pb.UpsertResponse{Upserted: upsertedCount}, nil
 }
 
-// Search handles the RPC for searching for similar vectors.
-// It forwards the search request to a relevant worker, then reranks the results.
 func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.SearchResponse, error) {
 	if req.Collection == "" {
 		return nil, status.Error(codes.InvalidArgument, "collection name cannot be empty")
@@ -319,20 +288,17 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 	}
 
 	if req.TopK == 0 {
-		req.TopK = 10 // Default to 10 nearest neighbors
+		req.TopK = 10
 	}
 
-	// First, get results from the worker (increase top_k for better reranking)
-	workerTopK := req.TopK * 2 // Get more results for better reranking
+	workerTopK := req.TopK * 2
 	if workerTopK > 100 {
-		workerTopK = 100 // Cap at 100 for performance
+		workerTopK = 100
 	}
 
-	// For search, we can query any worker that has a replica of the shard.
-	// The vectorID is empty, letting the placement driver pick a suitable worker.
 	result, err := s.forwardToWorker(ctx, req.Collection, "", func(c workerpb.WorkerServiceClient, shardID uint64) (interface{}, error) {
 		workerReq := translator.ToWorkerSearchRequest(req, shardID)
-		workerReq.K = int32(workerTopK) // Use increased K for worker search
+		workerReq.K = int32(workerTopK)
 		res, err := c.Search(ctx, workerReq)
 		if err != nil {
 			return nil, err
@@ -342,54 +308,46 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 	if err != nil {
 		return nil, err
 	}
-	
+
 	searchResponse := result.(*pb.SearchResponse)
-	
-	// If no results or reranker is not available, return worker results
+
 	if len(searchResponse.Results) == 0 {
 		return searchResponse, nil
 	}
-	
-	// Prepare reranker request
+
 	candidates := make([]*reranker.Candidate, len(searchResponse.Results))
 	for i, result := range searchResponse.Results {
-		// Create metadata from payload
 		metadata := make(map[string]string)
 		if result.Payload != nil {
 			for k, v := range result.Payload {
 				metadata[k] = v
 			}
 		}
-		
+
 		candidates[i] = &reranker.Candidate{
 			Id:       result.Id,
 			Score:    result.Score,
 			Metadata: metadata,
 		}
 	}
-	
-	// Call reranker service
+
 	rerankReq := &reranker.RerankRequest{
-		Query:      "", // We don't have the original query text, using empty string
+		Query:      "",
 		Candidates: candidates,
 		TopN:       int32(req.TopK),
 	}
-	
+
 	rerankResp, err := s.rerankerClient.Rerank(ctx, rerankReq)
 	if err != nil {
-		// If reranking fails, log the error but return original results
 		log.Printf("Reranking failed, returning original results: %v", err)
-		// Truncate to requested TopK
 		if len(searchResponse.Results) > int(req.TopK) {
 			searchResponse.Results = searchResponse.Results[:req.TopK]
 		}
 		return searchResponse, nil
 	}
-	
-	// Convert reranked results back to SearchResponse format
+
 	rerankedResults := make([]*pb.SearchResult, len(rerankResp.Results))
 	for i, result := range rerankResp.Results {
-		// Convert metadata back to payload
 		payload := make(map[string]string)
 		for _, candidate := range candidates {
 			if candidate.Id == result.Id {
@@ -397,20 +355,19 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 				break
 			}
 		}
-		
+
 		rerankedResults[i] = &pb.SearchResult{
 			Id:      result.Id,
-			Score:   result.RerankScore, // Use reranked score
+			Score:   result.RerankScore,
 			Payload: payload,
 		}
 	}
-	
+
 	return &pb.SearchResponse{
 		Results: rerankedResults,
 	}, nil
 }
 
-// Get handles the RPC for retrieving a point by its ID.
 func (s *gatewayServer) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetResponse, error) {
 	result, err := s.forwardToWorker(ctx, req.Collection, req.Id, func(c workerpb.WorkerServiceClient, shardID uint64) (interface{}, error) {
 		workerReq := translator.ToWorkerGetVectorRequest(req, shardID)
@@ -426,7 +383,6 @@ func (s *gatewayServer) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetRes
 	return result.(*pb.GetResponse), nil
 }
 
-// Delete handles the RPC for deleting a point by its ID.
 func (s *gatewayServer) Delete(ctx context.Context, req *pb.DeleteRequest) (*pb.DeleteResponse, error) {
 	result, err := s.forwardToWorker(ctx, req.Collection, req.Id, func(c workerpb.WorkerServiceClient, shardID uint64) (interface{}, error) {
 		workerReq := translator.ToWorkerDeleteVectorRequest(req, shardID)
@@ -442,8 +398,6 @@ func (s *gatewayServer) Delete(ctx context.Context, req *pb.DeleteRequest) (*pb.
 	return result.(*pb.DeleteResponse), nil
 }
 
-// ListCollections handles the RPC for listing all collections.
-// This is a metadata operation, so it goes to the placement driver.
 func (s *gatewayServer) ListCollections(ctx context.Context, req *pb.ListCollectionsRequest) (*pb.ListCollectionsResponse, error) {
 	placementClient, err := s.getPlacementClient()
 	if err != nil {
@@ -468,8 +422,6 @@ func (s *gatewayServer) ListCollections(ctx context.Context, req *pb.ListCollect
 	return &pb.ListCollectionsResponse{Collections: res.Collections}, nil
 }
 
-// GetCollectionStatus handles the RPC for getting the status of a collection.
-// This is a metadata operation, so it goes to the placement driver.
 func (s *gatewayServer) GetCollectionStatus(ctx context.Context, req *pb.GetCollectionStatusRequest) (*pb.GetCollectionStatusResponse, error) {
 	placementClient, err := s.getPlacementClient()
 	if err != nil {
@@ -512,10 +464,59 @@ func (s *gatewayServer) GetCollectionStatus(ctx context.Context, req *pb.GetColl
 	}, nil
 }
 
+// metricsMiddleware wraps the gRPC gateway mux to track request metrics
+func metricsMiddleware(mgr *management.Manager, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		
+		// Create a response writer wrapper to capture status code
+		wrapped := &responseRecorder{ResponseWriter: w, statusCode: http.StatusOK}
+		
+		next.ServeHTTP(wrapped, r)
+		
+		// Record the request
+		duration := time.Since(start)
+		isError := wrapped.statusCode >= 400
+		mgr.RecordRequest(r.URL.Path, r.Method, duration, isError)
+	})
+}
+
+// responseRecorder wraps http.ResponseWriter to capture status code
+type responseRecorder struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rr *responseRecorder) WriteHeader(code int) {
+	rr.statusCode = code
+	rr.ResponseWriter.WriteHeader(code)
+}
+
+// managementHandlers returns a handler for management endpoints
+func managementHandlers(mgr *management.Manager) http.Handler {
+	mux := http.NewServeMux()
+	
+	// System health
+	mux.HandleFunc("/v1/system/health", mgr.HandleSystemHealth)
+	
+	// Admin endpoints
+	mux.HandleFunc("/v1/admin/stats", mgr.HandleGatewayStats)
+	mux.HandleFunc("/v1/admin/workers", mgr.HandleWorkers)
+	mux.HandleFunc("/v1/admin/collections", mgr.HandleCollections)
+	
+	// Alerts
+	mux.HandleFunc("/v1/alerts", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/resolve") {
+			mgr.HandleResolveAlert(w, r)
+		} else {
+			mgr.HandleAlerts(w, r)
+		}
+	})
+	
+	return mux
+}
+
 // Start initializes and runs the API Gateway's gRPC and HTTP servers.
-// It can optionally take a pre-configured net.Listener for the gRPC server,
-// useful for testing scenarios. It returns the gRPC server instance and the
-// client connection to the auth service.
 func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.ClientConn) {
 	// Establish gRPC connection to Auth service
 	authConn, err := grpc.Dial(config.AuthServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -544,12 +545,12 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 		rerankerClient:  rerankerClient,
 		feedbackService: feedbackService,
 	}
+
 	// Initialize the leader connection with retry logic
 	maxRetries := 5
 	baseBackoff := 1 * time.Second
 	for i := 0; i < maxRetries; i++ {
 		if _, err := server.updateLeader(); err == nil {
-			// Successfully connected to a leader
 			break
 		}
 		if i == maxRetries-1 {
@@ -560,12 +561,23 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 		time.Sleep(wait)
 	}
 
+	// Create management manager with gRPC client
+	// Note: We need to pass a pb.VectronServiceClient, but we don't have a direct client.
+	// For now, we'll pass nil and the management manager will work without it.
+	managementMgr := management.NewManager(
+		server.leader.client,
+		authClient,
+		feedbackService,
+		nil, // grpcClient - not available directly
+	)
+	server.managementMgr = managementMgr
+
 	// Create the gRPC server with a chain of unary interceptors for middleware.
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
-			middleware.AuthInterceptor(authClient, config.JWTSecret), // Handles API Key authentication.
-			middleware.LoggingInterceptor,                        // Logs incoming requests.
-			middleware.RateLimitInterceptor(config.RateLimitRPS), // Enforces rate limiting.
+			middleware.AuthInterceptor(authClient, config.JWTSecret),
+			middleware.LoggingInterceptor,
+			middleware.RateLimitInterceptor(config.RateLimitRPS),
 		),
 	)
 	pb.RegisterVectronServiceServer(grpcServer, server)
@@ -596,7 +608,19 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 		}
 	}()
 
-	// Wrap mux with CORS middleware
+	// Create a combined HTTP handler that routes to either management or gRPC gateway
+	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Check if this is a management endpoint
+		if strings.HasPrefix(r.URL.Path, "/v1/system/") || 
+		   strings.HasPrefix(r.URL.Path, "/v1/admin/") || 
+		   strings.HasPrefix(r.URL.Path, "/v1/alerts") {
+			managementHandlers(managementMgr).ServeHTTP(w, r)
+		} else {
+			mux.ServeHTTP(w, r)
+		}
+	})
+
+	// Wrap with CORS middleware
 	corsHandler := func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -611,11 +635,15 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 		})
 	}
 
+	// Wrap with metrics middleware
+	finalHandler := metricsMiddleware(managementMgr, corsHandler(mainHandler))
+
 	// Start the HTTP server in a separate goroutine.
 	go func() {
 		log.Printf("Vectron HTTP API (curl)      → %s", config.HTTPAddr)
+		log.Printf("Management endpoints         → %s/v1/system/health, %s/v1/admin/...", config.HTTPAddr, config.HTTPAddr)
 		log.Printf("Using placement driver           → %s", config.PlacementDriver)
-		if err := http.ListenAndServe(config.HTTPAddr, corsHandler(mux)); err != nil && err != http.ErrServerClosed {
+		if err := http.ListenAndServe(config.HTTPAddr, finalHandler); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("HTTP server failed to serve: %v", err)
 		}
 	}()
@@ -626,11 +654,8 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 // ================ MAIN ================
 
 func main() {
-	// Start the servers.
-	// In the main function, we pass nil for grpcListener to let Start create its own.
 	_, authConn := Start(cfg, nil)
 	defer authConn.Close()
 
-	// Block forever to keep the services running.
 	select {}
 }

@@ -42,6 +42,7 @@ export AUTH_GRPC=10008
 export AUTH_HTTP=10009
 export APIGATEWAY_GRPC=10010
 export FRONTEND_PORT=10011
+export RERANKER_PORT=10013
 
 # Endpoints
 export ETCD_ENDPOINTS="127.0.0.1:2379"
@@ -135,12 +136,29 @@ echo "▶️  Starting Auth service..."
 GRPC_PORT=":${AUTH_GRPC}" HTTP_PORT=":${AUTH_HTTP}" ./bin/authsvc > /tmp/vectron-auth.log 2>&1 &
 sleep 2
 
-# 5. Start API Gateway
-echo "▶️  Starting API Gateway service..."
-GRPC_ADDR="127.0.0.1:${APIGATEWAY_GRPC}" HTTP_ADDR="127.0.0.1:10012" PLACEMENT_DRIVER="${PD_ADDRS}" ./bin/apigateway > /tmp/vectron-apigw.log 2>&1 &
+# 5. Start Reranker Service
+echo "▶️  Starting Reranker service..."
+RULE_EXACT_MATCH_BOOST=0.3 \
+RULE_TITLE_BOOST=0.2 \
+RULE_METADATA_BOOSTS="verified:0.3,featured:0.2" \
+RULE_METADATA_PENALTIES="deprecated:0.5" \
+./bin/reranker \
+  --port="${RERANKER_PORT}" \
+  --strategy="rule" \
+  --cache="memory" > /tmp/vectron-reranker.log 2>&1 &
 sleep 2
 
-# 6. Start Frontend
+# 6. Start API Gateway
+echo "▶️  Starting API Gateway service..."
+GRPC_ADDR="127.0.0.1:${APIGATEWAY_GRPC}" \
+HTTP_ADDR="127.0.0.1:10012" \
+PLACEMENT_DRIVER="${PD_ADDRS}" \
+AUTH_SERVICE_ADDR="${AUTH_SERVICE_ADDR}" \
+RERANKER_SERVICE_ADDR="127.0.0.1:${RERANKER_PORT}" \
+./bin/apigateway > /tmp/vectron-apigw.log 2>&1 &
+sleep 2
+
+# 7. Start Frontend
 echo "▶️  Starting Frontend development server..."
 (
     cd auth/frontend
@@ -163,6 +181,7 @@ echo "Auth Service (HTTP)   > http://localhost:${AUTH_HTTP}"
 echo "API Gateway (HTTP)    > http://localhost:10012"
 echo "API Gateway (gRPC)    > 127.0.0.1:${APIGATEWAY_GRPC}"
 echo "Placement Driver      > 127.0.0.1:${PD_GRPC_1}"
+echo "Reranker Service      > 127.0.0.1:${RERANKER_PORT}"
 echo "-----------------------------------"
 echo "Frontend Environment Variables:"
 echo "VITE_AUTH_API_BASE_URL=http://localhost:${AUTH_HTTP}"
@@ -170,6 +189,7 @@ echo "VITE_APIGATEWAY_API_BASE_URL=http://localhost:10012"
 echo "VITE_PLACEMENT_DRIVER_API_BASE_URL=http://localhost:${PD_GRPC_1}"
 echo "-----------------------------------"
 echo "Logs are being written to /tmp/vectron-*.log"
+echo "Reranker log: /tmp/vectron-reranker.log"
 echo "Press Ctrl+C to stop all services."
 
 # Wait indefinitely until the script is interrupted

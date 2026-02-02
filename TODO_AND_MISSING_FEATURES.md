@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-02-02
 
-**Phase**: Active Development - Core services implemented, refinements in progress
+**Phase**: Active Development - Core services + Reranker + Management Console implemented
 
 ---
 
@@ -57,6 +57,106 @@
 - [ ] Fix Search() return value handling in tests
 - [ ] Consolidate or separate TestMain functions
 - [ ] Fix PD integration test syntax
+
+---
+
+## New Services TODOs
+
+### Reranker Service TODOs
+
+#### R1. Docker & Kubernetes Setup
+**Status**: Not Implemented
+**Location**: `/reranker/`
+
+**Action Items**:
+- [ ] Create Dockerfile for reranker service
+- [ ] Add to docker-compose.yml
+- [ ] Create Kubernetes deployment manifests
+- [ ] Add service discovery configuration
+
+#### R2. Prometheus Metrics
+**Status**: Not Implemented
+**Location**: `/reranker/cmd/reranker/main.go`
+
+**Action Items**:
+- [ ] Add latency metrics (p50, p95, p99)
+- [ ] Add cache hit/miss metrics
+- [ ] Add strategy usage metrics
+- [ ] Create Grafana dashboard
+
+#### R3. LLM Strategy Implementation
+**Status**: Planned
+**Location**: `/reranker/internal/strategies/llm/`
+
+**Action Items**:
+- [ ] OpenAI client integration
+- [ ] Grok/xAI client integration
+- [ ] Prompt engineering for reranking
+- [ ] Cost optimization with caching
+- [ ] Fallback to rule-based on failures
+
+#### R4. RL Strategy Implementation
+**Status**: Planned
+**Location**: `/reranker/internal/strategies/rl/`
+
+**Action Items**:
+- [ ] ONNX Runtime integration
+- [ ] Model serving infrastructure
+- [ ] Training pipeline setup
+- [ ] A/B testing framework
+- [ ] Model versioning
+
+#### R5. A/B Testing Framework
+**Status**: Not Implemented
+**Location**: `/reranker/internal/strategy.go`
+
+**Action Items**:
+- [ ] Multi-armed bandit implementation
+- [ ] Traffic splitting logic
+- [ ] Conversion tracking
+- [ ] Statistical significance testing
+- [ ] Winner auto-promotion
+
+### Management Console TODOs
+
+#### M1. Backend Management APIs
+**Status**: Not Implemented (Using Mock Data)
+**Location**: Backend services
+
+**Current**: Frontend uses mock data
+**Needed**: Real REST/gRPC endpoints
+
+**Action Items**:
+- [ ] Create `/v1/admin/stats` endpoint in API Gateway
+- [ ] Add management endpoints to Placement Driver
+  - [ ] GET /admin/collections - List all collections with stats
+  - [ ] GET /admin/workers - List all workers with health
+  - [ ] POST /admin/collections/{name}/delete - Delete collection
+  - [ ] GET /admin/metrics - System-wide metrics
+- [ ] Add worker statistics endpoint
+- [ ] Implement real-time metrics streaming (WebSockets/SSE)
+
+#### M2. Authentication for Management Console
+**Status**: Partial
+**Location**: `/auth/frontend/src/pages/`
+
+**Action Items**:
+- [ ] Role-based access control (RBAC)
+  - [ ] Admin role for management access
+  - [ ] Regular user role (no management)
+- [ ] Audit logging for management actions
+- [ ] IP whitelisting for admin access
+
+#### M3. Advanced Monitoring
+**Status**: Not Implemented
+**Location**: Management Console
+
+**Action Items**:
+- [ ] Real-time log viewer
+- [ ] Query performance analytics
+- [ ] Slow query identification
+- [ ] Error rate tracking
+- [ ] Alert configuration UI
 
 ---
 

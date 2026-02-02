@@ -1,4 +1,3 @@
-import React from "react";
 import { Outlet, useLocation, Link as RouterLink } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import {
@@ -11,7 +10,6 @@ import {
   BarChart3,
   Server,
   Globe,
-  Shield,
   ArrowRight,
 } from "lucide-react";
 

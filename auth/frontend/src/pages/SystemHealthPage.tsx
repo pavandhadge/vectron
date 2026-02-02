@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   Activity,
   AlertTriangle,
   CheckCircle,
-  Clock,
   RefreshCw,
   Server,
   Shield,
@@ -15,7 +14,7 @@ import {
   CheckSquare,
   Square,
 } from "lucide-react";
-import { SystemHealth, Alert, ServiceStatus, SystemMetrics } from "../api-types";
+import { SystemHealth } from "../api-types";
 import { managementApi } from "../services/managementApi";
 
 interface SystemHealthPageProps {}
@@ -49,7 +48,7 @@ const SystemHealthPage: React.FC<SystemHealthPageProps> = () => {
     
     const interval = setInterval(() => {
       fetchSystemHealth();
-    }, 30000); // Refresh every 30 seconds
+    }, 30000);
 
     return () => clearInterval(interval);
   }, [autoRefresh]);
@@ -57,15 +56,23 @@ const SystemHealthPage: React.FC<SystemHealthPageProps> = () => {
   const resolveAlert = async (alertId: string) => {
     if (!systemHealth) return;
     
-    // Optimistic update
-    const updatedAlerts = systemHealth.alerts.map(alert =>
-      alert.id === alertId ? { ...alert, resolved: true } : alert
-    );
-    
-    setSystemHealth({
-      ...systemHealth,
-      alerts: updatedAlerts
-    });
+    try {
+      // Call the API to persist the resolution
+      await managementApi.resolveAlert(alertId);
+      
+      // Then update local state
+      const updatedAlerts = systemHealth.alerts.map(alert =>
+        alert.id === alertId ? { ...alert, resolved: true } : alert
+      );
+      
+      setSystemHealth({
+        ...systemHealth,
+        alerts: updatedAlerts
+      });
+    } catch (err) {
+      console.error("Failed to resolve alert:", err);
+      setError("Failed to resolve alert. Please try again.");
+    }
   };
 
   const getStatusIcon = (status: string) => {
@@ -79,7 +86,7 @@ const SystemHealthPage: React.FC<SystemHealthPageProps> = () => {
       case "critical":
         return <XCircle className="w-5 h-5 text-red-400" />;
       default:
-        return <Clock className="w-5 h-5 text-neutral-400" />;
+        return <RefreshCw className="w-5 h-5 text-neutral-400" />;
     }
   };
 
