@@ -16,7 +16,7 @@
 // Run: go test -v -run TestResearchBenchmark -timeout 60m
 // Output: Detailed metrics report + CSV files for analysis
 
-package main
+package main_test
 
 import (
 	"context"

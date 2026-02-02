@@ -14,7 +14,7 @@
 // Run: go test -v -run TestUltimateE2E -timeout 30m
 // Or: go test -v -run TestUltimateE2E/QuickSmoke (for quick validation)
 
-package main
+package main_test
 
 import (
 	"context"
@@ -1365,11 +1365,3 @@ func generateRandomVector(dim int) []float32 {
 // =============================================================================
 // Cleanup
 // =============================================================================
-
-func TestMain(m *testing.M) {
-	// Run tests
-	code := m.Run()
-
-	// Global cleanup if needed
-	os.Exit(code)
-}

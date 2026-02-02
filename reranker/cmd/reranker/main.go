@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -48,7 +48,12 @@ func main() {
 	grpcServer := internal.NewGrpcServer(strategy, cacheInstance, logger, metrics)
 
 	// Start gRPC listener
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", *port))
+	// Handle both port-only (e.g., "50051") and full address (e.g., "127.0.0.1:50051")
+	listenAddr := *port
+	if !strings.Contains(listenAddr, ":") {
+		listenAddr = ":" + listenAddr
+	}
+	lis, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		log.Fatalf("Failed to listen: %v", err)
 	}
@@ -99,11 +104,11 @@ func createStrategy(strategyType string, logger internal.Logger) internal.Strate
 	switch strategyType {
 	case "rule":
 		log.Println("Initializing rule-based reranking strategy")
-		
+
 		// Try to load config from file, fall back to env vars
 		var config rule.Config
 		configPath := getEnv("RULE_CONFIG_PATH", "")
-		
+
 		if configPath != "" {
 			log.Printf("Loading rule config from: %s", configPath)
 			var err error
@@ -115,17 +120,17 @@ func createStrategy(strategyType string, logger internal.Logger) internal.Strate
 		} else {
 			config = rule.LoadConfigFromEnv()
 		}
-		
+
 		// Validate config
 		if err := rule.ValidateConfig(config); err != nil {
 			log.Printf("Warning: config validation failed: %v", err)
 		}
-		
+
 		log.Printf("Rule strategy config: ExactBoost=%.2f, TitleBoost=%.2f, TFIDF=%.2f, Original=%.2f",
 			config.ExactMatchBoost, config.TitleBoost, config.TFIDFWeight, config.OriginalWeight)
-		
+
 		return rule.NewStrategy(config)
-		
+
 	case "llm":
 		// TODO: Implement LLM strategy
 		log.Println("LLM strategy not yet implemented, falling back to stub")
@@ -197,7 +202,7 @@ func (s *StubStrategy) Version() string { return s.version }
 
 func (s *StubStrategy) Rerank(ctx context.Context, req *internal.RerankInput) (*internal.RerankOutput, error) {
 	start := time.Now()
-	
+
 	// Stub: Just return candidates in original order with unchanged scores
 	results := make([]internal.ScoredCandidate, len(req.Candidates))
 	for i, c := range req.Candidates {
@@ -208,12 +213,12 @@ func (s *StubStrategy) Rerank(ctx context.Context, req *internal.RerankInput) (*
 			Explanation:   "stub implementation - no reranking applied",
 		}
 	}
-	
+
 	// Limit to TopN
 	if req.TopN < len(results) {
 		results = results[:req.TopN]
 	}
-	
+
 	return &internal.RerankOutput{
 		Results:  results,
 		Latency:  time.Since(start),
