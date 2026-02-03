@@ -1225,12 +1225,3 @@ func generateNormalizedVector(dim int) []float32 {
 
 	return vec
 }
-
-// Avoid "strings" import error by defining locally
-func stringsRepeat(s string, count int) string {
-	result := ""
-	for i := 0; i < count; i++ {
-		result += s
-	}
-	return result
-}

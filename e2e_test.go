@@ -74,10 +74,15 @@ func getFreePort() (int, error) {
 
 func TestMain(m *testing.M) {
 	// Build the binaries before running the tests
+	// Get the project root directory (where go.mod is located)
 	cmd := exec.Command("make", "build")
+	cmd.Dir = "/home/pavan/Programming/vectron"
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	err := cmd.Run()
 	if err != nil {
 		fmt.Printf("Failed to build binaries: %v\n", err)
+		fmt.Printf("Working directory: /home/pavan/Programming/vectron\n")
 		os.Exit(1)
 	}
 	os.Exit(m.Run())
