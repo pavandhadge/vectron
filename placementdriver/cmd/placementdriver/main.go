@@ -143,20 +143,29 @@ func parseInitialMembers(s string) (map[uint64]string, error) {
 
 	parts := strings.Split(s, ",")
 	for _, part := range parts {
-		p := strings.Split(strings.TrimSpace(part), ":")
-		if len(p) != 3 { // Strictly enforce "id:host:port" format
+		part = strings.TrimSpace(part)
+		// Find the first colon to separate ID from the rest of the address
+		firstColon := strings.Index(part, ":")
+		if firstColon == -1 {
 			return nil, fmt.Errorf("invalid member format, expected 'id:host:port', got: '%s'", part)
 		}
 
-		id, err := strconv.ParseUint(p[0], 10, 64)
+		idStr := part[:firstColon]
+		addr := part[firstColon+1:]
+
+		id, err := strconv.ParseUint(idStr, 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse node id '%s': %w", p[0], err)
+			return nil, fmt.Errorf("failed to parse node id '%s': %w", idStr, err)
 		}
 		if id == 0 {
 			return nil, fmt.Errorf("node id cannot be 0")
 		}
 
-		addr := p[1] + ":" + p[2]
+		// Validate the address part, it should contain at least one colon for the port
+		if !strings.Contains(addr, ":") {
+			return nil, fmt.Errorf("invalid address format, expected 'host:port', got: '%s'", addr)
+		}
+
 		members[id] = addr
 	}
 	return members, nil

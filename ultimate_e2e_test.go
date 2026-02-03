@@ -22,8 +22,12 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -39,11 +43,21 @@ import (
 	placementpb "github.com/pavandhadge/vectron/shared/proto/placementdriver"
 )
 
+func getPort(envVar string, defaultPort int) int {
+	if portStr := os.Getenv(envVar); portStr != "" {
+		if port, err := strconv.Atoi(portStr); err == nil {
+			return port
+		}
+	}
+	return defaultPort
+}
+
+
 // =============================================================================
 // Test Configuration
 // =============================================================================
 
-const (
+var (
 	// Service ports
 	etcdPort       = 2379
 	pdGRPCPort1    = 10001
@@ -56,7 +70,9 @@ const (
 	apigatewayPort = 10010
 	apigatewayHTTP = 10012
 	rerankerPort   = 10013
+)
 
+const (
 	// Test timeouts
 	quickTestTimeout    = 5 * time.Minute
 	standardTestTimeout = 15 * time.Minute
@@ -1282,19 +1298,68 @@ func (s *UltimateE2ETest) TestQuickVectors(t *testing.T) {
 // =============================================================================
 
 func (s *UltimateE2ETest) startEtcd() {
-	// Check if etcd is already running
-	if s.isPortOpen(etcdPort) {
-		log.Println("etcd already running")
-		return
+	log.Println("▶️ Starting etcd (Podman)...")
+
+	// 1. Force stop the container if it's already running.
+	// We ignore the error here because the container might not exist yet,
+	// which is a valid state.
+	exec.CommandContext(s.ctx, "podman", "stop", "etcd").Run()
+
+	// 2. Prepare Data Directory ($HOME/.vectron/etcd)
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		s.t.Fatalf("Failed to get user home dir: %v", err)
+	}
+	etcdDataDir := filepath.Join(homeDir, ".vectron", "etcd")
+	if err := os.MkdirAll(etcdDataDir, 0755); err != nil {
+		s.t.Fatalf("Failed to create etcd data dir: %v", err)
 	}
 
-	cmd := exec.CommandContext(s.ctx, "etcd",
-		"--listen-client-urls", "http://0.0.0.0:2379",
-		"--advertise-client-urls", "http://127.0.0.1:2379",
-	)
-	s.registerProcess(cmd)
-	if err := cmd.Start(); err != nil {
-		log.Printf("Warning: Failed to start etcd: %v", err)
+	// 3. Check if container 'etcd' exists
+	// "podman container exists" returns exit code 0 if true, 1 if false
+	checkCmd := exec.CommandContext(s.ctx, "podman", "container", "exists", "etcd")
+	if err := checkCmd.Run(); err == nil {
+		// --- CASE A: Container Exists -> Start it ---
+		// We already stopped it in step 1, so now we just start it up again.
+		startCmd := exec.CommandContext(s.ctx, "podman", "start", "etcd")
+		if out, err := startCmd.CombinedOutput(); err != nil {
+			s.t.Fatalf("Failed to start existing etcd container: %v\nOutput: %s", err, string(out))
+		}
+	} else {
+		// --- CASE B: Container Does Not Exist -> Run new ---
+		// Note: We use 127.0.0.1 for advertise-client-urls to ensure reliable local connections
+		runCmd := exec.CommandContext(s.ctx, "podman", "run", "-d",
+			"--name", "etcd",
+			"-p", "2379:2379",
+			"-v", fmt.Sprintf("%s:/etcd-data:Z", etcdDataDir),
+			"quay.io/coreos/etcd:v3.5.0",
+			"/usr/local/bin/etcd",
+			"--data-dir", "/etcd-data",
+			"--listen-client-urls", "http://0.0.0.0:2379",
+			"--advertise-client-urls", "http://127.0.0.1:2379",
+		)
+		if out, err := runCmd.CombinedOutput(); err != nil {
+			s.t.Fatalf("Failed to run new etcd container: %v\nOutput: %s", err, string(out))
+		}
+	}
+
+	// 4. Wait for Etcd to be ready
+	// Since 'podman start/run -d' returns immediately, we must wait for the port to open
+	log.Println("⏳ Waiting for etcd to be ready...")
+	timeout := time.After(10 * time.Second)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeout:
+			s.t.Fatal("Timed out waiting for etcd to start")
+		case <-ticker.C:
+			if s.isPortOpen(etcdPort) {
+				log.Println("✅ Etcd started and listening")
+				return
+			}
+		}
 	}
 }
 
@@ -1312,9 +1377,25 @@ func (s *UltimateE2ETest) startPlacementDriverCluster() {
 	}
 
 	for _, node := range nodes {
+		// Extract raft port
+		_, raftPortStr, err := net.SplitHostPort(node.raftAddr)
+		if err != nil {
+			s.t.Fatalf("Failed to parse raft address %s: %v", node.raftAddr, err)
+		}
+		raftPort, err := strconv.Atoi(raftPortStr)
+		if err != nil {
+			s.t.Fatalf("Failed to convert raft port %s to int: %v", raftPortStr, err)
+		}
+
+		s.killProcessOnPort(node.grpcPort)
+		s.killProcessOnPort(raftPort)
+		time.Sleep(500 * time.Millisecond) // Give it a moment to free up
+
 		if s.isPortOpen(node.grpcPort) {
-			log.Printf("PD node %d already running on port %d", node.id, node.grpcPort)
-			continue // Already running
+			s.t.Fatalf("PD gRPC Port %d is still open after attempting to kill process. Cannot start PD node.", node.grpcPort)
+		}
+		if s.isPortOpen(raftPort) {
+			s.t.Fatalf("PD Raft Port %d is still open after attempting to kill process. Cannot start PD node.", raftPort)
 		}
 
 		// Use unique temp directory for each run (like run-all.sh)
@@ -1355,13 +1436,21 @@ func (s *UltimateE2ETest) startWorkers() {
 	// Start 2 workers
 	for i := 1; i <= 2; i++ {
 		port := workerPort1 + (i-1)*10
+		raftPort := 20000 + i // Raft port for worker
+
+		s.killProcessOnPort(port)
+		s.killProcessOnPort(raftPort)
+		time.Sleep(500 * time.Millisecond) // Give it a moment to free up
+
 		if s.isPortOpen(port) {
-			log.Printf("Worker %d already running on port %d", i, port)
-			continue // Already running
+			s.t.Fatalf("Worker gRPC Port %d is still open after attempting to kill process. Cannot start worker.", port)
+		}
+		if s.isPortOpen(raftPort) {
+			s.t.Fatalf("Worker Raft Port %d is still open after attempting to kill process. Cannot start worker.", raftPort)
 		}
 
 		// Use unique temp directory for each run (like run-all.sh)
-		dataDir, err := os.MkdirTemp("/tmp", fmt.Sprintf("worker_test_%d_", i))
+		dataDir, err := os.MkdirTemp(os.TempDir(), fmt.Sprintf("worker_test_%d_", i))
 		if err != nil {
 			log.Printf("Warning: Failed to create temp dir for worker %d: %v", i, err)
 			continue
@@ -1371,13 +1460,15 @@ func (s *UltimateE2ETest) startWorkers() {
 		cmd := exec.CommandContext(s.ctx, "./bin/worker",
 			"--node-id", fmt.Sprintf("%d", i),
 			"--grpc-addr", fmt.Sprintf("127.0.0.1:%d", port),
+			"--raft-addr", fmt.Sprintf("127.0.0.1:%d", 20000+i),
 			"--pd-addrs", "127.0.0.1:10001,127.0.0.1:10002,127.0.0.1:10003",
 			"--data-dir", dataDir,
 		)
 		cmd.Dir = "/home/pavan/Programming/vectron"
 
 		// Capture output for debugging
-		logFile := fmt.Sprintf("/tmp/vectron-worker%d-test.log", i)
+		logFile := filepath.Join(os.TempDir(), fmt.Sprintf("vectron-worker%d-test.log", i))
+		log.Printf("Worker %d log file: %s", i, logFile)
 		if f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {
 			cmd.Stdout = f
 			cmd.Stderr = f
@@ -1393,9 +1484,12 @@ func (s *UltimateE2ETest) startWorkers() {
 }
 
 func (s *UltimateE2ETest) startAuthService() {
+	s.killProcessOnPort(authGRPCPort)
+	s.killProcessOnPort(authHTTPPort)
+	time.Sleep(500 * time.Millisecond) // Give it a moment to free up
+
 	if s.isPortOpen(authGRPCPort) {
-		log.Println("Auth service already running")
-		return // Already running
+		s.t.Fatalf("Auth gRPC Port %d is still open after attempting to kill process. Cannot start auth service.", authGRPCPort)
 	}
 
 	cmd := exec.CommandContext(s.ctx, "./bin/authsvc")
@@ -1422,9 +1516,11 @@ func (s *UltimateE2ETest) startAuthService() {
 }
 
 func (s *UltimateE2ETest) startReranker() {
+	s.killProcessOnPort(rerankerPort)
+	time.Sleep(500 * time.Millisecond) // Give it a moment to free up
+
 	if s.isPortOpen(rerankerPort) {
-		log.Println("Reranker already running")
-		return // Already running
+		s.t.Fatalf("Reranker Port %d is still open after attempting to kill process. Cannot start reranker.", rerankerPort)
 	}
 
 	cmd := exec.CommandContext(s.ctx, "./bin/reranker",
@@ -1449,9 +1545,12 @@ func (s *UltimateE2ETest) startReranker() {
 }
 
 func (s *UltimateE2ETest) startAPIGateway() {
+	s.killProcessOnPort(apigatewayPort)
+	s.killProcessOnPort(apigatewayHTTP)
+	time.Sleep(500 * time.Millisecond) // Give it a moment to free up
+
 	if s.isPortOpen(apigatewayPort) {
-		log.Println("API Gateway already running")
-		return // Already running
+		s.t.Fatalf("API Gateway gRPC Port %d is still open after attempting to kill process. Cannot start API Gateway.", apigatewayPort)
 	}
 
 	// Create data directory for API gateway feedback database
@@ -1541,6 +1640,45 @@ func (s *UltimateE2ETest) isPortOpen(port int) bool {
 	}
 	conn.Close()
 	return true
+}
+
+func (s *UltimateE2ETest) killProcessOnPort(port int) {
+	s.t.Logf("Attempting to kill process on port %d...", port)
+	// Find PID using lsof
+	cmd := exec.Command("lsof", "-t", fmt.Sprintf("-i:%d", port))
+	output, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			// lsof returns exit code 1 if no process found, which is not an error for us.
+			s.t.Logf("No process found on port %d.", port)
+			return
+		}
+		s.t.Logf("Warning: Could not run lsof for port %d: %v", port, err)
+		return
+	}
+
+	pidsStr := string(output)
+	pids := []string{}
+	for _, pid := range strings.Fields(pidsStr) {
+		pids = append(pids, pid)
+	}
+
+	if len(pids) == 0 {
+		s.t.Logf("No process found on port %d.", port)
+		return
+	}
+
+	for _, pid := range pids {
+		s.t.Logf("Killing process %s on port %d", pid, port)
+		killCmd := exec.Command("kill", "-9", pid)
+		if killOutput, killErr := killCmd.CombinedOutput(); killErr != nil {
+			s.t.Logf("Warning: Could not kill process %s: %v\nOutput: %s", pid, killErr, string(killOutput))
+		} else {
+			s.t.Logf("Successfully killed process %s on port %d.", pid, port)
+		}
+	}
+	// Give a moment for the port to actually free up
+	time.Sleep(1 * time.Second)
 }
 
 func (s *UltimateE2ETest) ensureTestCollection() {
