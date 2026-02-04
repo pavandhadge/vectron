@@ -1068,6 +1068,7 @@ func (s *UltimateE2ETest) TestConcurrentOperations(t *testing.T) {
 		for err := range errors {
 			if err != nil {
 				errorCount++
+				t.Logf("ConcurrentUpserts received error: %v", err)
 			}
 		}
 
@@ -1571,6 +1572,7 @@ func (s *UltimateE2ETest) startAPIGateway() {
 		"RERANKER_SERVICE_ADDR=127.0.0.1:10013",
 		"FEEDBACK_DB_PATH="+dataDir+"/feedback.db",
 		"JWT_SECRET=test-jwt-secret-for-testing-only-do-not-use-in-production",
+		"RATE_LIMIT_RPS=10000",
 	)
 
 	// Capture output for debugging

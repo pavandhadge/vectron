@@ -4,7 +4,10 @@
 
 package main
 
-import "os"
+import (
+	"os"
+	"strconv"
+)
 
 // Config holds all the configuration settings for the API Gateway.
 type Config struct {
@@ -28,7 +31,7 @@ func LoadConfig() Config {
 		AuthServiceAddr:     getEnv("AUTH_SERVICE_ADDR", "auth:50051"), // Default Auth service address
 		RerankerServiceAddr: getEnv("RERANKER_SERVICE_ADDR", "localhost:50051"), // Default Reranker service address
 		FeedbackDBPath:      getEnv("FEEDBACK_DB_PATH", "./data/feedback.db"), // Default feedback database path
-		RateLimitRPS:        100,
+		RateLimitRPS:        getEnvAsInt("RATE_LIMIT_RPS", 100),
 	}
 }
 
@@ -36,6 +39,16 @@ func LoadConfig() Config {
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+// getEnvAsInt retrieves an environment variable as an integer, returning a fallback value if not set or invalid.
+func getEnvAsInt(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if i, err := strconv.Atoi(v); err == nil {
+			return i
+		}
 	}
 	return fallback
 }
