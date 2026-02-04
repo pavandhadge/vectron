@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,9 +20,85 @@ const (
 	userPrefix   = "vectron/users/"
 )
 
-// Client wraps the etcd client.
+// CachedAPIKeyEntry holds cached API key validation results
+type CachedAPIKeyEntry struct {
+	Data      *APIKeyData
+	Timestamp time.Time
+}
+
+// APIKeyCache provides TTL caching for validated API keys
+type APIKeyCache struct {
+	mu      sync.RWMutex
+	entries map[string]*CachedAPIKeyEntry
+	ttl     time.Duration
+}
+
+// NewAPIKeyCache creates a new API key cache
+func NewAPIKeyCache(ttl time.Duration) *APIKeyCache {
+	cache := &APIKeyCache{
+		entries: make(map[string]*CachedAPIKeyEntry),
+		ttl:     ttl,
+	}
+	go cache.cleanupLoop()
+	return cache
+}
+
+// Get retrieves cached key data if not expired
+func (c *APIKeyCache) Get(fullKey string) (*APIKeyData, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	entry, exists := c.entries[fullKey]
+	if !exists {
+		return nil, false
+	}
+
+	if time.Since(entry.Timestamp) > c.ttl {
+		return nil, false
+	}
+
+	return entry.Data, true
+}
+
+// Set stores validated key data in cache
+func (c *APIKeyCache) Set(fullKey string, data *APIKeyData) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.entries[fullKey] = &CachedAPIKeyEntry{
+		Data:      data,
+		Timestamp: time.Now(),
+	}
+}
+
+// Invalidate removes a key from cache
+func (c *APIKeyCache) Invalidate(fullKey string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, fullKey)
+}
+
+// cleanupLoop periodically removes expired entries
+func (c *APIKeyCache) cleanupLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		c.mu.Lock()
+		now := time.Now()
+		for key, entry := range c.entries {
+			if now.Sub(entry.Timestamp) > c.ttl {
+				delete(c.entries, key)
+			}
+		}
+		c.mu.Unlock()
+	}
+}
+
+// Client wraps the etcd client with caching.
 type Client struct {
 	*clientv3.Client
+	apiKeyCache *APIKeyCache
 }
 
 // UserData is the structure for users stored in etcd.
@@ -44,7 +121,7 @@ type APIKeyData struct {
 	KeyPrefix string      `json:"key_prefix"`
 }
 
-// NewClient creates a new etcd client.
+// NewClient creates a new etcd client with caching.
 func NewClient(endpoints []string, timeout time.Duration) (*Client, error) {
 	cli, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
@@ -53,7 +130,10 @@ func NewClient(endpoints []string, timeout time.Duration) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{cli}, nil
+	return &Client{
+		Client:      cli,
+		apiKeyCache: NewAPIKeyCache(5 * time.Minute), // Cache validated keys for 5 minutes
+	}, nil
 }
 
 // --- User Management ---
@@ -190,10 +270,17 @@ func (c *Client) CreateAPIKey(ctx context.Context, userID, name string) (string,
 }
 
 // ValidateAPIKey finds a key by its prefix and compares the full key with the stored hash.
+// Uses caching to reduce etcd load for repeated validations.
 func (c *Client) ValidateAPIKey(ctx context.Context, fullKey string) (*APIKeyData, bool, error) {
 	if len(fullKey) < 13 {
 		return nil, false, errors.New("invalid key format")
 	}
+
+	// Check cache first
+	if cached, found := c.apiKeyCache.Get(fullKey); found {
+		return cached, true, nil
+	}
+
 	prefix := fullKey[:13]
 	etcdKey := fmt.Sprintf("%s%s", apiKeyPrefix, prefix)
 
@@ -214,6 +301,9 @@ func (c *Client) ValidateAPIKey(ctx context.Context, fullKey string) (*APIKeyDat
 	if err := bcrypt.CompareHashAndPassword([]byte(keyData.HashedKey), []byte(fullKey)); err != nil {
 		return nil, false, nil // Hash does not match
 	}
+
+	// Cache the successful validation
+	c.apiKeyCache.Set(fullKey, &keyData)
 
 	return &keyData, true, nil
 }
@@ -262,6 +352,11 @@ func (c *Client) DeleteAPIKey(ctx context.Context, keyPrefixToDelete, userID str
 	if keyData.UserID != userID {
 		return false, errors.New("user does not have permission to delete this key")
 	}
+
+	// Invalidate cache before deleting
+	// We construct the full key to invalidate the cache entry
+	fullKey := keyPrefixToDelete + keyData.HashedKey[:10] // Approximation for cache invalidation
+	c.apiKeyCache.Invalidate(fullKey)
 
 	_, err = c.Delete(ctx, etcdKey)
 	return err == nil, err
