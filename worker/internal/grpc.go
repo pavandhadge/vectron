@@ -12,7 +12,9 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lni/dragonboat/v3"
@@ -27,7 +29,33 @@ const (
 	raftTimeout = 5 * time.Second
 )
 
-var debugLogs = os.Getenv("VECTRON_DEBUG_LOGS") == "1"
+var (
+	debugLogs                    = os.Getenv("VECTRON_DEBUG_LOGS") == "1"
+	hotPathLogSampleEvery uint64 = 100
+	hotPathLogCounter     uint64
+)
+
+func init() {
+	if v := os.Getenv("WORKER_LOG_SAMPLE_EVERY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			if n <= 1 {
+				hotPathLogSampleEvery = 1
+			} else {
+				hotPathLogSampleEvery = uint64(n)
+			}
+		}
+	}
+}
+
+func shouldLogHotPath() bool {
+	if debugLogs {
+		return true
+	}
+	if hotPathLogSampleEvery <= 1 {
+		return true
+	}
+	return atomic.AddUint64(&hotPathLogCounter, 1)%hotPathLogSampleEvery == 0
+}
 
 type searchHeapItem struct {
 	id    string
@@ -83,7 +111,7 @@ func NewGrpcServer(nh *dragonboat.NodeHost, sm *shard.Manager) *GrpcServer {
 // StoreVector handles the request to store a vector.
 // It marshals the request into a command and proposes it to the target shard's Raft group.
 func (s *GrpcServer) StoreVector(ctx context.Context, req *worker.StoreVectorRequest) (*worker.StoreVectorResponse, error) {
-	if debugLogs {
+	if shouldLogHotPath() {
 		log.Printf("Received StoreVector request for ID: %s on shard %d", req.GetVector().GetId(), req.GetShardId())
 	}
 	if req.GetVector() == nil {
@@ -159,7 +187,7 @@ func (s *GrpcServer) BatchStoreVector(ctx context.Context, req *worker.BatchStor
 // Search performs a similarity search for a given vector.
 // It performs a linearizable read on the target shard's FSM to ensure up-to-date results.
 func (s *GrpcServer) Search(ctx context.Context, req *worker.SearchRequest) (*worker.SearchResponse, error) {
-	if debugLogs {
+	if shouldLogHotPath() {
 		log.Printf("Received Search request on shard %d", req.GetShardId())
 	}
 	if len(req.GetVector()) == 0 {
@@ -271,7 +299,7 @@ func (s *GrpcServer) Search(ctx context.Context, req *worker.SearchRequest) (*wo
 // GetVector retrieves a vector by its ID.
 // This is a read operation and uses a linearizable read from the FSM.
 func (s *GrpcServer) GetVector(ctx context.Context, req *worker.GetVectorRequest) (*worker.GetVectorResponse, error) {
-	if debugLogs {
+	if shouldLogHotPath() {
 		log.Printf("Received GetVector request for ID: %s on shard %d", req.GetId(), req.GetShardId())
 	}
 
@@ -305,7 +333,7 @@ func (s *GrpcServer) GetVector(ctx context.Context, req *worker.GetVectorRequest
 // DeleteVector deletes a vector by its ID.
 // This is a write operation and is proposed to the Raft log.
 func (s *GrpcServer) DeleteVector(ctx context.Context, req *worker.DeleteVectorRequest) (*worker.DeleteVectorResponse, error) {
-	if debugLogs {
+	if shouldLogHotPath() {
 		log.Printf("Received DeleteVector request for ID: %s on shard %d", req.GetId(), req.GetShardId())
 	}
 

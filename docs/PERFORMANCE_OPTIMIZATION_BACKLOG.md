@@ -26,13 +26,14 @@ Legend: [DONE] implemented, [PENDING] not implemented, [EXPERIMENT] requires val
 1. [DONE] Worker list cache in API Gateway (short TTL).
 2. [DONE] Worker resolve cache in API Gateway (short TTL).
 3. [DONE] Limit rerank candidates further based on query length/quality.
+4. [DONE] Avoid overfetch when reranking is disabled (fetch TopK only).
 4. [PENDING] Async rerank warmup + cache for recurring queries.
 5. [PENDING] Add request coalescing for identical searches in flight.
-6. [PENDING] Reduce logging on hot paths (sampling / debug toggle).
+6. [DONE] Reduce logging on hot paths (sampling / debug toggle).
 7. [PENDING] Use faster hashing for search cache keys (already optimized via maphash).
 
 ## Tier 3 — System/Storage Tuning
-1. [PENDING] Pebble tuning defaults: memtable, cache size, compaction thresholds.
+1. [DONE] Pebble tuning defaults: memtable, cache size, compaction thresholds.
 2. [PENDING] Adaptive HNSW snapshot cadence (avoid heavy saves during hot ingest).
 3. [PENDING] Switch HNSW serialization from gob to a compact binary encoder (done for Raft; extend to snapshots).
 4. [PENDING] WAL‑only fast recovery for HNSW with periodic snapshots.

@@ -849,6 +849,13 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 			candidateLimit = shortQueryLimit
 		}
 	}
+	// If reranking won't run, don't overfetch.
+	allowAll := len(cfg.RerankCollections) == 0
+	enabledForCollection := allowAll || cfg.RerankCollections[req.Collection]
+	if req.Query == "" || !cfg.RerankEnabled || !enabledForCollection {
+		workerTopK = int(req.TopK)
+		candidateLimit = workerTopK
+	}
 
 	placementClient, err := s.getPlacementClient()
 	if err != nil {
@@ -968,22 +975,6 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 		searchResponse.Results = searchResponse.Results[:candidateLimit]
 	}
 
-	candidates := make([]*reranker.Candidate, len(searchResponse.Results))
-	metadataByID := make(map[string]map[string]string, len(searchResponse.Results))
-	for i, result := range searchResponse.Results {
-		metadata := result.Payload
-		if metadata == nil {
-			metadata = map[string]string{}
-		}
-		metadataByID[result.Id] = metadata
-
-		candidates[i] = &reranker.Candidate{
-			Id:       result.Id,
-			Score:    result.Score,
-			Metadata: metadata,
-		}
-	}
-
 	// Standard practice: skip reranking when no query text is provided.
 	// Also skip unless reranking is explicitly enabled.
 	allowAll := len(cfg.RerankCollections) == 0
@@ -998,6 +989,22 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 		s.searchCache.Set(req, searchResponse)
 		searchResultSlicePool.Put(results[:0])
 		return searchResponse, nil
+	}
+
+	candidates := make([]*reranker.Candidate, len(searchResponse.Results))
+	metadataByID := make(map[string]map[string]string, len(searchResponse.Results))
+	for i, result := range searchResponse.Results {
+		metadata := result.Payload
+		if metadata == nil {
+			metadata = map[string]string{}
+		}
+		metadataByID[result.Id] = metadata
+
+		candidates[i] = &reranker.Candidate{
+			Id:       result.Id,
+			Score:    result.Score,
+			Metadata: metadata,
+		}
 	}
 
 	rerankTopN := int(req.TopK)

@@ -12,6 +12,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -33,18 +34,7 @@ func (r *PebbleDB) Init(path string, opts *Options) error {
 	dbOpts := &pebble.Options{}
 	r.opts = opts
 
-	// Apply custom PebbleDB options if provided.
-	if opts != nil {
-		if opts.MaxOpenFiles > 0 {
-			dbOpts.MaxOpenFiles = opts.MaxOpenFiles
-		}
-		if opts.WriteBufferSize > 0 {
-			dbOpts.MemTableSize = opts.WriteBufferSize
-		}
-		if opts.CacheSize > 0 {
-			dbOpts.Cache = pebble.NewCache(opts.CacheSize)
-		}
-	}
+	applyPebbleTuning(dbOpts, opts)
 
 	var err error
 	r.path = path
@@ -335,17 +325,7 @@ func (r *PebbleDB) Restore(backupPath string) error {
 
 	// Reopen the database
 	dbOpts := &pebble.Options{}
-	if r.opts != nil {
-		if r.opts.MaxOpenFiles > 0 {
-			dbOpts.MaxOpenFiles = r.opts.MaxOpenFiles
-		}
-		if r.opts.WriteBufferSize > 0 {
-			dbOpts.MemTableSize = r.opts.WriteBufferSize
-		}
-		if r.opts.CacheSize > 0 {
-			dbOpts.Cache = pebble.NewCache(r.opts.CacheSize)
-		}
-	}
+	applyPebbleTuning(dbOpts, r.opts)
 
 	var err error
 	r.db, err = pebble.Open(r.path, dbOpts)
@@ -368,6 +348,62 @@ func (r *PebbleDB) Restore(backupPath string) error {
 	}
 
 	return nil
+}
+
+func applyPebbleTuning(dbOpts *pebble.Options, opts *Options) {
+	if opts != nil {
+		if opts.MaxOpenFiles > 0 {
+			dbOpts.MaxOpenFiles = opts.MaxOpenFiles
+		}
+		if opts.WriteBufferSize > 0 {
+			dbOpts.MemTableSize = opts.WriteBufferSize
+		}
+		if opts.CacheSize > 0 {
+			dbOpts.Cache = pebble.NewCache(opts.CacheSize)
+		}
+	}
+
+	// Performance-oriented defaults (override via env or Options).
+	if dbOpts.MemTableSize == 0 {
+		dbOpts.MemTableSize = envInt("PEBBLE_MEMTABLE_MB", 64) * 1024 * 1024
+	}
+	if dbOpts.MemTableStopWritesThreshold == 0 {
+		dbOpts.MemTableStopWritesThreshold = envInt("PEBBLE_MEMTABLE_STOP", 4)
+	}
+	if dbOpts.L0CompactionThreshold == 0 {
+		dbOpts.L0CompactionThreshold = envInt("PEBBLE_L0_COMPACT", 4)
+	}
+	if dbOpts.L0StopWritesThreshold == 0 {
+		dbOpts.L0StopWritesThreshold = envInt("PEBBLE_L0_STOP", 12)
+	}
+	if dbOpts.MaxConcurrentCompactions == 0 {
+		compactions := runtime.NumCPU() / 2
+		if compactions < 2 {
+			compactions = 2
+		}
+		if compactions > 4 {
+			compactions = 4
+		}
+		dbOpts.MaxConcurrentCompactions = compactions
+	}
+	if dbOpts.Cache == nil {
+		cacheMB := envInt("PEBBLE_CACHE_MB", 256)
+		if cacheMB > 0 {
+			dbOpts.Cache = pebble.NewCache(int64(cacheMB) * 1024 * 1024)
+		}
+	}
+}
+
+func envInt(key string, def int) int {
+	val := strings.TrimSpace(os.Getenv(key))
+	if val == "" {
+		return def
+	}
+	parsed, err := strconv.Atoi(val)
+	if err != nil || parsed <= 0 {
+		return def
+	}
+	return parsed
 }
 
 // copyDir recursively copies a directory from src to dst.
