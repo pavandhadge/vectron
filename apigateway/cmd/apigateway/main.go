@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -441,7 +442,11 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 	rerankResp, err := s.rerankerClient.Rerank(ctx, rerankReq)
 	if err != nil {
 		log.Println("Reranking failed, returning original results:", err)
-		// Truncate to TopK if reranking fails
+		// Sort original results by score in descending order before returning
+		sort.Slice(searchResponse.Results, func(i, j int) bool {
+			return searchResponse.Results[i].Score > searchResponse.Results[j].Score
+		})
+		// Then truncate to TopK
 		if len(searchResponse.Results) > int(req.TopK) {
 			searchResponse.Results = searchResponse.Results[:req.TopK]
 		}

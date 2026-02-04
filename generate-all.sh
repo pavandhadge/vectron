@@ -1,8 +1,11 @@
 #!/bin/bash
 set -e
 
-echo "🚀 Generating protobuf code..."
+# ADD THIS LINE:
+export PATH="$PATH:$(go env GOPATH)/bin"
 
+echo "🚀 Generating protobuf code..."
+# ... rest of your script
 # -------------------------------------------------
 # PROTO INCLUDE PATHS (INPUT ONLY)
 # -------------------------------------------------
