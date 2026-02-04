@@ -68,6 +68,7 @@ message SearchRequest {
   int32 k = 3;
   bool brute_force = 4;
   bool linearizable = 5;
+  string collection = 6;
 }
 
 message SearchResponse {

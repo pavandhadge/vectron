@@ -723,6 +723,36 @@ func upsertWithRetry(ctx context.Context, client apigatewaypb.VectronServiceClie
 	return nil, lastErr
 }
 
+// waitForCollectionReady polls GetCollectionStatus until all shards are ready or timeout.
+func waitForCollectionReady(ctx context.Context, client apigatewaypb.VectronServiceClient, collection string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out waiting for collection %q to become ready", collection)
+		}
+		resp, err := client.GetCollectionStatus(ctx, &apigatewaypb.GetCollectionStatusRequest{Name: collection})
+		if err != nil {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		if len(resp.Shards) == 0 {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		allReady := true
+		for _, shard := range resp.Shards {
+			if !shard.Ready {
+				allReady = false
+				break
+			}
+		}
+		if allReady {
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
 func benchmarkVectorSearchScalability(t *testing.T, ctx context.Context, client apigatewaypb.VectronServiceClient, suite *BenchmarkSuite) {
 	log.Println("\n📊 Scenario 1: Vector Search Scalability")
 	log.Println("Testing search performance with increasing dataset sizes")
@@ -766,10 +796,8 @@ func runScalabilityBenchmark(t *testing.T, ctx context.Context, client apigatewa
 	require.NoError(t, err)
 
 	// Wait for shards to be assigned and initialized
-	// This is critical - shards are created asynchronously after collection creation
-	// Wait longer for distributed systems to stabilize
 	log.Printf("  Waiting for shards to be assigned and initialized...")
-	time.Sleep(20 * time.Second)
+	require.NoError(t, waitForCollectionReady(ctx, client, collectionName, 120*time.Second))
 
 	// Insert vectors in batches
 	batchSize := 1000
@@ -910,7 +938,8 @@ func runDimensionBenchmark(t *testing.T, ctx context.Context, client apigatewayp
 	// Wait for shards to be ready
 	// Wait for shards to be assigned and initialized
 	// This is critical - shards are created asynchronously after collection creation
-	time.Sleep(20 * time.Second)
+	log.Printf("  Waiting for shards to be assigned and initialized...")
+	require.NoError(t, waitForCollectionReady(ctx, client, collectionName, 120*time.Second))
 
 	// Measure insert performance
 	batchSize := 100
@@ -998,7 +1027,8 @@ func benchmarkConcurrentWorkload(t *testing.T, ctx context.Context, client apiga
 	// Wait for shards to be ready
 	// Wait for shards to be assigned and initialized
 	// This is critical - shards are created asynchronously after collection creation
-	time.Sleep(20 * time.Second)
+	log.Printf("  Waiting for shards to be assigned and initialized...")
+	require.NoError(t, waitForCollectionReady(ctx, client, collectionName, 120*time.Second))
 
 	// Insert dataset
 	for i := 0; i < datasetSize; i += 1000 {
@@ -1134,7 +1164,8 @@ func benchmarkRerankerEffectiveness(t *testing.T, ctx context.Context, client ap
 	// Wait for shards to be ready
 	// Wait for shards to be assigned and initialized
 	// This is critical - shards are created asynchronously after collection creation
-	time.Sleep(20 * time.Second)
+	log.Printf("  Waiting for shards to be assigned and initialized...")
+	require.NoError(t, waitForCollectionReady(ctx, client, collectionName, 120*time.Second))
 
 	// Insert vectors with metadata for reranking
 	start := time.Now()
@@ -1283,7 +1314,8 @@ func runDistributedBenchmark(t *testing.T, ctx context.Context, client apigatewa
 	// Wait for shards to be ready
 	// Wait for shards to be assigned and initialized
 	// This is critical - shards are created asynchronously after collection creation
-	time.Sleep(20 * time.Second)
+	log.Printf("  Waiting for shards to be assigned and initialized...")
+	require.NoError(t, waitForCollectionReady(ctx, client, collectionName, 120*time.Second))
 
 	// Insert data
 	start := time.Now()
@@ -1399,7 +1431,8 @@ func benchmarkEndToEndLatency(t *testing.T, ctx context.Context, client apigatew
 	// Wait for shards to be ready
 	// Wait for shards to be assigned and initialized
 	// This is critical - shards are created asynchronously after collection creation
-	time.Sleep(20 * time.Second)
+	log.Printf("  Waiting for shards to be assigned and initialized...")
+	require.NoError(t, waitForCollectionReady(ctx, client, collectionName, 180*time.Second))
 
 	// Test 2: Single upsert latency
 	singleUpsertLatencies := make([]time.Duration, 100)
@@ -1615,12 +1648,21 @@ func generateMarkdownReport(t *testing.T, results []*BenchmarkResult) {
 	fmt.Fprintf(file, "|------|---------|-----|--------------|--------------|-----|-----|\n")
 
 	for _, r := range results {
-		if r.InsertMetrics != nil {
-			fmt.Fprintf(file, "| %s | %d | %d | %.0f | %.0f | %v | %v |\n",
-				r.Name, r.DatasetSize, r.VectorDimension,
-				r.InsertMetrics.VectorsPerSec, r.SearchMetrics.OpsPerSecond,
-				r.LatencyMetrics.P50, r.LatencyMetrics.P95)
+		if r.InsertMetrics == nil {
+			continue
 		}
+		searchOps := 0.0
+		if r.SearchMetrics != nil {
+			searchOps = r.SearchMetrics.OpsPerSecond
+		}
+		var p50, p95 interface{} = "-", "-"
+		if r.LatencyMetrics != nil {
+			p50 = r.LatencyMetrics.P50
+			p95 = r.LatencyMetrics.P95
+		}
+		fmt.Fprintf(file, "| %s | %d | %d | %.0f | %.0f | %v | %v |\n",
+			r.Name, r.DatasetSize, r.VectorDimension,
+			r.InsertMetrics.VectorsPerSec, searchOps, p50, p95)
 	}
 
 	fmt.Fprintf(file, "\n## Detailed Results\n\n")

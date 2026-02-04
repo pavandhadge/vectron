@@ -457,6 +457,7 @@ type SearchRequest struct {
 	K             int32                  `protobuf:"varint,3,opt,name=k,proto3" json:"k,omitempty"`
 	BruteForce    bool                   `protobuf:"varint,4,opt,name=brute_force,json=bruteForce,proto3" json:"brute_force,omitempty"`
 	Linearizable  bool                   `protobuf:"varint,5,opt,name=linearizable,proto3" json:"linearizable,omitempty"`
+	Collection    string                 `protobuf:"bytes,6,opt,name=collection,proto3" json:"collection,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -524,6 +525,13 @@ func (x *SearchRequest) GetLinearizable() bool {
 		return x.Linearizable
 	}
 	return false
+}
+
+func (x *SearchRequest) GetCollection() string {
+	if x != nil {
+		return x.Collection
+	}
+	return ""
 }
 
 type SearchResponse struct {
@@ -1098,14 +1106,17 @@ const file_worker_worker_proto_rawDesc = "" +
 	"\x13DeleteVectorRequest\x12\x19\n" +
 	"\bshard_id\x18\x01 \x01(\x04R\ashardId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\"\x16\n" +
-	"\x14DeleteVectorResponse\"\x95\x01\n" +
+	"\x14DeleteVectorResponse\"\xb5\x01\n" +
 	"\rSearchRequest\x12\x19\n" +
 	"\bshard_id\x18\x01 \x01(\x04R\ashardId\x12\x16\n" +
 	"\x06vector\x18\x02 \x03(\x02R\x06vector\x12\f\n" +
 	"\x01k\x18\x03 \x01(\x05R\x01k\x12\x1f\n" +
 	"\vbrute_force\x18\x04 \x01(\bR\n" +
 	"bruteForce\x12\"\n" +
-	"\flinearizable\x18\x05 \x01(\bR\flinearizable\":\n" +
+	"\flinearizable\x18\x05 \x01(\bR\flinearizable\x12\x1e\n" +
+	"\n" +
+	"collection\x18\x06 \x01(\tR\n" +
+	"collection\":\n" +
 	"\x0eSearchResponse\x12\x10\n" +
 	"\x03ids\x18\x01 \x03(\tR\x03ids\x12\x16\n" +
 	"\x06scores\x18\x02 \x03(\x02R\x06scores\"6\n" +

@@ -22,17 +22,19 @@ type Manager struct {
 	workerDataDir string               // The root directory for this worker's data.
 	nodeID        uint64               // The ID of this worker node.
 
-	mu              sync.RWMutex
-	runningReplicas map[uint64]bool // A set of shard IDs for replicas currently running on this node.
+	mu               sync.RWMutex
+	runningReplicas  map[uint64]bool // A set of shard IDs for replicas currently running on this node.
+	shardCollections map[uint64]string
 }
 
 // NewManager creates a new instance of the ShardManager.
 func NewManager(nh *dragonboat.NodeHost, workerDataDir string, nodeID uint64) *Manager {
 	return &Manager{
-		nodeHost:        nh,
-		workerDataDir:   workerDataDir,
-		nodeID:          nodeID,
-		runningReplicas: make(map[uint64]bool),
+		nodeHost:         nh,
+		workerDataDir:    workerDataDir,
+		nodeID:           nodeID,
+		runningReplicas:  make(map[uint64]bool),
+		shardCollections: make(map[uint64]string),
 	}
 }
 
@@ -78,6 +80,7 @@ func (m *Manager) SyncShards(assignments []*pd.ShardAssignment) {
 			// Continue even if stopping fails.
 		}
 		delete(m.runningReplicas, shardID)
+		delete(m.shardCollections, shardID)
 	}
 
 	// Start new replicas.
@@ -113,6 +116,7 @@ func (m *Manager) SyncShards(assignments []*pd.ShardAssignment) {
 		}
 
 		m.runningReplicas[shardID] = true
+		m.shardCollections[shardID] = assignment.ShardInfo.Collection
 	}
 }
 
@@ -174,3 +178,16 @@ func (m *Manager) GetShards() []uint64 {
 	return ids
 }
 
+// GetShardsForCollection returns shard IDs for a specific collection.
+func (m *Manager) GetShardsForCollection(collection string) []uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	ids := make([]uint64, 0, len(m.runningReplicas))
+	for id := range m.runningReplicas {
+		if m.shardCollections[id] == collection {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}

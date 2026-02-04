@@ -165,7 +165,12 @@ func (s *GrpcServer) Search(ctx context.Context, req *worker.SearchRequest) (*wo
 		)
 		heap.Init(topKHeap)
 
-		shardIDs := s.shardManager.GetShards()
+		var shardIDs []uint64
+		if req.GetCollection() != "" {
+			shardIDs = s.shardManager.GetShardsForCollection(req.GetCollection())
+		} else {
+			shardIDs = s.shardManager.GetShards()
+		}
 		for _, shardID := range shardIDs {
 			wg.Add(1)
 			go func(id uint64) {

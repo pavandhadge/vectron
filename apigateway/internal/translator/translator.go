@@ -54,6 +54,7 @@ func ToWorkerSearchRequest(req *apigatewaypb.SearchRequest, shardID uint64, line
 		Vector:       req.Vector,
 		K:            int32(req.TopK),
 		Linearizable: linearizable,
+		Collection:   req.Collection,
 	}
 }
 

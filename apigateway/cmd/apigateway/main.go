@@ -761,11 +761,22 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 				}
 
 				workerReq := translator.ToWorkerBatchStoreVectorRequestFromPoints(pts, sid)
-				_, err = client.BatchStoreVector(ctx, workerReq)
-				if err != nil {
+				var batchErr error
+				for attempt := 0; attempt < 10; attempt++ {
+					_, batchErr = client.BatchStoreVector(ctx, workerReq)
+					if batchErr == nil {
+						break
+					}
+					if st, ok := status.FromError(batchErr); ok && st.Code() == codes.Unavailable {
+						time.Sleep(200 * time.Millisecond)
+						continue
+					}
+					break
+				}
+				if batchErr != nil {
 					sendMu.Lock()
 					if sendErr == nil {
-						sendErr = status.Errorf(codes.Internal, "failed to upsert batch for shard %d: %v", sid, err)
+						sendErr = status.Errorf(codes.Internal, "failed to upsert batch for shard %d: %v", sid, batchErr)
 					}
 					sendMu.Unlock()
 					return
