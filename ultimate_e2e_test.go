@@ -636,6 +636,7 @@ func (s *UltimateE2ETest) TestRerankerIntegration(t *testing.T) {
 			Collection: testCollectionName,
 			Vector:     queryVector,
 			TopK:       20, // Request more to see reranking effect
+			Query:      "test query for reranking",
 		})
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, len(resp.Results), 1)
@@ -742,6 +743,7 @@ func (s *UltimateE2ETest) TestSearchQuality(t *testing.T) {
 			Collection: testCollectionName,
 			Vector:     baseVector,
 			TopK:       20,
+			Query:      "quality search query",
 		})
 		require.NoError(t, err)
 

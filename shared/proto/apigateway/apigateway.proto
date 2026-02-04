@@ -118,6 +118,9 @@ message SearchRequest {
   // proto3 has no native defaults — this sets an OpenAPI (Swagger) default
   // so the generated OpenAPI spec will show top_k default = 10.
   uint32 top_k = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {default: "10"}];
+  
+  // Optional natural language query for reranking purposes.
+  string query = 4;
 }
 
 message SearchResponse {

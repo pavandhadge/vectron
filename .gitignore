@@ -106,3 +106,7 @@ dist/
 # ============================
 *.local
 *.cache/
+
+temp_vectron
+vectron.test
+*.csv

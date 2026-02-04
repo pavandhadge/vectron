@@ -109,6 +109,35 @@ func (s *Strategy) Config() map[string]string {
 func (s *Strategy) Rerank(ctx context.Context, req *internal.RerankInput) (*internal.RerankOutput, error) {
 	start := time.Now()
 
+	// If query is empty, apply universal rules: sort by original score and return.
+	if req.Query == "" {
+		sort.Slice(req.Candidates, func(i, j int) bool {
+			return req.Candidates[i].Score > req.Candidates[j].Score
+		})
+
+		results := make([]internal.ScoredCandidate, 0, req.TopN)
+		for i, candidate := range req.Candidates {
+			if i >= req.TopN {
+				break
+			}
+			results = append(results, internal.ScoredCandidate{
+				ID:            candidate.ID,
+				RerankScore:   candidate.Score,    // Use original score as rerank score
+				OriginalScore: candidate.Score,
+				Explanation:   "no query provided, sorted by original score",
+			})
+		}
+		return &internal.RerankOutput{
+			Results: results,
+			Latency: time.Since(start),
+			Metadata: map[string]string{
+				"strategy":    s.Name(),
+				"version":     s.Version(),
+				"query_empty": "true",
+			},
+		}, nil
+	}
+
 	// Tokenize query
 	queryTokens := s.tokenize(req.Query)
 

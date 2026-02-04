@@ -318,7 +318,9 @@ type SearchRequest struct {
 	Vector     []float32              `protobuf:"fixed32,2,rep,packed,name=vector,proto3" json:"vector,omitempty"`
 	// proto3 has no native defaults — this sets an OpenAPI (Swagger) default
 	// so the generated OpenAPI spec will show top_k default = 10.
-	TopK          uint32 `protobuf:"varint,3,opt,name=top_k,json=topK,proto3" json:"top_k,omitempty"`
+	TopK uint32 `protobuf:"varint,3,opt,name=top_k,json=topK,proto3" json:"top_k,omitempty"`
+	// Optional natural language query for reranking purposes.
+	Query         string `protobuf:"bytes,4,opt,name=query,proto3" json:"query,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -372,6 +374,13 @@ func (x *SearchRequest) GetTopK() uint32 {
 		return x.TopK
 	}
 	return 0
+}
+
+func (x *SearchRequest) GetQuery() string {
+	if x != nil {
+		return x.Query
+	}
+	return ""
 }
 
 type SearchResponse struct {
@@ -1296,13 +1305,14 @@ const file_apigateway_apigateway_proto_rawDesc = "" +
 	"collection\x12)\n" +
 	"\x06points\x18\x02 \x03(\v2\x11.vectron.v1.PointR\x06points\",\n" +
 	"\x0eUpsertResponse\x12\x1a\n" +
-	"\bupserted\x18\x01 \x01(\x05R\bupserted\"o\n" +
+	"\bupserted\x18\x01 \x01(\x05R\bupserted\"\x85\x01\n" +
 	"\rSearchRequest\x12#\n" +
 	"\n" +
 	"collection\x18\x01 \x01(\tB\x03\xe0A\x02R\n" +
 	"collection\x12\x1b\n" +
 	"\x06vector\x18\x02 \x03(\x02B\x03\xe0A\x02R\x06vector\x12\x1c\n" +
-	"\x05top_k\x18\x03 \x01(\rB\a\x92A\x04:\x0210R\x04topK\"D\n" +
+	"\x05top_k\x18\x03 \x01(\rB\a\x92A\x04:\x0210R\x04topK\x12\x14\n" +
+	"\x05query\x18\x04 \x01(\tR\x05query\"D\n" +
 	"\x0eSearchResponse\x122\n" +
 	"\aresults\x18\x01 \x03(\v2\x18.vectron.v1.SearchResultR\aresults\"\xb1\x01\n" +
 	"\fSearchResult\x12\x0e\n" +

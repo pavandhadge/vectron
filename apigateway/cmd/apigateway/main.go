@@ -434,7 +434,7 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 	}
 
 	rerankReq := &reranker.RerankRequest{
-		Query:      "",
+		Query:      req.Query, // Pass the query from the API Gateway's SearchRequest
 		Candidates: candidates,
 		TopN:       int32(req.TopK),
 	}

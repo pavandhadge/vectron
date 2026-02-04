@@ -140,9 +140,7 @@ func (e *ValidationError) Error() string {
 
 // ValidateRerankInput checks if the input is valid.
 func ValidateRerankInput(input *RerankInput) error {
-	if input.Query == "" {
-		return &ValidationError{Field: "query", Message: "query cannot be empty"}
-	}
+	// Removed: if input.Query == "" { return &ValidationError{Field: "query", Message: "query cannot be empty"} }
 	if len(input.Candidates) == 0 {
 		return &ValidationError{Field: "candidates", Message: "candidates list is empty"}
 	}
