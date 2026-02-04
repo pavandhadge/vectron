@@ -11,12 +11,14 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	runtime "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"hash/maphash"
 	"log"
 	"math"
 	"net"
 	"net/http"
 	"os"
+	stdruntime "runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -31,8 +33,6 @@ import (
 	placementpb "github.com/pavandhadge/vectron/shared/proto/placementdriver"
 	reranker "github.com/pavandhadge/vectron/shared/proto/reranker"
 	workerpb "github.com/pavandhadge/vectron/shared/proto/worker"
-
-	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
@@ -48,6 +48,21 @@ var searchResultSlicePool = sync.Pool{
 	New: func() interface{} {
 		return make([]*pb.SearchResult, 0, 256)
 	},
+}
+
+func adaptiveConcurrency(multiplier, maxCap int) int {
+	procs := stdruntime.GOMAXPROCS(0)
+	if procs < 1 {
+		procs = 1
+	}
+	limit := procs * multiplier
+	if maxCap > 0 && limit > maxCap {
+		limit = maxCap
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	return limit
 }
 
 const (
@@ -696,7 +711,7 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 		assignMu    sync.Mutex
 		assignErr   error
 		assignWg    sync.WaitGroup
-		semaphore   = make(chan struct{}, 16)
+		semaphore   = make(chan struct{}, adaptiveConcurrency(4, 64))
 		assignments = make(map[string]map[uint64][]*pb.Point)
 	)
 
@@ -738,7 +753,7 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 		sendErr error
 		sendWg  sync.WaitGroup
 		sendMu  sync.Mutex
-		sendSem = make(chan struct{}, 16)
+		sendSem = make(chan struct{}, adaptiveConcurrency(4, 64))
 	)
 
 	for addr, shards := range assignments {
@@ -825,12 +840,20 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 	if candidateLimit > workerTopK {
 		candidateLimit = workerTopK
 	}
+	if len(req.Query) > 0 && len(req.Query) < 3 {
+		shortQueryLimit := int(req.TopK) + int(req.TopK)/2
+		if shortQueryLimit < 1 {
+			shortQueryLimit = 1
+		}
+		if shortQueryLimit < candidateLimit {
+			candidateLimit = shortQueryLimit
+		}
+	}
 
 	placementClient, err := s.getPlacementClient()
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
 	}
-
 	var workerAddresses []string
 	if cachedAddresses, ok := s.workerListCache.Get(req.Collection); ok {
 		workerAddresses = cachedAddresses
@@ -870,10 +893,14 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 	)
 	heap.Init(topResults)
 
+	searchSem := make(chan struct{}, adaptiveConcurrency(2, 32))
 	for _, addr := range workerAddresses {
 		wg.Add(1)
 		go func(workerAddr string) {
 			defer wg.Done()
+
+			searchSem <- struct{}{}
+			defer func() { <-searchSem }()
 
 			workerClient, err := s.workerPool.GetClient(workerAddr)
 			if err != nil {
@@ -958,8 +985,10 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 	}
 
 	// Standard practice: skip reranking when no query text is provided.
-	// This avoids unnecessary RPCs and latency on pure vector search.
-	if req.Query == "" {
+	// Also skip unless reranking is explicitly enabled.
+	allowAll := len(cfg.RerankCollections) == 0
+	enabledForCollection := allowAll || cfg.RerankCollections[req.Collection]
+	if req.Query == "" || !cfg.RerankEnabled || !enabledForCollection {
 		sort.Slice(searchResponse.Results, func(i, j int) bool {
 			return searchResponse.Results[i].Score > searchResponse.Results[j].Score
 		})
@@ -971,16 +1000,25 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 		return searchResponse, nil
 	}
 
+	rerankTopN := int(req.TopK)
+	if v, ok := cfg.RerankTopNOverrides[req.Collection]; ok && v > 0 {
+		rerankTopN = v
+	}
+
 	rerankReq := &reranker.RerankRequest{
 		Query:      req.Query, // Pass the query from the API Gateway's SearchRequest
 		Candidates: candidates,
-		TopN:       int32(req.TopK),
+		TopN:       int32(rerankTopN),
 	}
 
 	rerankCtx := ctx
 	var cancel context.CancelFunc
-	if cfg.RerankTimeoutMs > 0 {
-		rerankCtx, cancel = context.WithTimeout(ctx, time.Duration(cfg.RerankTimeoutMs)*time.Millisecond)
+	rerankTimeoutMs := cfg.RerankTimeoutMs
+	if v, ok := cfg.RerankTimeoutOverrides[req.Collection]; ok && v > 0 {
+		rerankTimeoutMs = v
+	}
+	if rerankTimeoutMs > 0 {
+		rerankCtx, cancel = context.WithTimeout(ctx, time.Duration(rerankTimeoutMs)*time.Millisecond)
 		defer cancel()
 	}
 	rerankResp, err := s.rerankerClient.Rerank(rerankCtx, rerankReq)

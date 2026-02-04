@@ -8,6 +8,7 @@ package storage
 import (
 	"container/heap"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/cockroachdb/pebble"
@@ -87,9 +88,26 @@ func (r *PebbleDB) Search(query []float32, k int) ([]string, []float32, error) {
 	if r.hnsw == nil {
 		return nil, nil, errors.New("hnsw index not initialized")
 	}
+	if r.opts != nil && r.opts.HNSWConfig.Dim > 0 && len(query) != r.opts.HNSWConfig.Dim {
+		return nil, nil, fmt.Errorf("search vector dimension %d does not match index dimension %d", len(query), r.opts.HNSWConfig.Dim)
+	}
 
 	// The HNSW search returns candidate IDs and their distances.
-	ids, scores := r.hnsw.Search(query, k)
+	searchVec := query
+	if r.opts != nil && r.opts.HNSWConfig.DistanceMetric == "cosine" && r.opts.HNSWConfig.NormalizeVectors {
+		searchVec = idxhnsw.NormalizeVector(query)
+	}
+	ef := r.opts.HNSWConfig.EfSearch
+	if k > 0 {
+		adaptive := k * 2
+		if adaptive < k {
+			adaptive = k
+		}
+		if adaptive < ef {
+			ef = adaptive
+		}
+	}
+	ids, scores := r.hnsw.SearchWithEf(searchVec, k, ef)
 	return ids, scores, nil
 }
 

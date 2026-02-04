@@ -106,12 +106,13 @@ func (r *PebbleDB) Close() error {
 // loadHNSW loads the HNSW index from a snapshot in the database and replays the WAL.
 func (r *PebbleDB) loadHNSW(opts *Options) error {
 	r.hnsw = idxhnsw.NewHNSW(r, opts.HNSWConfig.Dim, idxhnsw.HNSWConfig{
-		M:              opts.HNSWConfig.M,
-		EfConstruction: opts.HNSWConfig.EfConstruction,
-		EfSearch:       opts.HNSWConfig.EfSearch,
-		Distance:       opts.HNSWConfig.DistanceMetric,
-		PersistNodes:   opts.HNSWConfig.PersistNodes,
-		EnableNorms:    opts.HNSWConfig.EnableNorms,
+		M:                opts.HNSWConfig.M,
+		EfConstruction:   opts.HNSWConfig.EfConstruction,
+		EfSearch:         opts.HNSWConfig.EfSearch,
+		Distance:         opts.HNSWConfig.DistanceMetric,
+		PersistNodes:     opts.HNSWConfig.PersistNodes,
+		EnableNorms:      opts.HNSWConfig.EnableNorms,
+		NormalizeVectors: opts.HNSWConfig.NormalizeVectors,
 	})
 
 	data, closer, err := r.db.Get([]byte(hnswIndexKey))
@@ -128,12 +129,13 @@ func (r *PebbleDB) loadHNSW(opts *Options) error {
 		log.Printf("Failed to load HNSW index from snapshot, creating a new one: %v", err)
 		// Reset to a new index if loading fails.
 		r.hnsw = idxhnsw.NewHNSW(r, opts.HNSWConfig.Dim, idxhnsw.HNSWConfig{
-			M:              opts.HNSWConfig.M,
-			EfConstruction: opts.HNSWConfig.EfConstruction,
-			EfSearch:       opts.HNSWConfig.EfSearch,
-			Distance:       opts.HNSWConfig.DistanceMetric,
-			PersistNodes:   opts.HNSWConfig.PersistNodes,
-			EnableNorms:    opts.HNSWConfig.EnableNorms,
+			M:                opts.HNSWConfig.M,
+			EfConstruction:   opts.HNSWConfig.EfConstruction,
+			EfSearch:         opts.HNSWConfig.EfSearch,
+			Distance:         opts.HNSWConfig.DistanceMetric,
+			PersistNodes:     opts.HNSWConfig.PersistNodes,
+			EnableNorms:      opts.HNSWConfig.EnableNorms,
+			NormalizeVectors: opts.HNSWConfig.NormalizeVectors,
 		})
 		return nil
 	}

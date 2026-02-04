@@ -125,7 +125,10 @@ func (h *HNSW) add(id string, vec []float32) error {
 		Layer:     layer,
 		Neighbors: make([][]uint32, layer+1),
 	}
-	if h.config.Distance == "cosine" && h.config.EnableNorms {
+	if h.config.Distance == "cosine" && h.config.NormalizeVectors {
+		node.Vec = NormalizeVector(node.Vec)
+		node.Norm = 1
+	} else if h.config.Distance == "cosine" && h.config.EnableNorms {
 		node.Norm = VectorNorm(node.Vec)
 	}
 	for i := range node.Neighbors {

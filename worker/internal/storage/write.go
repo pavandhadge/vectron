@@ -11,6 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/pavandhadge/vectron/worker/internal/idxhnsw"
 )
 
 // Put inserts or updates a single key-value pair in the database.
@@ -73,7 +75,11 @@ func (r *PebbleDB) StoreVector(id string, vector []float32, metadata []byte) err
 	}
 
 	// 1. Add to HNSW index first. This is an in-memory operation.
-	if err := r.hnsw.Add(id, vector); err != nil {
+	indexVector := vector
+	if r.opts != nil && r.opts.HNSWConfig.DistanceMetric == "cosine" && r.opts.HNSWConfig.NormalizeVectors {
+		indexVector = idxhnsw.NormalizeVector(vector)
+	}
+	if err := r.hnsw.Add(id, indexVector); err != nil {
 		return fmt.Errorf("failed to add vector to HNSW index: %w", err)
 	}
 
@@ -134,7 +140,11 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 			return errors.New("vector id or data missing")
 		}
 
-		if err := r.hnsw.Add(v.ID, v.Vector); err != nil {
+		indexVector := v.Vector
+		if r.opts != nil && r.opts.HNSWConfig.DistanceMetric == "cosine" && r.opts.HNSWConfig.NormalizeVectors {
+			indexVector = idxhnsw.NormalizeVector(v.Vector)
+		}
+		if err := r.hnsw.Add(v.ID, indexVector); err != nil {
 			for _, id := range added {
 				_ = r.hnsw.Delete(id)
 			}

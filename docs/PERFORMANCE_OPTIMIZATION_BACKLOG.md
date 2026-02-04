@@ -10,8 +10,8 @@ Legend: [DONE] implemented, [PENDING] not implemented, [EXPERIMENT] requires val
 3. [DONE] Skip reranking when query text is empty.
 4. [DONE] Pre‑merge/limit top‑K before reranker to avoid huge candidate sets.
 5. [DONE] Non‑linearizable (stale) reads for search by default (configurable).
-6. [PENDING] Make reranking fully opt‑in (header/collection policy) to avoid unintended use.
-7. [PENDING] Enforce rerank RPC timeout + fallback (configurable).
+6. [DONE] Make reranking fully opt‑in (header/collection policy) to avoid unintended use.
+7. [DONE] Enforce rerank RPC timeout + fallback (configurable).
 
 ## Tier 1 — Major Wins
 1. [DONE] Remove per‑candidate Pebble existence checks in search.
@@ -25,7 +25,7 @@ Legend: [DONE] implemented, [PENDING] not implemented, [EXPERIMENT] requires val
 ## Tier 2 — Medium Wins
 1. [DONE] Worker list cache in API Gateway (short TTL).
 2. [DONE] Worker resolve cache in API Gateway (short TTL).
-3. [PENDING] Limit rerank candidates further based on query length/quality.
+3. [DONE] Limit rerank candidates further based on query length/quality.
 4. [PENDING] Async rerank warmup + cache for recurring queries.
 5. [PENDING] Add request coalescing for identical searches in flight.
 6. [PENDING] Reduce logging on hot paths (sampling / debug toggle).
@@ -40,7 +40,7 @@ Legend: [DONE] implemented, [PENDING] not implemented, [EXPERIMENT] requires val
 
 ## Tier 4 — Architecture / Roadmap
 1. [PENDING] Per‑collection read consistency policy (eventual vs linearizable).
-2. [PENDING] Per‑collection rerank policy (enable, top‑N, timeout).
+2. [DONE] Per‑collection rerank policy (enable, top‑N, timeout).
 3. [PENDING] Optional vector quantization / compression for RAM reduction.
 4. [PENDING] Multi‑tenant isolation (rate limits, resource caps per tenant).
 5. [PENDING] Async index rebuild / background maintenance scheduling.

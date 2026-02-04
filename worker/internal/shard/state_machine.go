@@ -278,11 +278,12 @@ func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dime
 		Path:            dbPath,
 		CreateIfMissing: true,
 		HNSWConfig: storage.HNSWConfig{
-			Dim:            int(dimension),
-			M:              16,
-			EfConstruction: 200,
-			EfSearch:       100,
-			DistanceMetric: distance,
+			Dim:              int(dimension),
+			M:                16,
+			EfConstruction:   200,
+			EfSearch:         100, // check what it controlls then tunr it
+			DistanceMetric:   distance,
+			NormalizeVectors: distance == "cosine",
 		},
 	}
 

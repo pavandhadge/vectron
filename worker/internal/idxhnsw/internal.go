@@ -35,6 +35,9 @@ func (h *HNSW) distance(a, b []float32) float32 {
 }
 
 func (h *HNSW) distanceWithNode(a []float32, b []float32, normB float32) float32 {
+	if h.config.Distance == "cosine" && h.config.NormalizeVectors {
+		return 1 - dotProduct(a, b)
+	}
 	if h.config.Distance != "cosine" || !h.config.EnableNorms {
 		return h.distance(a, b)
 	}
@@ -78,14 +81,59 @@ func CosineDistance(a, b []float32) float32 {
 
 // VectorNorm computes the L2 norm for a vector.
 func VectorNorm(a []float32) float32 {
-	var sum float32
-	for i := range a {
-		sum += a[i] * a[i]
-	}
+	sum := sumSquares(a)
 	if sum == 0 {
 		return 0
 	}
 	return float32(math.Sqrt(float64(sum)))
+}
+
+// NormalizeVector returns a normalized copy of the vector (L2 norm = 1).
+func NormalizeVector(a []float32) []float32 {
+	norm := float32(math.Sqrt(float64(sumSquares(a))))
+	if norm == 0 {
+		return append([]float32(nil), a...)
+	}
+	out := make([]float32, len(a))
+	inv := 1.0 / norm
+	for i := range a {
+		out[i] = a[i] * float32(inv)
+	}
+	return out
+}
+
+func dotProduct(a, b []float32) float32 {
+	n := len(a)
+	var sum0, sum1, sum2, sum3 float32
+	i := 0
+	for ; i+3 < n; i += 4 {
+		sum0 += a[i] * b[i]
+		sum1 += a[i+1] * b[i+1]
+		sum2 += a[i+2] * b[i+2]
+		sum3 += a[i+3] * b[i+3]
+	}
+	sum := sum0 + sum1 + sum2 + sum3
+	for ; i < n; i++ {
+		sum += a[i] * b[i]
+	}
+	return sum
+}
+
+func sumSquares(a []float32) float32 {
+	n := len(a)
+	var sum0, sum1, sum2, sum3 float32
+	i := 0
+	for ; i+3 < n; i += 4 {
+		sum0 += a[i] * a[i]
+		sum1 += a[i+1] * a[i+1]
+		sum2 += a[i+2] * a[i+2]
+		sum3 += a[i+3] * a[i+3]
+	}
+	sum := sum0 + sum1 + sum2 + sum3
+	for ; i < n; i++ {
+		sum += a[i] * a[i]
+	}
+	return sum
 }
 
 // ======================================================================================

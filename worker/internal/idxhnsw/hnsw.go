@@ -22,13 +22,14 @@ type NodeStore interface {
 
 // HNSWConfig holds the configuration parameters for the HNSW index.
 type HNSWConfig struct {
-	M              int    // Max number of connections per node per layer.
-	EfConstruction int    // Size of the dynamic candidate list during construction.
-	EfSearch       int    // Size of the dynamic candidate list during search.
-	MaxLevel       int    // The maximum level to which a node can be promoted.
-	Distance       string // The distance metric to use ("euclidean" or "cosine").
-	PersistNodes   bool   // Whether to persist each node update to the store.
-	EnableNorms    bool   // Whether to store vector norms for cosine distance.
+	M                int    // Max number of connections per node per layer.
+	EfConstruction   int    // Size of the dynamic candidate list during construction.
+	EfSearch         int    // Size of the dynamic candidate list during search.
+	MaxLevel         int    // The maximum level to which a node can be promoted.
+	Distance         string // The distance metric to use ("euclidean" or "cosine").
+	PersistNodes     bool   // Whether to persist each node update to the store.
+	EnableNorms      bool   // Whether to store vector norms for cosine distance.
+	NormalizeVectors bool   // Whether to normalize vectors for cosine distance.
 }
 
 // HNSW represents the HNSW index.
@@ -92,6 +93,11 @@ func (h *HNSW) Add(id string, vec []float32) error { return h.add(id, vec) }
 
 // Search finds the k-nearest neighbors for a given vector.
 func (h *HNSW) Search(vec []float32, k int) ([]string, []float32) { return h.search(vec, k) }
+
+// SearchWithEf finds the k-nearest neighbors with a custom efSearch value.
+func (h *HNSW) SearchWithEf(vec []float32, k, ef int) ([]string, []float32) {
+	return h.searchWithEf(vec, k, ef)
+}
 
 // Delete marks a vector for deletion by its ID.
 func (h *HNSW) Delete(id string) error { return h.delete(id) }

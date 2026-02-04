@@ -83,6 +83,10 @@ func (h *HNSW) search(vec []float32, k int) ([]string, []float32) {
 		return nil, nil
 	}
 
+	if h.config.Distance == "cosine" && h.config.NormalizeVectors {
+		vec = NormalizeVector(vec)
+	}
+
 	// 1. Find the entry point at the base layer by greedily traversing from the top.
 	curr := h.getNode(h.entry)
 	for l := h.maxLayer; l > 0; l-- {
@@ -91,6 +95,50 @@ func (h *HNSW) search(vec []float32, k int) ([]string, []float32) {
 
 	// 2. Perform a more thorough search at the base layer (layer 0).
 	results := h.searchLayer(vec, curr, h.config.EfSearch, 0)
+
+	// 3. Sort the final results by distance and take the top K.
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].dist < results[j].dist
+	})
+	if len(results) > k {
+		results = results[:k]
+	}
+
+	// 4. Convert internal IDs back to external string IDs and collect scores.
+	ids := make([]string, len(results))
+	scores := make([]float32, len(results))
+	for i, c := range results {
+		ids[i] = h.uint32ToID[c.id]
+		scores[i] = c.dist
+	}
+	return ids, scores
+}
+
+// searchWithEf is like search but allows a custom ef parameter.
+func (h *HNSW) searchWithEf(vec []float32, k, ef int) ([]string, []float32) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	if h.entry == 0 {
+		return nil, nil
+	}
+
+	if h.config.Distance == "cosine" && h.config.NormalizeVectors {
+		vec = NormalizeVector(vec)
+	}
+
+	if ef < k {
+		ef = k
+	}
+
+	// 1. Find the entry point at the base layer by greedily traversing from the top.
+	curr := h.getNode(h.entry)
+	for l := h.maxLayer; l > 0; l-- {
+		curr = h.searchLayerSingle(vec, curr, l)
+	}
+
+	// 2. Perform a more thorough search at the base layer (layer 0).
+	results := h.searchLayer(vec, curr, ef, 0)
 
 	// 3. Sort the final results by distance and take the top K.
 	sort.Slice(results, func(i, j int) bool {

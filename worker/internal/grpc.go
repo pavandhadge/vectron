@@ -11,6 +11,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"runtime"
 	"sync"
 	"time"
 
@@ -31,6 +32,21 @@ var debugLogs = os.Getenv("VECTRON_DEBUG_LOGS") == "1"
 type searchHeapItem struct {
 	id    string
 	score float32
+}
+
+func adaptiveConcurrency(multiplier, maxCap int) int {
+	procs := runtime.GOMAXPROCS(0)
+	if procs < 1 {
+		procs = 1
+	}
+	limit := procs * multiplier
+	if maxCap > 0 && limit > maxCap {
+		limit = maxCap
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	return limit
 }
 
 type searchMinHeap []searchHeapItem
@@ -165,6 +181,7 @@ func (s *GrpcServer) Search(ctx context.Context, req *worker.SearchRequest) (*wo
 		)
 		heap.Init(topKHeap)
 
+		searchSem := make(chan struct{}, adaptiveConcurrency(2, 32))
 		var shardIDs []uint64
 		if req.GetCollection() != "" {
 			shardIDs = s.shardManager.GetShardsForCollection(req.GetCollection())
@@ -175,6 +192,8 @@ func (s *GrpcServer) Search(ctx context.Context, req *worker.SearchRequest) (*wo
 			wg.Add(1)
 			go func(id uint64) {
 				defer wg.Done()
+				searchSem <- struct{}{}
+				defer func() { <-searchSem }()
 				var res interface{}
 				var err error
 				if useLinearizable {

@@ -15,14 +15,15 @@ type Options struct {
 
 // HNSWConfig defines the configuration for the HNSW index.
 type HNSWConfig struct {
-	Dim            int    // The dimension of the vectors.
-	M              int    // The max number of connections per node per layer.
-	EfConstruction int    // The size of the dynamic candidate list during index construction.
-	EfSearch       int    // The size of the dynamic candidate list during search.
-	DistanceMetric string // The distance metric to use (e.g., "euclidean", "cosine").
-	WALEnabled     bool   // If true, enable the write-ahead log for the HNSW index.
-	PersistNodes   bool   // If true, persist individual HNSW nodes on every update.
-	EnableNorms    bool   // If true, store vector norms to speed up cosine distance.
+	Dim              int    // The dimension of the vectors.
+	M                int    // The max number of connections per node per layer.
+	EfConstruction   int    // The size of the dynamic candidate list during index construction.
+	EfSearch         int    // The size of the dynamic candidate list during search.
+	DistanceMetric   string // The distance metric to use (e.g., "euclidean", "cosine").
+	WALEnabled       bool   // If true, enable the write-ahead log for the HNSW index.
+	PersistNodes     bool   // If true, persist individual HNSW nodes on every update.
+	EnableNorms      bool   // If true, store vector norms to speed up cosine distance.
+	NormalizeVectors bool   // If true, normalize vectors for cosine distance.
 }
 
 // BatchOperations holds a set of write and delete operations to be performed atomically.
