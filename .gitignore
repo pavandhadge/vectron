@@ -110,3 +110,5 @@ dist/
 temp_vectron
 vectron.test
 *.csv
+BENCHMARK_REPORT.md
+temp_vectron_benchmark

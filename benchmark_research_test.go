@@ -58,7 +58,7 @@ const (
 	// Dataset sizes for different test scenarios - reduced for local testing
 	SmallDataset  = 1000  // 1K vectors
 	MediumDataset = 2500  // 5K vectors
-	LargeDataset  = 5000 // 10K vectors
+	LargeDataset  = 5000  // 10K vectors
 	XLDataset     = 10000 // 50K vectors (max for local testing)
 
 	// Vector dimensions to test
@@ -697,6 +697,32 @@ func (s *BenchmarkTest) getAuthenticatedContext() context.Context {
 // Scenario 1: Vector Search Scalability
 // =============================================================================
 
+// upsertWithRetry attempts to upsert with retry logic for transient failures like "shard not ready"
+func upsertWithRetry(ctx context.Context, client apigatewaypb.VectronServiceClient, req *apigatewaypb.UpsertRequest, maxRetries int) (*apigatewaypb.UpsertResponse, error) {
+	var lastErr error
+	for i := 0; i < maxRetries; i++ {
+		resp, err := client.Upsert(ctx, req)
+		if err == nil {
+			return resp, nil
+		}
+
+		// Check if it's a retryable error (shard not ready, unavailable)
+		errStr := err.Error()
+		if !strings.Contains(errStr, "not ready") && !strings.Contains(errStr, "Unavailable") {
+			return nil, err // Not retryable
+		}
+
+		lastErr = err
+		// Exponential backoff: 500ms, 1s, 2s, 4s, etc.
+		backoff := time.Duration(1<<i) * 500 * time.Millisecond
+		if backoff > 5*time.Second {
+			backoff = 5 * time.Second
+		}
+		time.Sleep(backoff)
+	}
+	return nil, lastErr
+}
+
 func benchmarkVectorSearchScalability(t *testing.T, ctx context.Context, client apigatewaypb.VectronServiceClient, suite *BenchmarkSuite) {
 	log.Println("\n📊 Scenario 1: Vector Search Scalability")
 	log.Println("Testing search performance with increasing dataset sizes")
@@ -741,8 +767,9 @@ func runScalabilityBenchmark(t *testing.T, ctx context.Context, client apigatewa
 
 	// Wait for shards to be assigned and initialized
 	// This is critical - shards are created asynchronously after collection creation
+	// Wait longer for distributed systems to stabilize
 	log.Printf("  Waiting for shards to be assigned and initialized...")
-	time.Sleep(10 * time.Second)
+	time.Sleep(20 * time.Second)
 
 	// Insert vectors in batches
 	batchSize := 1000
@@ -762,10 +789,10 @@ func runScalabilityBenchmark(t *testing.T, ctx context.Context, client apigatewa
 		}
 
 		batchStart := time.Now()
-		resp, err := client.Upsert(ctx, &apigatewaypb.UpsertRequest{
+		resp, err := upsertWithRetry(ctx, client, &apigatewaypb.UpsertRequest{
 			Collection: collectionName,
 			Points:     batch,
-		})
+		}, 5)
 		require.NoError(t, err)
 		batchDuration := time.Since(batchStart)
 
@@ -883,7 +910,7 @@ func runDimensionBenchmark(t *testing.T, ctx context.Context, client apigatewayp
 	// Wait for shards to be ready
 	// Wait for shards to be assigned and initialized
 	// This is critical - shards are created asynchronously after collection creation
-	time.Sleep(10 * time.Second)
+	time.Sleep(20 * time.Second)
 
 	// Measure insert performance
 	batchSize := 100
@@ -898,10 +925,10 @@ func runDimensionBenchmark(t *testing.T, ctx context.Context, client apigatewayp
 			})
 		}
 
-		_, err := client.Upsert(ctx, &apigatewaypb.UpsertRequest{
+		_, err := upsertWithRetry(ctx, client, &apigatewaypb.UpsertRequest{
 			Collection: collectionName,
 			Points:     batch,
-		})
+		}, 5)
 		require.NoError(t, err)
 	}
 
@@ -971,7 +998,7 @@ func benchmarkConcurrentWorkload(t *testing.T, ctx context.Context, client apiga
 	// Wait for shards to be ready
 	// Wait for shards to be assigned and initialized
 	// This is critical - shards are created asynchronously after collection creation
-	time.Sleep(10 * time.Second)
+	time.Sleep(20 * time.Second)
 
 	// Insert dataset
 	for i := 0; i < datasetSize; i += 1000 {
@@ -982,10 +1009,10 @@ func benchmarkConcurrentWorkload(t *testing.T, ctx context.Context, client apiga
 				Vector: generateNormalizedVector(dimension),
 			})
 		}
-		_, err := client.Upsert(ctx, &apigatewaypb.UpsertRequest{
+		_, err := upsertWithRetry(ctx, client, &apigatewaypb.UpsertRequest{
 			Collection: collectionName,
 			Points:     batch,
-		})
+		}, 5)
 		require.NoError(t, err)
 	}
 
@@ -1107,7 +1134,7 @@ func benchmarkRerankerEffectiveness(t *testing.T, ctx context.Context, client ap
 	// Wait for shards to be ready
 	// Wait for shards to be assigned and initialized
 	// This is critical - shards are created asynchronously after collection creation
-	time.Sleep(10 * time.Second)
+	time.Sleep(20 * time.Second)
 
 	// Insert vectors with metadata for reranking
 	start := time.Now()
@@ -1127,10 +1154,10 @@ func benchmarkRerankerEffectiveness(t *testing.T, ctx context.Context, client ap
 				},
 			})
 		}
-		_, err := client.Upsert(ctx, &apigatewaypb.UpsertRequest{
+		_, err := upsertWithRetry(ctx, client, &apigatewaypb.UpsertRequest{
 			Collection: collectionName,
 			Points:     batch,
-		})
+		}, 5)
 		require.NoError(t, err)
 	}
 	insertDuration := time.Since(start)
@@ -1256,7 +1283,7 @@ func runDistributedBenchmark(t *testing.T, ctx context.Context, client apigatewa
 	// Wait for shards to be ready
 	// Wait for shards to be assigned and initialized
 	// This is critical - shards are created asynchronously after collection creation
-	time.Sleep(10 * time.Second)
+	time.Sleep(20 * time.Second)
 
 	// Insert data
 	start := time.Now()
@@ -1268,10 +1295,10 @@ func runDistributedBenchmark(t *testing.T, ctx context.Context, client apigatewa
 				Vector: generateNormalizedVector(dimension),
 			})
 		}
-		_, err := client.Upsert(ctx, &apigatewaypb.UpsertRequest{
+		_, err := upsertWithRetry(ctx, client, &apigatewaypb.UpsertRequest{
 			Collection: collectionName,
 			Points:     batch,
-		})
+		}, 5)
 		require.NoError(t, err)
 	}
 	insertDuration := time.Since(start)
@@ -1372,7 +1399,7 @@ func benchmarkEndToEndLatency(t *testing.T, ctx context.Context, client apigatew
 	// Wait for shards to be ready
 	// Wait for shards to be assigned and initialized
 	// This is critical - shards are created asynchronously after collection creation
-	time.Sleep(10 * time.Second)
+	time.Sleep(20 * time.Second)
 
 	// Test 2: Single upsert latency
 	singleUpsertLatencies := make([]time.Duration, 100)
