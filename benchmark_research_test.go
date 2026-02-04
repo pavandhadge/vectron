@@ -1,11 +1,13 @@
-// benchmark_research_test.go - Comprehensive Benchmark Suite for Research
+// benchmark_research_test.go - Comprehensive Standalone Benchmark Suite for Research
 //
 // This test suite provides detailed benchmarking and metrics collection for:
 // - Vector search performance (latency, throughput, recall, precision)
 // - Distributed system scalability (shard distribution, load balancing)
 // - Reranker effectiveness (quality improvement metrics)
 // - End-to-end system performance under various workloads
-
+//
+// This is a STANDALONE test that starts all required services automatically.
+//
 // Metrics Calculated:
 // - Latency: P50, P95, P99, Average, Min, Max
 // - Throughput: Vectors/second, Queries/second
@@ -25,9 +27,13 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"net"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,8 +43,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 
 	apigatewaypb "github.com/pavandhadge/vectron/shared/proto/apigateway"
+	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
+	placementpb "github.com/pavandhadge/vectron/shared/proto/placementdriver"
 )
 
 // =============================================================================
@@ -46,11 +55,11 @@ import (
 // =============================================================================
 
 const (
-	// Dataset sizes for different test scenarios
-	SmallDataset  = 1000   // 1K vectors
-	MediumDataset = 10000  // 10K vectors
-	LargeDataset  = 100000 // 100K vectors
-	XLDataset     = 500000 // 500K vectors
+	// Dataset sizes for different test scenarios - reduced for local testing
+	SmallDataset  = 1000  // 1K vectors
+	MediumDataset = 2500  // 5K vectors
+	LargeDataset  = 5000 // 10K vectors
+	XLDataset     = 10000 // 50K vectors (max for local testing)
 
 	// Vector dimensions to test
 	Dim128  = 128  // Common for sentence embeddings
@@ -62,6 +71,32 @@ const (
 	ShortDuration  = 30 * time.Second
 	MediumDuration = 2 * time.Minute
 	LongDuration   = 5 * time.Minute
+)
+
+// =============================================================================
+// Service Configuration (Benchmark-specific to avoid conflicts with ultimate_e2e_test.go)
+// =============================================================================
+
+var (
+	// Service ports - benchmark-specific to avoid package conflicts
+	benchmarkEtcdPort       = 2379
+	benchmarkPdGRPCPort1    = 10001
+	benchmarkPdGRPCPort2    = 10002
+	benchmarkPdGRPCPort3    = 10003
+	benchmarkWorkerPort1    = 10007
+	benchmarkWorkerPort2    = 10017
+	benchmarkAuthGRPCPort   = 10008
+	benchmarkAuthHTTPPort   = 10009
+	benchmarkApigatewayPort = 10010
+	benchmarkApigatewayHTTP = 10012
+	benchmarkRerankerPort   = 10013
+
+	// Base directory for all temporary test files (data and logs)
+	benchmarkBaseTempDir = "./temp_vectron_benchmark"
+	// Subdirectory for all service data
+	benchmarkDataTempDir = filepath.Join(benchmarkBaseTempDir, "data")
+	// Subdirectory for all service logs
+	benchmarkLogTempDir = filepath.Join(benchmarkBaseTempDir, "logs")
 )
 
 // =============================================================================
@@ -154,6 +189,25 @@ type BenchmarkSuite struct {
 	mutex   sync.RWMutex
 }
 
+// BenchmarkTest represents the comprehensive benchmark suite with service management
+type BenchmarkTest struct {
+	t              *testing.T
+	ctx            context.Context
+	cancel         context.CancelFunc
+	processes      []*exec.Cmd
+	processesMutex sync.Mutex
+	dataDirs       []string
+	dataDirsMutex  sync.Mutex
+	jwtToken       string
+	apiKey         string
+	userID         string
+
+	// gRPC clients
+	authClient      authpb.AuthServiceClient
+	apigwClient     apigatewaypb.VectronServiceClient
+	placementClient placementpb.PlacementServiceClient
+}
+
 // =============================================================================
 // Main Research Benchmark Test
 // =============================================================================
@@ -165,64 +219,500 @@ func TestResearchBenchmark(t *testing.T) {
 
 	log.Println("🔬 Starting Research Benchmark Suite...")
 	log.Println("This will run comprehensive benchmarks for research paper analysis")
-	log.Println("Estimated duration: 45-60 minutes")
+	log.Println("Estimated duration: 20-30 minutes")
 
-	suite := &BenchmarkSuite{}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
-	defer cancel()
+	// Create base temporary directories
+	if err := os.MkdirAll(benchmarkDataTempDir, 0755); err != nil {
+		t.Fatalf("Failed to create data temp dir %s: %v", benchmarkDataTempDir, err)
+	}
+	if err := os.MkdirAll(benchmarkLogTempDir, 0755); err != nil {
+		t.Fatalf("Failed to create log temp dir %s: %v", benchmarkLogTempDir, err)
+	}
+
+	suite := &BenchmarkTest{t: t}
+	suite.ctx, suite.cancel = context.WithTimeout(context.Background(), 60*time.Minute)
+	t.Cleanup(suite.cleanup) // Register cleanup function
+	defer suite.cancel()
+
+	// Start all services
+	t.Run("SystemStartup", suite.TestSystemStartup)
+
+	// Initialize clients and authenticate
+	t.Run("InitializeAndAuthenticate", suite.TestInitializeAndAuthenticate)
 
 	// Run comprehensive benchmark scenarios
+	benchmarkSuite := &BenchmarkSuite{}
+
 	t.Run("Scenario1_VectorSearchScalability", func(t *testing.T) {
-		benchmarkVectorSearchScalability(t, ctx, suite)
+		benchmarkVectorSearchScalability(t, suite.getAuthenticatedContext(), suite.apigwClient, benchmarkSuite)
 	})
 
 	t.Run("Scenario2_DimensionImpact", func(t *testing.T) {
-		benchmarkDimensionImpact(t, ctx, suite)
+		benchmarkDimensionImpact(t, suite.getAuthenticatedContext(), suite.apigwClient, benchmarkSuite)
 	})
 
 	t.Run("Scenario3_ConcurrentWorkload", func(t *testing.T) {
-		benchmarkConcurrentWorkload(t, ctx, suite)
+		benchmarkConcurrentWorkload(t, suite.getAuthenticatedContext(), suite.apigwClient, benchmarkSuite)
 	})
 
 	t.Run("Scenario4_RerankerEffectiveness", func(t *testing.T) {
-		benchmarkRerankerEffectiveness(t, ctx, suite)
+		benchmarkRerankerEffectiveness(t, suite.getAuthenticatedContext(), suite.apigwClient, benchmarkSuite)
 	})
 
 	t.Run("Scenario5_DistributedScalability", func(t *testing.T) {
-		benchmarkDistributedScalability(t, ctx, suite)
+		benchmarkDistributedScalability(t, suite.getAuthenticatedContext(), suite.apigwClient, suite.placementClient, benchmarkSuite)
 	})
 
 	t.Run("Scenario6_EndToEndLatency", func(t *testing.T) {
-		benchmarkEndToEndLatency(t, ctx, suite)
+		benchmarkEndToEndLatency(t, suite.getAuthenticatedContext(), suite.apigwClient, benchmarkSuite)
 	})
 
 	// Generate final report
 	t.Run("GenerateReport", func(t *testing.T) {
-		generateResearchReport(t, suite)
+		generateResearchReport(t, benchmarkSuite)
 	})
 }
+
+// =============================================================================
+// System Startup (from ultimate_e2e_test.go)
+// =============================================================================
+
+func (s *BenchmarkTest) TestSystemStartup(t *testing.T) {
+	log.Println("🚀 Starting System for Benchmark...")
+
+	// Start all services individually
+	t.Run("StartAllServices", func(t *testing.T) {
+		s.startEtcd()
+		s.startPlacementDriverCluster()
+		s.startWorkers()
+		s.startAuthService()
+		s.startReranker()
+		s.startAPIGateway()
+
+		// Wait for all services to be ready
+		ports := []int{benchmarkEtcdPort, benchmarkPdGRPCPort1, benchmarkWorkerPort1, benchmarkAuthGRPCPort, benchmarkApigatewayPort, benchmarkRerankerPort}
+		for _, port := range ports {
+			require.Eventually(t, func() bool {
+				return s.isPortOpen(port)
+			}, 30*time.Second, 1*time.Second, "Port %d should be open", port)
+		}
+
+		log.Println("✅ All services started and healthy")
+	})
+
+	// Initialize clients
+	t.Run("InitializeClients", func(t *testing.T) {
+		s.initializeClients()
+		require.NotNil(t, s.apigwClient, "API Gateway client should be initialized")
+		require.NotNil(t, s.authClient, "Auth client should be initialized")
+		log.Println("✅ gRPC clients initialized")
+	})
+}
+
+func (s *BenchmarkTest) TestInitializeAndAuthenticate(t *testing.T) {
+	log.Println("🔐 Authenticating for Benchmark...")
+
+	// Register and login to get JWT token
+	email := fmt.Sprintf("benchmark-%d@example.com", time.Now().Unix())
+	_, err := s.authClient.RegisterUser(s.ctx, &authpb.RegisterUserRequest{
+		Email:    email,
+		Password: "BenchmarkPassword123!",
+	})
+	require.NoError(t, err, "Failed to register user")
+
+	loginResp, err := s.authClient.Login(s.ctx, &authpb.LoginRequest{
+		Email:    email,
+		Password: "BenchmarkPassword123!",
+	})
+	require.NoError(t, err, "Failed to login and get JWT token")
+	require.NotEmpty(t, loginResp.JwtToken, "JWT token should not be empty")
+
+	s.jwtToken = loginResp.JwtToken
+	log.Println("✅ JWT token obtained for API Gateway authentication")
+}
+
+// =============================================================================
+// Service Management (from ultimate_e2e_test.go)
+// =============================================================================
+
+func (s *BenchmarkTest) startEtcd() {
+	log.Println("▶️ Starting etcd (Podman)...")
+
+	// 1. Force stop the container if it's already running.
+	exec.CommandContext(s.ctx, "podman", "stop", "etcd").Run()
+
+	// 2. Prepare Data Directory
+	etcdDataDir := filepath.Join(benchmarkDataTempDir, "etcd")
+	if err := os.MkdirAll(etcdDataDir, 0755); err != nil {
+		s.t.Fatalf("Failed to create etcd data dir: %v", err)
+	}
+
+	// 3. Check if container 'etcd' exists
+	checkCmd := exec.CommandContext(s.ctx, "podman", "container", "exists", "etcd")
+	if err := checkCmd.Run(); err == nil {
+		// Container Exists -> Start it
+		startCmd := exec.CommandContext(s.ctx, "podman", "start", "etcd")
+		if out, err := startCmd.CombinedOutput(); err != nil {
+			s.t.Fatalf("Failed to start existing etcd container: %v\nOutput: %s", err, string(out))
+		}
+	} else {
+		// Container Does Not Exist -> Run new
+		runCmd := exec.CommandContext(s.ctx, "podman", "run", "-d",
+			"--name", "etcd",
+			"-p", "2379:2379",
+			"-v", fmt.Sprintf("%s:/etcd-data:Z", etcdDataDir),
+			"quay.io/coreos/etcd:v3.5.0",
+			"/usr/local/bin/etcd",
+			"--data-dir", "/etcd-data",
+			"--listen-client-urls", "http://0.0.0.0:2379",
+			"--advertise-client-urls", "http://127.0.0.1:2379",
+		)
+		if out, err := runCmd.CombinedOutput(); err != nil {
+			s.t.Fatalf("Failed to run new etcd container: %v\nOutput: %s", err, string(out))
+		}
+	}
+
+	// 4. Wait for Etcd to be ready
+	log.Println("⏳ Waiting for etcd to be ready...")
+	timeout := time.After(10 * time.Second)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeout:
+			s.t.Fatal("Timed out waiting for etcd to start")
+		case <-ticker.C:
+			if s.isPortOpen(benchmarkEtcdPort) {
+				log.Println("✅ Etcd started and listening")
+				return
+			}
+		}
+	}
+}
+
+func (s *BenchmarkTest) startPlacementDriverCluster() {
+	nodes := []struct {
+		id       uint64
+		raftAddr string
+		grpcAddr string
+		grpcPort int
+	}{
+		{1, "127.0.0.1:11001", "127.0.0.1:10001", 10001},
+		{2, "127.0.0.1:11002", "127.0.0.1:10002", 10002},
+		{3, "127.0.0.1:11003", "127.0.0.1:10003", 10003},
+	}
+
+	for _, node := range nodes {
+		_, raftPortStr, err := net.SplitHostPort(node.raftAddr)
+		if err != nil {
+			s.t.Fatalf("Failed to parse raft address %s: %v", node.raftAddr, err)
+		}
+		raftPort, err := strconv.Atoi(raftPortStr)
+		if err != nil {
+			s.t.Fatalf("Failed to convert raft port %s to int: %v", raftPortStr, err)
+		}
+
+		s.killProcessOnPort(node.grpcPort)
+		s.killProcessOnPort(raftPort)
+		time.Sleep(500 * time.Millisecond)
+
+		dataDir, err := os.MkdirTemp(benchmarkDataTempDir, fmt.Sprintf("pd_benchmark_%d_", node.id))
+		if err != nil {
+			log.Printf("Warning: Failed to create temp dir for PD node %d: %v", node.id, err)
+			continue
+		}
+		s.registerDataDir(dataDir)
+
+		cmd := exec.CommandContext(s.ctx, "./bin/placementdriver",
+			"--node-id", fmt.Sprintf("%d", node.id),
+			"--cluster-id", "1",
+			"--raft-addr", node.raftAddr,
+			"--grpc-addr", node.grpcAddr,
+			"--initial-members", "1:127.0.0.1:11001,2:127.0.0.1:11002,3:127.0.0.1:11003",
+			"--data-dir", dataDir,
+		)
+		cmd.Dir = "/home/pavan/Programming/vectron"
+
+		logFile := filepath.Join(benchmarkLogTempDir, fmt.Sprintf("vectron-pd%d-benchmark.log", node.id))
+		if f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {
+			cmd.Stdout = f
+			cmd.Stderr = f
+		}
+
+		s.registerProcess(cmd)
+		if err := cmd.Start(); err != nil {
+			log.Printf("Warning: Failed to start PD node %d: %v", node.id, err)
+		} else {
+			log.Printf("Started PD node %d (PID: %d) with data dir %s", node.id, cmd.Process.Pid, dataDir)
+		}
+	}
+}
+
+func (s *BenchmarkTest) startWorkers() {
+	for i := 1; i <= 2; i++ {
+		port := benchmarkWorkerPort1 + (i-1)*10
+		raftPort := 20000 + i
+
+		s.killProcessOnPort(port)
+		s.killProcessOnPort(raftPort)
+		time.Sleep(500 * time.Millisecond)
+
+		dataDir, err := os.MkdirTemp(benchmarkDataTempDir, fmt.Sprintf("worker_benchmark_%d_", i))
+		if err != nil {
+			log.Printf("Warning: Failed to create temp dir for worker %d: %v", i, err)
+			continue
+		}
+		s.registerDataDir(dataDir)
+
+		cmd := exec.CommandContext(s.ctx, "./bin/worker",
+			"--node-id", fmt.Sprintf("%d", i),
+			"--grpc-addr", fmt.Sprintf("127.0.0.1:%d", port),
+			"--raft-addr", fmt.Sprintf("127.0.0.1:%d", raftPort),
+			"--pd-addrs", "127.0.0.1:10001,127.0.0.1:10002,127.0.0.1:10003",
+			"--data-dir", dataDir,
+		)
+		cmd.Dir = "/home/pavan/Programming/vectron"
+
+		logFile := filepath.Join(benchmarkLogTempDir, fmt.Sprintf("vectron-worker%d-benchmark.log", i))
+		if f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {
+			cmd.Stdout = f
+			cmd.Stderr = f
+		}
+
+		s.registerProcess(cmd)
+		if err := cmd.Start(); err != nil {
+			log.Printf("Warning: Failed to start worker %d: %v", i, err)
+		} else {
+			log.Printf("Started worker %d (PID: %d) with data dir %s", i, cmd.Process.Pid, dataDir)
+		}
+	}
+}
+
+func (s *BenchmarkTest) startAuthService() {
+	s.killProcessOnPort(benchmarkAuthGRPCPort)
+	s.killProcessOnPort(benchmarkAuthHTTPPort)
+	time.Sleep(500 * time.Millisecond)
+
+	cmd := exec.CommandContext(s.ctx, "./bin/authsvc")
+	cmd.Dir = "/home/pavan/Programming/vectron"
+	cmd.Env = append(os.Environ(),
+		"GRPC_PORT=:10008",
+		"HTTP_PORT=:10009",
+		"JWT_SECRET=test-jwt-secret-for-testing-only-do-not-use-in-production",
+		"ETCD_ENDPOINTS=127.0.0.1:2379",
+	)
+
+	if f, err := os.OpenFile(filepath.Join(benchmarkLogTempDir, "vectron-auth-benchmark.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {
+		cmd.Stdout = f
+		cmd.Stderr = f
+	}
+
+	s.registerProcess(cmd)
+	if err := cmd.Start(); err != nil {
+		log.Printf("Warning: Failed to start auth service: %v", err)
+	} else {
+		log.Printf("Started auth service (PID: %d)", cmd.Process.Pid)
+	}
+}
+
+func (s *BenchmarkTest) startReranker() {
+	s.killProcessOnPort(benchmarkRerankerPort)
+	time.Sleep(500 * time.Millisecond)
+
+	cmd := exec.CommandContext(s.ctx, "./bin/reranker",
+		"--port", fmt.Sprintf("127.0.0.1:%d", benchmarkRerankerPort),
+		"--strategy", "rule",
+		"--cache", "memory",
+	)
+	cmd.Dir = "/home/pavan/Programming/vectron"
+
+	if f, err := os.OpenFile(filepath.Join(benchmarkLogTempDir, "vectron-reranker-benchmark.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {
+		cmd.Stdout = f
+		cmd.Stderr = f
+	}
+
+	s.registerProcess(cmd)
+	if err := cmd.Start(); err != nil {
+		log.Printf("Warning: Failed to start reranker: %v", err)
+	} else {
+		log.Printf("Started reranker (PID: %d)", cmd.Process.Pid)
+	}
+}
+
+func (s *BenchmarkTest) startAPIGateway() {
+	s.killProcessOnPort(benchmarkApigatewayPort)
+	s.killProcessOnPort(benchmarkApigatewayHTTP)
+	time.Sleep(500 * time.Millisecond)
+
+	dataDir := filepath.Join(benchmarkDataTempDir, "apigw-data")
+	os.MkdirAll(dataDir, 0755)
+
+	cmd := exec.CommandContext(s.ctx, "./bin/apigateway")
+	cmd.Dir = "/home/pavan/Programming/vectron"
+	cmd.Env = append(os.Environ(),
+		"GRPC_ADDR=127.0.0.1:10010",
+		"HTTP_ADDR=127.0.0.1:10012",
+		"PLACEMENT_DRIVER=127.0.0.1:10001,127.0.0.1:10002,127.0.0.1:10003",
+		"AUTH_SERVICE_ADDR=127.0.0.1:10008",
+		"RERANKER_SERVICE_ADDR=127.0.0.1:10013",
+		"FEEDBACK_DB_PATH="+dataDir+"/feedback.db",
+		"JWT_SECRET=test-jwt-secret-for-testing-only-do-not-use-in-production",
+		"RATE_LIMIT_RPS=10000",
+	)
+
+	if f, err := os.OpenFile(filepath.Join(benchmarkLogTempDir, "vectron-apigw-benchmark.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {
+		cmd.Stdout = f
+		cmd.Stderr = f
+	}
+
+	s.registerProcess(cmd)
+	if err := cmd.Start(); err != nil {
+		log.Printf("Warning: Failed to start API gateway: %v", err)
+	} else {
+		log.Printf("Started API gateway (PID: %d)", cmd.Process.Pid)
+	}
+}
+
+func (s *BenchmarkTest) initializeClients() {
+	// Auth client
+	authConn, err := grpc.Dial(fmt.Sprintf("127.0.0.1:%d", benchmarkAuthGRPCPort),
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Printf("Failed to connect to auth service: %v", err)
+	} else {
+		s.authClient = authpb.NewAuthServiceClient(authConn)
+	}
+
+	// API Gateway client
+	apigwConn, err := grpc.Dial(fmt.Sprintf("127.0.0.1:%d", benchmarkApigatewayPort),
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Printf("Failed to connect to API gateway: %v", err)
+	} else {
+		s.apigwClient = apigatewaypb.NewVectronServiceClient(apigwConn)
+	}
+
+	// Placement driver client (connect to first PD node)
+	pdConn, err := grpc.Dial(fmt.Sprintf("127.0.0.1:%d", benchmarkPdGRPCPort1),
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Printf("Failed to connect to placement driver: %v", err)
+	} else {
+		s.placementClient = placementpb.NewPlacementServiceClient(pdConn)
+	}
+}
+
+// =============================================================================
+// Cleanup and Helper Functions (from ultimate_e2e_test.go)
+// =============================================================================
+
+func (s *BenchmarkTest) cleanup() {
+	log.Println("\n🧹 Cleaning up benchmark resources...")
+
+	// Cancel context to signal all goroutines to stop
+	if s.cancel != nil {
+		s.cancel()
+	}
+
+	// Kill all registered processes
+	s.processesMutex.Lock()
+	for _, cmd := range s.processes {
+		if cmd.Process != nil {
+			log.Printf("Stopping process %d...", cmd.Process.Pid)
+			cmd.Process.Kill()
+			cmd.Process.Wait()
+		}
+	}
+	s.processes = nil
+	s.processesMutex.Unlock()
+
+	// Clean up data directories only (keep logs for debugging)
+	s.dataDirsMutex.Lock()
+	for _, dir := range s.dataDirs {
+		log.Printf("Removing data directory: %s", dir)
+		os.RemoveAll(dir)
+	}
+	s.dataDirs = nil
+	s.dataDirsMutex.Unlock()
+
+	// Clean up base data directory but keep logs
+	log.Printf("Removing data directory: %s", benchmarkDataTempDir)
+	os.RemoveAll(benchmarkDataTempDir)
+
+	log.Println("✅ Cleanup complete (logs preserved in: " + benchmarkLogTempDir + ")")
+}
+
+func (s *BenchmarkTest) registerProcess(cmd *exec.Cmd) {
+	s.processesMutex.Lock()
+	defer s.processesMutex.Unlock()
+	s.processes = append(s.processes, cmd)
+}
+
+func (s *BenchmarkTest) registerDataDir(dir string) {
+	s.dataDirsMutex.Lock()
+	defer s.dataDirsMutex.Unlock()
+	s.dataDirs = append(s.dataDirs, dir)
+}
+
+func (s *BenchmarkTest) isPortOpen(port int) bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 1*time.Second)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+func (s *BenchmarkTest) killProcessOnPort(port int) {
+	// Try to find and kill process using the port
+	cmd := exec.Command("lsof", "-ti", fmt.Sprintf(":%d", port))
+	output, err := cmd.Output()
+	if err == nil && len(output) > 0 {
+		pids := strings.Split(strings.TrimSpace(string(output)), "\n")
+		for _, pid := range pids {
+			if pid != "" {
+				log.Printf("Killing process %s on port %d", pid, port)
+				exec.Command("kill", "-9", pid).Run()
+			}
+		}
+	}
+}
+
+func (s *BenchmarkTest) getAuthenticatedContext() context.Context {
+	if s.jwtToken == "" {
+		return s.ctx
+	}
+	md := metadata.New(map[string]string{
+		"authorization": "Bearer " + s.jwtToken,
+	})
+	return metadata.NewOutgoingContext(s.ctx, md)
+}
+
+// =============================================================================
+// Helper Functions for Shard Readiness
+// =============================================================================
 
 // =============================================================================
 // Scenario 1: Vector Search Scalability
 // =============================================================================
 
-func benchmarkVectorSearchScalability(t *testing.T, ctx context.Context, suite *BenchmarkSuite) {
+func benchmarkVectorSearchScalability(t *testing.T, ctx context.Context, client apigatewaypb.VectronServiceClient, suite *BenchmarkSuite) {
 	log.Println("\n📊 Scenario 1: Vector Search Scalability")
 	log.Println("Testing search performance with increasing dataset sizes")
 
-	datasetSizes := []int{SmallDataset, MediumDataset, LargeDataset}
+	datasetSizes := []int{SmallDataset, MediumDataset, LargeDataset, XLDataset}
 	dimensions := []int{Dim128, Dim384, Dim768}
 
 	for _, dim := range dimensions {
 		for _, size := range datasetSizes {
-			result := runScalabilityBenchmark(t, ctx, size, dim)
+			result := runScalabilityBenchmark(t, ctx, client, size, dim)
 			suite.addResult(result)
 		}
 	}
 }
 
-func runScalabilityBenchmark(t *testing.T, ctx context.Context, datasetSize, dimension int) *BenchmarkResult {
-	client := setupBenchmarkClient(t)
+func runScalabilityBenchmark(t *testing.T, ctx context.Context, client apigatewaypb.VectronServiceClient, datasetSize, dimension int) *BenchmarkResult {
 	collectionName := fmt.Sprintf("scalability-d%d-n%d", dimension, datasetSize)
 
 	result := &BenchmarkResult{
@@ -248,6 +738,11 @@ func runScalabilityBenchmark(t *testing.T, ctx context.Context, datasetSize, dim
 		Distance:  "cosine",
 	})
 	require.NoError(t, err)
+
+	// Wait for shards to be assigned and initialized
+	// This is critical - shards are created asynchronously after collection creation
+	log.Printf("  Waiting for shards to be assigned and initialized...")
+	time.Sleep(10 * time.Second)
 
 	// Insert vectors in batches
 	batchSize := 1000
@@ -277,7 +772,7 @@ func runScalabilityBenchmark(t *testing.T, ctx context.Context, datasetSize, dim
 		insertLatencies = append(insertLatencies, batchDuration)
 		insertCount += int64(resp.Upserted)
 
-		if i%(datasetSize/10) == 0 {
+		if datasetSize >= 10000 && i%(datasetSize/10) == 0 && i > 0 {
 			progress := float64(i) / float64(datasetSize) * 100
 			log.Printf("  Insert progress: %.1f%% (%d/%d vectors)", progress, i, datasetSize)
 		}
@@ -353,7 +848,7 @@ func runScalabilityBenchmark(t *testing.T, ctx context.Context, datasetSize, dim
 // Scenario 2: Dimension Impact Analysis
 // =============================================================================
 
-func benchmarkDimensionImpact(t *testing.T, ctx context.Context, suite *BenchmarkSuite) {
+func benchmarkDimensionImpact(t *testing.T, ctx context.Context, client apigatewaypb.VectronServiceClient, suite *BenchmarkSuite) {
 	log.Println("\n📏 Scenario 2: Dimension Impact Analysis")
 	log.Println("Testing how vector dimension affects performance")
 
@@ -361,13 +856,12 @@ func benchmarkDimensionImpact(t *testing.T, ctx context.Context, suite *Benchmar
 	datasetSize := 10000
 
 	for _, dim := range dimensions {
-		result := runDimensionBenchmark(t, ctx, datasetSize, dim)
+		result := runDimensionBenchmark(t, ctx, client, datasetSize, dim)
 		suite.addResult(result)
 	}
 }
 
-func runDimensionBenchmark(t *testing.T, ctx context.Context, datasetSize, dimension int) *BenchmarkResult {
-	client := setupBenchmarkClient(t)
+func runDimensionBenchmark(t *testing.T, ctx context.Context, client apigatewaypb.VectronServiceClient, datasetSize, dimension int) *BenchmarkResult {
 	collectionName := fmt.Sprintf("dimension-bench-d%d", dimension)
 
 	result := &BenchmarkResult{
@@ -385,6 +879,11 @@ func runDimensionBenchmark(t *testing.T, ctx context.Context, datasetSize, dimen
 		Distance:  "cosine",
 	})
 	require.NoError(t, err)
+
+	// Wait for shards to be ready
+	// Wait for shards to be assigned and initialized
+	// This is critical - shards are created asynchronously after collection creation
+	time.Sleep(10 * time.Second)
 
 	// Measure insert performance
 	batchSize := 100
@@ -451,7 +950,7 @@ func runDimensionBenchmark(t *testing.T, ctx context.Context, datasetSize, dimen
 // Scenario 3: Concurrent Workload Analysis
 // =============================================================================
 
-func benchmarkConcurrentWorkload(t *testing.T, ctx context.Context, suite *BenchmarkSuite) {
+func benchmarkConcurrentWorkload(t *testing.T, ctx context.Context, client apigatewaypb.VectronServiceClient, suite *BenchmarkSuite) {
 	log.Println("\n🔄 Scenario 3: Concurrent Workload Analysis")
 	log.Println("Testing system behavior under concurrent load")
 
@@ -459,7 +958,6 @@ func benchmarkConcurrentWorkload(t *testing.T, ctx context.Context, suite *Bench
 	datasetSize := 50000
 	dimension := 384
 
-	client := setupBenchmarkClient(t)
 	collectionName := "concurrent-bench"
 
 	// Setup dataset
@@ -469,6 +967,11 @@ func benchmarkConcurrentWorkload(t *testing.T, ctx context.Context, suite *Bench
 		Distance:  "cosine",
 	})
 	require.NoError(t, err)
+
+	// Wait for shards to be ready
+	// Wait for shards to be assigned and initialized
+	// This is critical - shards are created asynchronously after collection creation
+	time.Sleep(10 * time.Second)
 
 	// Insert dataset
 	for i := 0; i < datasetSize; i += 1000 {
@@ -577,11 +1080,10 @@ func runConcurrentBenchmark(t *testing.T, ctx context.Context, client apigateway
 // Scenario 4: Reranker Effectiveness
 // =============================================================================
 
-func benchmarkRerankerEffectiveness(t *testing.T, ctx context.Context, suite *BenchmarkSuite) {
+func benchmarkRerankerEffectiveness(t *testing.T, ctx context.Context, client apigatewaypb.VectronServiceClient, suite *BenchmarkSuite) {
 	log.Println("\n🎛️ Scenario 4: Reranker Effectiveness Analysis")
 	log.Println("Measuring quality improvement from reranking")
 
-	client := setupBenchmarkClient(t)
 	collectionName := "reranker-effectiveness"
 	datasetSize := 10000
 	dimension := 384
@@ -601,6 +1103,11 @@ func benchmarkRerankerEffectiveness(t *testing.T, ctx context.Context, suite *Be
 		Distance:  "cosine",
 	})
 	require.NoError(t, err)
+
+	// Wait for shards to be ready
+	// Wait for shards to be assigned and initialized
+	// This is critical - shards are created asynchronously after collection creation
+	time.Sleep(10 * time.Second)
 
 	// Insert vectors with metadata for reranking
 	start := time.Now()
@@ -713,23 +1220,20 @@ func benchmarkRerankerEffectiveness(t *testing.T, ctx context.Context, suite *Be
 // Scenario 5: Distributed Scalability
 // =============================================================================
 
-func benchmarkDistributedScalability(t *testing.T, ctx context.Context, suite *BenchmarkSuite) {
+func benchmarkDistributedScalability(t *testing.T, ctx context.Context, client apigatewaypb.VectronServiceClient, placementClient placementpb.PlacementServiceClient, suite *BenchmarkSuite) {
 	log.Println("\n🌐 Scenario 5: Distributed System Scalability")
 	log.Println("Analyzing shard distribution and load balancing")
-
-	// This test requires querying the placement driver for cluster state
-	client := setupBenchmarkClient(t)
 
 	// Create multiple collections of different sizes
 	collectionSizes := []int{1000, 5000, 10000, 50000}
 
 	for _, size := range collectionSizes {
-		result := runDistributedBenchmark(t, ctx, client, size)
+		result := runDistributedBenchmark(t, ctx, client, placementClient, size)
 		suite.addResult(result)
 	}
 }
 
-func runDistributedBenchmark(t *testing.T, ctx context.Context, client apigatewaypb.VectronServiceClient, datasetSize int) *BenchmarkResult {
+func runDistributedBenchmark(t *testing.T, ctx context.Context, client apigatewaypb.VectronServiceClient, placementClient placementpb.PlacementServiceClient, datasetSize int) *BenchmarkResult {
 	collectionName := fmt.Sprintf("distributed-bench-%d", datasetSize)
 	dimension := 384
 
@@ -748,6 +1252,11 @@ func runDistributedBenchmark(t *testing.T, ctx context.Context, client apigatewa
 		Distance:  "cosine",
 	})
 	require.NoError(t, err)
+
+	// Wait for shards to be ready
+	// Wait for shards to be assigned and initialized
+	// This is critical - shards are created asynchronously after collection creation
+	time.Sleep(10 * time.Second)
 
 	// Insert data
 	start := time.Now()
@@ -823,11 +1332,10 @@ func runDistributedBenchmark(t *testing.T, ctx context.Context, client apigatewa
 // Scenario 6: End-to-End Latency Breakdown
 // =============================================================================
 
-func benchmarkEndToEndLatency(t *testing.T, ctx context.Context, suite *BenchmarkSuite) {
+func benchmarkEndToEndLatency(t *testing.T, ctx context.Context, client apigatewaypb.VectronServiceClient, suite *BenchmarkSuite) {
 	log.Println("\n⏱️ Scenario 6: End-to-End Latency Breakdown")
 	log.Println("Detailed latency analysis for each operation type")
 
-	client := setupBenchmarkClient(t)
 	collectionName := "latency-breakdown"
 	datasetSize := 10000
 	dimension := 384
@@ -860,6 +1368,11 @@ func benchmarkEndToEndLatency(t *testing.T, ctx context.Context, suite *Benchmar
 		Distance:  "cosine",
 	})
 	require.NoError(t, err)
+
+	// Wait for shards to be ready
+	// Wait for shards to be assigned and initialized
+	// This is critical - shards are created asynchronously after collection creation
+	time.Sleep(10 * time.Second)
 
 	// Test 2: Single upsert latency
 	singleUpsertLatencies := make([]time.Duration, 100)
@@ -1138,13 +1651,6 @@ func (s *BenchmarkSuite) addResult(result *BenchmarkResult) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	s.results = append(s.results, result)
-}
-
-func setupBenchmarkClient(t *testing.T) apigatewaypb.VectronServiceClient {
-	conn, err := grpc.Dial("localhost:10010",
-		grpc.WithTransportCredentials(insecure.NewCredentials()))
-	require.NoError(t, err)
-	return apigatewaypb.NewVectronServiceClient(conn)
 }
 
 func calculateLatencyMetrics(latencies []time.Duration) *LatencyMetrics {
