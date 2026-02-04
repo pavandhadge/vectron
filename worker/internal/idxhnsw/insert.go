@@ -46,7 +46,7 @@ func (h *HNSW) selectNeighborsHeuristic(query []float32, candidates []candidate,
 				continue
 			}
 			// This is a simplified diversity check. A more robust implementation might be needed.
-			if h.distance(selectedNode.Vec, candNode.Vec) < cand.dist {
+			if h.distanceWithNode(selectedNode.Vec, candNode.Vec, candNode.Norm) < cand.dist {
 				tooClose = true
 				break
 			}
@@ -82,7 +82,7 @@ func toCandidates(ids []uint32, query []float32, h *HNSW) []candidate {
 		if n := h.getNode(id); n != nil && n.Vec != nil {
 			cands = append(cands, candidate{
 				id:   id,
-				dist: h.distance(query, n.Vec),
+				dist: h.distanceWithNode(query, n.Vec, n.Norm),
 				node: n,
 			})
 		}
@@ -121,8 +121,12 @@ func (h *HNSW) add(id string, vec []float32) error {
 	node := &Node{
 		ID:        internalID,
 		Vec:       append([]float32(nil), vec...), // Create a deep copy.
+		Norm:      0,
 		Layer:     layer,
 		Neighbors: make([][]uint32, layer+1),
+	}
+	if h.config.Distance == "cosine" && h.config.EnableNorms {
+		node.Norm = VectorNorm(node.Vec)
 	}
 	for i := range node.Neighbors {
 		node.Neighbors[i] = make([]uint32, 0, h.config.M)

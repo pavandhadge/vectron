@@ -17,6 +17,7 @@ import (
 type Node struct {
 	ID        uint32
 	Vec       []float32
+	Norm      float32
 	Layer     int
 	Neighbors [][]uint32 // A slice of slices, where Neighbors[i] are the neighbors at layer i.
 }
@@ -31,6 +32,21 @@ func (h *HNSW) distance(a, b []float32) float32 {
 		return CosineDistance(a, b)
 	}
 	return EuclideanDistance(a, b)
+}
+
+func (h *HNSW) distanceWithNode(a []float32, b []float32, normB float32) float32 {
+	if h.config.Distance != "cosine" || !h.config.EnableNorms {
+		return h.distance(a, b)
+	}
+	var dot, normA float32
+	for i := range a {
+		dot += a[i] * b[i]
+		normA += a[i] * a[i]
+	}
+	if normA == 0 || normB == 0 {
+		return 2.0
+	}
+	return 1 - dot/(float32(math.Sqrt(float64(normA)))*normB)
 }
 
 // EuclideanDistance calculates the squared Euclidean distance between two vectors.
@@ -60,6 +76,18 @@ func CosineDistance(a, b []float32) float32 {
 	return 1 - dot/(float32(math.Sqrt(float64(normA)))*float32(math.Sqrt(float64(normB))))
 }
 
+// VectorNorm computes the L2 norm for a vector.
+func VectorNorm(a []float32) float32 {
+	var sum float32
+	for i := range a {
+		sum += a[i] * a[i]
+	}
+	if sum == 0 {
+		return 0
+	}
+	return float32(math.Sqrt(float64(sum)))
+}
+
 // ======================================================================================
 // Node Management
 // ======================================================================================
@@ -74,6 +102,9 @@ func (h *HNSW) getNode(id uint32) *Node {
 
 // persistNode serializes a node and saves it to the underlying key-value store.
 func (h *HNSW) persistNode(n *Node) error {
+	if !h.config.PersistNodes {
+		return nil
+	}
 	key := []byte("hnsw:" + strconv.FormatUint(uint64(n.ID), 10))
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(n); err != nil {

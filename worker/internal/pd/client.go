@@ -16,6 +16,7 @@ import (
 	pd "github.com/pavandhadge/vectron/shared/proto/placementdriver"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 )
 
 const (
@@ -61,7 +62,19 @@ func (c *Client) updateLeader(ctx context.Context) error {
 
 	for _, addr := range c.pdAddrs {
 		// Try to connect to a PD node
-		conn, err := grpc.DialContext(ctx, addr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
+		conn, err := grpc.DialContext(ctx, addr,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithKeepaliveParams(keepalive.ClientParameters{
+				Time:                20 * time.Second,
+				Timeout:             5 * time.Second,
+				PermitWithoutStream: true,
+			}),
+			grpc.WithInitialWindowSize(1<<20),
+			grpc.WithInitialConnWindowSize(1<<20),
+			grpc.WithReadBufferSize(64*1024),
+			grpc.WithWriteBufferSize(64*1024),
+			grpc.WithBlock(),
+		)
 		if err != nil {
 			log.Printf("Failed to connect to PD node at %s: %v", addr, err)
 			continue

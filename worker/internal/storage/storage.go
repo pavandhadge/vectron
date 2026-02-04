@@ -8,7 +8,6 @@ package storage
 import (
 	"container/heap"
 	"errors"
-	"fmt"
 	"sync"
 
 	"github.com/cockroachdb/pebble"
@@ -42,6 +41,7 @@ type Storage interface {
 
 	// Vector-Specific Operations
 	StoreVector(id string, vector []float32, metadata []byte) error
+	StoreVectorBatch(vectors []VectorEntry) error
 	GetVector(id string) (vector []float32, metadata []byte, err error)
 	DeleteVector(id string) error
 	Search(query []float32, k int) ([]string, []float32, error) // Vector search using HNSW
@@ -56,6 +56,13 @@ type Storage interface {
 	// Metrics & Stats
 	Size() (int64, error)
 	EntryCount(prefix []byte) (int64, error)
+}
+
+// VectorEntry represents a vector payload for batch operations.
+type VectorEntry struct {
+	ID       string
+	Vector   []float32
+	Metadata []byte
 }
 
 // PebbleDB is the implementation of the Storage interface using PebbleDB as the backend.
@@ -83,29 +90,7 @@ func (r *PebbleDB) Search(query []float32, k int) ([]string, []float32, error) {
 
 	// The HNSW search returns candidate IDs and their distances.
 	ids, scores := r.hnsw.Search(query, k)
-
-	// The HNSW index might contain deleted items, so we need to verify existence.
-	// Optimized: Use batch existence check instead of N+1 queries
-	keys := make([][]byte, len(ids))
-	for i, id := range ids {
-		keys[i] = vectorKey(id)
-	}
-
-	existenceMap, err := r.ExistsBatch(keys)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to check existence of vectors: %w", err)
-	}
-
-	var existingIDs []string
-	var existingScores []float32
-	for i, id := range ids {
-		if existenceMap[string(keys[i])] {
-			existingIDs = append(existingIDs, id)
-			existingScores = append(existingScores, scores[i])
-		}
-	}
-
-	return existingIDs, existingScores, nil
+	return ids, scores, nil
 }
 
 // result represents a single search result.

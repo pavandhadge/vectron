@@ -8,6 +8,7 @@ option go_package = "github.com/pavandhadge/vectron/shared/proto/worker";
 service WorkerService {
   // Vector operations
   rpc StoreVector(StoreVectorRequest) returns (StoreVectorResponse) {}
+  rpc BatchStoreVector(BatchStoreVectorRequest) returns (BatchStoreVectorResponse) {}
   rpc GetVector(GetVectorRequest) returns (GetVectorResponse) {}
   rpc DeleteVector(DeleteVectorRequest) returns (DeleteVectorResponse) {}
   rpc Search(SearchRequest) returns (SearchResponse) {}
@@ -36,6 +37,15 @@ message StoreVectorRequest {
 
 message StoreVectorResponse {}
 
+message BatchStoreVectorRequest {
+  uint64 shard_id = 1;
+  repeated Vector vectors = 2;
+}
+
+message BatchStoreVectorResponse {
+  int32 stored = 1;
+}
+
 message GetVectorRequest {
   uint64 shard_id = 1;
   string id = 2;
@@ -57,6 +67,7 @@ message SearchRequest {
   repeated float vector = 2;
   int32 k = 3;
   bool brute_force = 4;
+  bool linearizable = 5;
 }
 
 message SearchResponse {

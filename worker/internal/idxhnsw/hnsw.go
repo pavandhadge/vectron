@@ -27,6 +27,8 @@ type HNSWConfig struct {
 	EfSearch       int    // Size of the dynamic candidate list during search.
 	MaxLevel       int    // The maximum level to which a node can be promoted.
 	Distance       string // The distance metric to use ("euclidean" or "cosine").
+	PersistNodes   bool   // Whether to persist each node update to the store.
+	EnableNorms    bool   // Whether to store vector norms for cosine distance.
 }
 
 // HNSW represents the HNSW index.

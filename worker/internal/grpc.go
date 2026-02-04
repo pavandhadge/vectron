@@ -7,9 +7,10 @@
 package internal
 
 import (
+	"container/heap"
 	"context"
-	"encoding/json"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -24,6 +25,29 @@ const (
 	// raftTimeout is the default timeout for Raft proposals.
 	raftTimeout = 5 * time.Second
 )
+
+var debugLogs = os.Getenv("VECTRON_DEBUG_LOGS") == "1"
+
+type searchHeapItem struct {
+	id    string
+	score float32
+}
+
+type searchMinHeap []searchHeapItem
+
+func (h searchMinHeap) Len() int           { return len(h) }
+func (h searchMinHeap) Less(i, j int) bool { return h[i].score < h[j].score }
+func (h searchMinHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *searchMinHeap) Push(x interface{}) {
+	*h = append(*h, x.(searchHeapItem))
+}
+func (h *searchMinHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	item := old[n-1]
+	*h = old[:n-1]
+	return item
+}
 
 // GrpcServer implements the gRPC worker.WorkerServiceServer interface.
 type GrpcServer struct {
@@ -43,7 +67,9 @@ func NewGrpcServer(nh *dragonboat.NodeHost, sm *shard.Manager) *GrpcServer {
 // StoreVector handles the request to store a vector.
 // It marshals the request into a command and proposes it to the target shard's Raft group.
 func (s *GrpcServer) StoreVector(ctx context.Context, req *worker.StoreVectorRequest) (*worker.StoreVectorResponse, error) {
-	log.Printf("Received StoreVector request for ID: %s on shard %d", req.GetVector().GetId(), req.GetShardId())
+	if debugLogs {
+		log.Printf("Received StoreVector request for ID: %s on shard %d", req.GetVector().GetId(), req.GetShardId())
+	}
 	if req.GetVector() == nil {
 		return nil, status.Error(codes.InvalidArgument, "vector is nil")
 	}
@@ -60,7 +86,7 @@ func (s *GrpcServer) StoreVector(ctx context.Context, req *worker.StoreVectorReq
 		Vector:   req.GetVector().GetVector(),
 		Metadata: req.GetVector().GetMetadata(),
 	}
-	cmdBytes, err := json.Marshal(cmd)
+	cmdBytes, err := shard.EncodeCommand(cmd)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to marshal command: %v", err)
 	}
@@ -75,10 +101,51 @@ func (s *GrpcServer) StoreVector(ctx context.Context, req *worker.StoreVectorReq
 	return &worker.StoreVectorResponse{}, nil
 }
 
+// BatchStoreVector handles storing multiple vectors in a single Raft proposal.
+func (s *GrpcServer) BatchStoreVector(ctx context.Context, req *worker.BatchStoreVectorRequest) (*worker.BatchStoreVectorResponse, error) {
+	if req == nil || len(req.GetVectors()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "vectors are empty")
+	}
+
+	if !s.shardManager.IsShardReady(req.GetShardId()) {
+		return nil, status.Errorf(codes.Unavailable, "shard %d not ready", req.GetShardId())
+	}
+
+	cmdVectors := make([]shard.VectorEntry, 0, len(req.GetVectors()))
+	for _, v := range req.GetVectors() {
+		if v == nil || v.GetId() == "" || len(v.GetVector()) == 0 {
+			return nil, status.Error(codes.InvalidArgument, "vector id or vector data missing")
+		}
+		cmdVectors = append(cmdVectors, shard.VectorEntry{
+			ID:       v.GetId(),
+			Vector:   v.GetVector(),
+			Metadata: v.GetMetadata(),
+		})
+	}
+
+	cmd := shard.Command{
+		Type:    shard.StoreVectorBatch,
+		Vectors: cmdVectors,
+	}
+	cmdBytes, err := shard.EncodeCommand(cmd)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to marshal batch command: %v", err)
+	}
+
+	cs := s.nodeHost.GetNoOPSession(req.GetShardId())
+	if _, err := s.nodeHost.SyncPropose(ctx, cs, cmdBytes); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to propose batch StoreVector command: %v", err)
+	}
+
+	return &worker.BatchStoreVectorResponse{Stored: int32(len(cmdVectors))}, nil
+}
+
 // Search performs a similarity search for a given vector.
 // It performs a linearizable read on the target shard's FSM to ensure up-to-date results.
 func (s *GrpcServer) Search(ctx context.Context, req *worker.SearchRequest) (*worker.SearchResponse, error) {
-	log.Printf("Received Search request on shard %d", req.GetShardId())
+	if debugLogs {
+		log.Printf("Received Search request on shard %d", req.GetShardId())
+	}
 	if len(req.GetVector()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "search vector is empty")
 	}
@@ -87,22 +154,29 @@ func (s *GrpcServer) Search(ctx context.Context, req *worker.SearchRequest) (*wo
 		Vector: req.GetVector(),
 		K:      int(req.GetK()),
 	}
+	useLinearizable := req.GetLinearizable()
 
 	// If ShardId is 0, it's a broadcast search. Search all shards on this worker.
 	if req.GetShardId() == 0 {
 		var (
-			wg        sync.WaitGroup
-			mu        sync.Mutex
-			allIDs    []string
-			allScores []float32
+			wg       sync.WaitGroup
+			mu       sync.Mutex
+			topKHeap = &searchMinHeap{}
 		)
+		heap.Init(topKHeap)
 
 		shardIDs := s.shardManager.GetShards()
 		for _, shardID := range shardIDs {
 			wg.Add(1)
 			go func(id uint64) {
 				defer wg.Done()
-				res, err := s.nodeHost.SyncRead(ctx, id, query)
+				var res interface{}
+				var err error
+				if useLinearizable {
+					res, err = s.nodeHost.SyncRead(ctx, id, query)
+				} else {
+					res, err = s.nodeHost.StaleRead(id, query)
+				}
 				if err != nil {
 					// Log error but don't fail the whole search for one failed shard.
 					log.Printf("Failed to search shard %d: %v", id, err)
@@ -115,18 +189,48 @@ func (s *GrpcServer) Search(ctx context.Context, req *worker.SearchRequest) (*wo
 				}
 
 				mu.Lock()
-				allIDs = append(allIDs, searchResult.IDs...)
-				allScores = append(allScores, searchResult.Scores...)
+				limit := int(req.GetK())
+				if limit <= 0 {
+					limit = 10
+				}
+				for i, resultID := range searchResult.IDs {
+					if i >= len(searchResult.Scores) {
+						break
+					}
+					score := searchResult.Scores[i]
+					if topKHeap.Len() < limit {
+						heap.Push(topKHeap, searchHeapItem{id: resultID, score: score})
+						continue
+					}
+					if topKHeap.Len() > 0 && score > (*topKHeap)[0].score {
+						(*topKHeap)[0] = searchHeapItem{id: resultID, score: score}
+						heap.Fix(topKHeap, 0)
+					}
+				}
 				mu.Unlock()
 			}(shardID)
 		}
 		wg.Wait()
 
-		return &worker.SearchResponse{Ids: allIDs, Scores: allScores}, nil
+		resultCount := topKHeap.Len()
+		ids := make([]string, resultCount)
+		scores := make([]float32, resultCount)
+		for i := resultCount - 1; i >= 0; i-- {
+			item := heap.Pop(topKHeap).(searchHeapItem)
+			ids[i] = item.id
+			scores[i] = item.score
+		}
+		return &worker.SearchResponse{Ids: ids, Scores: scores}, nil
 
 	} else {
 		// Original logic for single-shard search
-		res, err := s.nodeHost.SyncRead(ctx, req.GetShardId(), query)
+		var res interface{}
+		var err error
+		if useLinearizable {
+			res, err = s.nodeHost.SyncRead(ctx, req.GetShardId(), query)
+		} else {
+			res, err = s.nodeHost.StaleRead(req.GetShardId(), query)
+		}
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to perform search: %v", err)
 		}
@@ -143,7 +247,9 @@ func (s *GrpcServer) Search(ctx context.Context, req *worker.SearchRequest) (*wo
 // GetVector retrieves a vector by its ID.
 // This is a read operation and uses a linearizable read from the FSM.
 func (s *GrpcServer) GetVector(ctx context.Context, req *worker.GetVectorRequest) (*worker.GetVectorResponse, error) {
-	log.Printf("Received GetVector request for ID: %s on shard %d", req.GetId(), req.GetShardId())
+	if debugLogs {
+		log.Printf("Received GetVector request for ID: %s on shard %d", req.GetId(), req.GetShardId())
+	}
 
 	if !s.shardManager.IsShardReady(req.GetShardId()) {
 		return nil, status.Errorf(codes.Unavailable, "shard %d not ready", req.GetShardId())
@@ -175,13 +281,15 @@ func (s *GrpcServer) GetVector(ctx context.Context, req *worker.GetVectorRequest
 // DeleteVector deletes a vector by its ID.
 // This is a write operation and is proposed to the Raft log.
 func (s *GrpcServer) DeleteVector(ctx context.Context, req *worker.DeleteVectorRequest) (*worker.DeleteVectorResponse, error) {
-	log.Printf("Received DeleteVector request for ID: %s on shard %d", req.GetId(), req.GetShardId())
+	if debugLogs {
+		log.Printf("Received DeleteVector request for ID: %s on shard %d", req.GetId(), req.GetShardId())
+	}
 
 	cmd := shard.Command{
 		Type: shard.DeleteVector,
 		ID:   req.GetId(),
 	}
-	cmdBytes, err := json.Marshal(cmd)
+	cmdBytes, err := shard.EncodeCommand(cmd)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to marshal command: %v", err)
 	}

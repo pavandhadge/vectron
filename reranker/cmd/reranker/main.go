@@ -16,6 +16,7 @@ import (
 	"github.com/pavandhadge/vectron/reranker/internal/strategies/rule"
 	pb "github.com/pavandhadge/vectron/shared/proto/reranker"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 )
 
@@ -58,7 +59,19 @@ func main() {
 		log.Fatalf("Failed to listen: %v", err)
 	}
 
-	server := grpc.NewServer()
+	server := grpc.NewServer(
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    30 * time.Second,
+			Timeout: 10 * time.Second,
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
+		grpc.ReadBufferSize(64*1024),
+		grpc.WriteBufferSize(64*1024),
+		grpc.MaxConcurrentStreams(1024),
+	)
 	pb.RegisterRerankServiceServer(server, grpcServer)
 
 	// Enable reflection for grpcurl/debugging

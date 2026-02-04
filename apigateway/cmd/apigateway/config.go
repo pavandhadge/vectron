@@ -19,6 +19,8 @@ type Config struct {
 	RerankerServiceAddr string // Address of the Reranker service.
 	FeedbackDBPath      string // Path to the feedback SQLite database.
 	RateLimitRPS        int    // Requests per second for the rate limiter.
+	SearchLinearizable  bool   // Whether search reads should be linearizable.
+	RerankTimeoutMs     int    // Timeout for reranking (milliseconds).
 }
 
 // LoadConfig loads the configuration from environment variables with default fallbacks.
@@ -28,10 +30,12 @@ func LoadConfig() Config {
 		HTTPAddr:            getEnv("HTTP_ADDR", ":8080"),
 		PlacementDriver:     getEnv("PLACEMENT_DRIVER", "placement:6300"),
 		JWTSecret:           getEnv("JWT_SECRET", "CHANGE_ME_IN_PRODUCTION"),
-		AuthServiceAddr:     getEnv("AUTH_SERVICE_ADDR", "auth:50051"), // Default Auth service address
+		AuthServiceAddr:     getEnv("AUTH_SERVICE_ADDR", "auth:50051"),          // Default Auth service address
 		RerankerServiceAddr: getEnv("RERANKER_SERVICE_ADDR", "localhost:50051"), // Default Reranker service address
-		FeedbackDBPath:      getEnv("FEEDBACK_DB_PATH", "./data/feedback.db"), // Default feedback database path
+		FeedbackDBPath:      getEnv("FEEDBACK_DB_PATH", "./data/feedback.db"),   // Default feedback database path
 		RateLimitRPS:        getEnvAsInt("RATE_LIMIT_RPS", 100),
+		SearchLinearizable:  getEnvAsBool("SEARCH_LINEARIZABLE", false),
+		RerankTimeoutMs:     getEnvAsInt("RERANK_TIMEOUT_MS", 75),
 	}
 }
 
@@ -48,6 +52,16 @@ func getEnvAsInt(key string, fallback int) int {
 	if v := os.Getenv(key); v != "" {
 		if i, err := strconv.Atoi(v); err == nil {
 			return i
+		}
+	}
+	return fallback
+}
+
+// getEnvAsBool retrieves an environment variable as a boolean, returning a fallback value if not set or invalid.
+func getEnvAsBool(key string, fallback bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
 		}
 	}
 	return fallback

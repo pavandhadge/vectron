@@ -12,6 +12,7 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 
 	etcdclient "github.com/pavandhadge/vectron/auth/service/internal/etcd"
 	authhandler "github.com/pavandhadge/vectron/auth/service/internal/handler"
@@ -112,6 +113,17 @@ func runGrpcServer(store *etcdclient.Client) error {
 			rateLimiter.Unary(),
 			authInterceptor.Unary(),
 		),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    30 * time.Second,
+			Timeout: 10 * time.Second,
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
+		grpc.ReadBufferSize(64*1024),
+		grpc.WriteBufferSize(64*1024),
+		grpc.MaxConcurrentStreams(1024),
 	)
 
 	authServer := authhandler.NewAuthServer(store, jwtSecret)
@@ -126,7 +138,18 @@ func runHttpServer() error {
 	defer cancel()
 
 	mux := runtime.NewServeMux()
-	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+	opts := []grpc.DialOption{
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                20 * time.Second,
+			Timeout:             5 * time.Second,
+			PermitWithoutStream: true,
+		}),
+		grpc.WithInitialWindowSize(1 << 20),
+		grpc.WithInitialConnWindowSize(1 << 20),
+		grpc.WithReadBufferSize(64 * 1024),
+		grpc.WithWriteBufferSize(64 * 1024),
+	}
 
 	if err := authpb.RegisterAuthServiceHandlerFromEndpoint(ctx, mux, "localhost"+grpcPort, opts); err != nil {
 		return err

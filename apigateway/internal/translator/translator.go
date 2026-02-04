@@ -23,12 +23,37 @@ func ToWorkerStoreVectorRequestFromPoint(point *apigatewaypb.Point, shardID uint
 	}
 }
 
-// ToWorkerSearchRequest translates a public SearchRequest to a worker's SearchRequest.
-func ToWorkerSearchRequest(req *apigatewaypb.SearchRequest, shardID uint64) *workerpb.SearchRequest {
-	return &workerpb.SearchRequest{
+// ToWorkerVectorFromPoint translates a public API Point to a worker Vector.
+func ToWorkerVectorFromPoint(point *apigatewaypb.Point) *workerpb.Vector {
+	return &workerpb.Vector{
+		Id:       point.Id,
+		Vector:   point.Vector,
+		Metadata: nil, // Placeholder for payload translation.
+	}
+}
+
+// ToWorkerBatchStoreVectorRequestFromPoints translates points to a batch store request.
+func ToWorkerBatchStoreVectorRequestFromPoints(points []*apigatewaypb.Point, shardID uint64) *workerpb.BatchStoreVectorRequest {
+	vectors := make([]*workerpb.Vector, 0, len(points))
+	for _, point := range points {
+		if point == nil {
+			continue
+		}
+		vectors = append(vectors, ToWorkerVectorFromPoint(point))
+	}
+	return &workerpb.BatchStoreVectorRequest{
 		ShardId: shardID,
-		Vector:  req.Vector,
-		K:       int32(req.TopK),
+		Vectors: vectors,
+	}
+}
+
+// ToWorkerSearchRequest translates a public SearchRequest to a worker's SearchRequest.
+func ToWorkerSearchRequest(req *apigatewaypb.SearchRequest, shardID uint64, linearizable bool) *workerpb.SearchRequest {
+	return &workerpb.SearchRequest{
+		ShardId:      shardID,
+		Vector:       req.Vector,
+		K:            int32(req.TopK),
+		Linearizable: linearizable,
 	}
 }
 

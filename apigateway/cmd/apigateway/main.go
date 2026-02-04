@@ -6,12 +6,14 @@
 package main
 
 import (
+	"container/heap"
 	"context"
-	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"hash/maphash"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -41,6 +43,49 @@ import (
 )
 
 var cfg = LoadConfig()
+var cacheHashSeed = maphash.MakeSeed()
+var searchResultSlicePool = sync.Pool{
+	New: func() interface{} {
+		return make([]*pb.SearchResult, 0, 256)
+	},
+}
+
+const (
+	grpcReadBufferSize  = 64 * 1024
+	grpcWriteBufferSize = 64 * 1024
+	grpcWindowSize      = 1 << 20
+)
+
+func grpcClientOptions() []grpc.DialOption {
+	return []grpc.DialOption{
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                20 * time.Second,
+			Timeout:             5 * time.Second,
+			PermitWithoutStream: true,
+		}),
+		grpc.WithInitialWindowSize(grpcWindowSize),
+		grpc.WithInitialConnWindowSize(grpcWindowSize),
+		grpc.WithReadBufferSize(grpcReadBufferSize),
+		grpc.WithWriteBufferSize(grpcWriteBufferSize),
+	}
+}
+
+func grpcServerOptions() []grpc.ServerOption {
+	return []grpc.ServerOption{
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    30 * time.Second,
+			Timeout: 10 * time.Second,
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
+		grpc.ReadBufferSize(grpcReadBufferSize),
+		grpc.WriteBufferSize(grpcWriteBufferSize),
+		grpc.MaxConcurrentStreams(1024),
+	}
+}
 
 type LeaderInfo struct {
 	client placementpb.PlacementServiceClient
@@ -61,6 +106,116 @@ type SearchCache struct {
 	maxSize int
 }
 
+type WorkerListCacheEntry struct {
+	Addresses []string
+	Timestamp time.Time
+}
+
+type WorkerListCache struct {
+	mu      sync.RWMutex
+	entries map[string]*WorkerListCacheEntry
+	ttl     time.Duration
+}
+
+type WorkerResolveCacheEntry struct {
+	Addr      string
+	ShardID   uint64
+	Timestamp time.Time
+}
+
+type WorkerResolveCache struct {
+	mu      sync.RWMutex
+	entries map[string]*WorkerResolveCacheEntry
+	ttl     time.Duration
+	maxSize int
+}
+
+func NewWorkerResolveCache(ttl time.Duration, maxSize int) *WorkerResolveCache {
+	return &WorkerResolveCache{
+		entries: make(map[string]*WorkerResolveCacheEntry),
+		ttl:     ttl,
+		maxSize: maxSize,
+	}
+}
+
+func (c *WorkerResolveCache) Get(collection, vectorID string) (string, uint64, bool) {
+	key := collection + "|" + vectorID
+	c.mu.RLock()
+	entry, ok := c.entries[key]
+	c.mu.RUnlock()
+	if !ok {
+		return "", 0, false
+	}
+	if time.Since(entry.Timestamp) > c.ttl {
+		return "", 0, false
+	}
+	return entry.Addr, entry.ShardID, true
+}
+
+func (c *WorkerResolveCache) Set(collection, vectorID string, addr string, shardID uint64) {
+	key := collection + "|" + vectorID
+	c.mu.Lock()
+	if c.maxSize > 0 && len(c.entries) >= c.maxSize {
+		for k := range c.entries {
+			delete(c.entries, k)
+			break
+		}
+	}
+	c.entries[key] = &WorkerResolveCacheEntry{
+		Addr:      addr,
+		ShardID:   shardID,
+		Timestamp: time.Now(),
+	}
+	c.mu.Unlock()
+}
+
+func NewWorkerListCache(ttl time.Duration) *WorkerListCache {
+	return &WorkerListCache{
+		entries: make(map[string]*WorkerListCacheEntry),
+		ttl:     ttl,
+	}
+}
+
+func (c *WorkerListCache) Get(collection string) ([]string, bool) {
+	c.mu.RLock()
+	entry, ok := c.entries[collection]
+	c.mu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+	if time.Since(entry.Timestamp) > c.ttl {
+		return nil, false
+	}
+	return entry.Addresses, true
+}
+
+func (c *WorkerListCache) Set(collection string, addresses []string) {
+	c.mu.Lock()
+	c.entries[collection] = &WorkerListCacheEntry{
+		Addresses: addresses,
+		Timestamp: time.Now(),
+	}
+	c.mu.Unlock()
+}
+
+type searchResultHeap []*pb.SearchResult
+
+func (h searchResultHeap) Len() int { return len(h) }
+func (h searchResultHeap) Less(i, j int) bool {
+	return h[i].Score < h[j].Score
+}
+func (h searchResultHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h *searchResultHeap) Push(x interface{}) {
+	*h = append(*h, x.(*pb.SearchResult))
+}
+func (h *searchResultHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	item := old[n-1]
+	*h = old[:n-1]
+	return item
+}
+
 // NewSearchCache creates a new search cache with specified TTL and max size
 func NewSearchCache(ttl time.Duration, maxSize int) *SearchCache {
 	cache := &SearchCache{
@@ -75,14 +230,21 @@ func NewSearchCache(ttl time.Duration, maxSize int) *SearchCache {
 
 // computeCacheKey generates a cache key from search request
 func (c *SearchCache) computeCacheKey(req *pb.SearchRequest) string {
-	// Use collection + topK + first 8 bytes of vector hash as key
-	// This provides a good balance between cache hit rate and uniqueness
-	h := sha256.New()
-	binary.Write(h, binary.LittleEndian, req.Vector)
-	h.Write([]byte(req.Collection))
-	h.Write([]byte(req.Query))
-	binary.Write(h, binary.LittleEndian, req.TopK)
-	return hex.EncodeToString(h.Sum(nil)[:16]) // Use first 16 bytes for shorter keys
+	// Use collection + topK + vector hash as key (fast hash)
+	var h maphash.Hash
+	h.SetSeed(cacheHashSeed)
+	var buf [4]byte
+	for _, v := range req.Vector {
+		binary.LittleEndian.PutUint32(buf[:], math.Float32bits(v))
+		h.Write(buf[:])
+	}
+	h.WriteString(req.Collection)
+	h.WriteString(req.Query)
+	binary.LittleEndian.PutUint32(buf[:], uint32(req.TopK))
+	h.Write(buf[:])
+	var out [8]byte
+	binary.LittleEndian.PutUint64(out[:], h.Sum64())
+	return hex.EncodeToString(out[:])
 }
 
 // Get retrieves cached results if available and not expired
@@ -187,15 +349,8 @@ func (p *WorkerConnPool) GetClient(addr string) (workerpb.WorkerServiceClient, e
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	conn, err := grpc.DialContext(ctx, addr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                10 * time.Second,
-			Timeout:             3 * time.Second,
-			PermitWithoutStream: true,
-		}),
-		grpc.WithBlock(),
-	)
+	opts := append(grpcClientOptions(), grpc.WithBlock())
+	conn, err := grpc.DialContext(ctx, addr, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial worker %s: %w", addr, err)
 	}
@@ -241,6 +396,8 @@ type gatewayServer struct {
 	managementMgr   *management.Manager
 	workerPool      *WorkerConnPool // Connection pool for worker gRPC connections
 	searchCache     *SearchCache    // Cache for search results
+	workerListCache *WorkerListCache
+	resolveCache    *WorkerResolveCache
 }
 
 func (s *gatewayServer) getPlacementClient() (placementpb.PlacementServiceClient, error) {
@@ -251,6 +408,50 @@ func (s *gatewayServer) getPlacementClient() (placementpb.PlacementServiceClient
 	}
 	s.leaderMu.RUnlock()
 	return s.updateLeader()
+}
+
+func (s *gatewayServer) resolveWorker(ctx context.Context, collection string, vectorID string) (string, uint64, error) {
+	if vectorID != "" {
+		if addr, shardID, ok := s.resolveCache.Get(collection, vectorID); ok {
+			return addr, shardID, nil
+		}
+	}
+
+	placementClient, err := s.getPlacementClient()
+	if err != nil {
+		return "", 0, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
+	}
+
+	resp, err := placementClient.GetWorker(ctx, &placementpb.GetWorkerRequest{
+		Collection: collection,
+		VectorId:   vectorID,
+	})
+	if err != nil {
+		if st, ok := status.FromError(err); ok && (st.Code() == codes.Unavailable || st.Code() == codes.Internal) {
+			placementClient, err = s.updateLeader()
+			if err != nil {
+				return "", 0, status.Errorf(codes.Internal, "could not update placement driver leader: %v", err)
+			}
+			resp, err = placementClient.GetWorker(ctx, &placementpb.GetWorkerRequest{
+				Collection: collection,
+				VectorId:   vectorID,
+			})
+			if err != nil {
+				return "", 0, status.Errorf(codes.Internal, "could not get worker for collection %q after leader update: %v", collection, err)
+			}
+		} else {
+			return "", 0, status.Errorf(codes.Internal, "could not get worker for collection %q: %v", collection, err)
+		}
+	}
+	if resp.GetGrpcAddress() == "" {
+		return "", 0, status.Errorf(codes.NotFound, "collection %q not found", collection)
+	}
+	addr := resp.GetGrpcAddress()
+	shardID := uint64(resp.GetShardId())
+	if vectorID != "" {
+		s.resolveCache.Set(collection, vectorID, addr, shardID)
+	}
+	return addr, shardID, nil
 }
 
 func (s *gatewayServer) UpdateUserProfile(ctx context.Context, req *pb.UpdateUserProfileRequest) (*pb.UpdateUserProfileResponse, error) {
@@ -338,7 +539,10 @@ func (s *gatewayServer) updateLeader() (placementpb.PlacementServiceClient, erro
 	}
 
 	for _, addr := range s.pdAddrs {
-		conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock(), grpc.WithTimeout(2*time.Second))
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		opts := append(grpcClientOptions(), grpc.WithBlock())
+		conn, err := grpc.DialContext(ctx, addr, opts...)
+		cancel()
 		if err != nil {
 			log.Printf("Failed to connect to PD node %s: %v", addr, err)
 			continue
@@ -487,54 +691,95 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 		}
 	}
 
-	// Process points in parallel using worker pool
-	// This provides 3-5x throughput improvement for batch upserts
+	// Resolve worker/shard assignments in parallel, then batch per shard.
 	var (
-		upsertedCount int32
-		errChan       = make(chan error, len(req.Points))
-		semaphore     = make(chan struct{}, 10) // Limit concurrent goroutines to 10
-		wg            sync.WaitGroup
+		assignMu    sync.Mutex
+		assignErr   error
+		assignWg    sync.WaitGroup
+		semaphore   = make(chan struct{}, 16)
+		assignments = make(map[string]map[uint64][]*pb.Point)
 	)
 
 	for _, point := range req.Points {
-		wg.Add(1)
+		assignWg.Add(1)
 		go func(p *pb.Point) {
-			defer wg.Done()
+			defer assignWg.Done()
 
-			semaphore <- struct{}{}        // Acquire
-			defer func() { <-semaphore }() // Release
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
 
-			_, err := s.forwardToWorker(ctx, req.Collection, p.Id, func(client workerpb.WorkerServiceClient, shardID uint64) (interface{}, error) {
-				workerReq := translator.ToWorkerStoreVectorRequestFromPoint(p, shardID)
-				_, err := client.StoreVector(ctx, workerReq)
-				return nil, err
-			})
-
+			addr, shardID, err := s.resolveWorker(ctx, req.Collection, p.Id)
 			if err != nil {
-				errChan <- status.Errorf(codes.Internal, "failed to upsert point %s: %v", p.Id, err)
+				assignMu.Lock()
+				if assignErr == nil {
+					assignErr = err
+				}
+				assignMu.Unlock()
 				return
 			}
-			// Use atomic increment for thread safety
-			// (In practice with the errChan buffer, this is safe, but good practice)
+
+			assignMu.Lock()
+			shards, ok := assignments[addr]
+			if !ok {
+				shards = make(map[uint64][]*pb.Point)
+				assignments[addr] = shards
+			}
+			shards[shardID] = append(shards[shardID], p)
+			assignMu.Unlock()
 		}(point)
 	}
 
-	// Wait for all goroutines to complete
-	wg.Wait()
-	close(errChan)
-
-	// Check for any errors
-	var errs []error
-	for err := range errChan {
-		errs = append(errs, err)
+	assignWg.Wait()
+	if assignErr != nil {
+		return nil, assignErr
 	}
 
-	if len(errs) > 0 {
-		return nil, errs[0] // Return first error
+	var (
+		sendErr error
+		sendWg  sync.WaitGroup
+		sendMu  sync.Mutex
+		sendSem = make(chan struct{}, 16)
+	)
+
+	for addr, shards := range assignments {
+		for shardID, points := range shards {
+			sendWg.Add(1)
+			go func(workerAddr string, sid uint64, pts []*pb.Point) {
+				defer sendWg.Done()
+
+				sendSem <- struct{}{}
+				defer func() { <-sendSem }()
+
+				client, err := s.workerPool.GetClient(workerAddr)
+				if err != nil {
+					sendMu.Lock()
+					if sendErr == nil {
+						sendErr = status.Errorf(codes.Internal, "worker %s unreachable: %v", workerAddr, err)
+					}
+					sendMu.Unlock()
+					return
+				}
+
+				workerReq := translator.ToWorkerBatchStoreVectorRequestFromPoints(pts, sid)
+				_, err = client.BatchStoreVector(ctx, workerReq)
+				if err != nil {
+					sendMu.Lock()
+					if sendErr == nil {
+						sendErr = status.Errorf(codes.Internal, "failed to upsert batch for shard %d: %v", sid, err)
+					}
+					sendMu.Unlock()
+					return
+				}
+			}(addr, shardID, points)
+		}
 	}
 
-	upsertedCount = int32(len(req.Points))
-	return &pb.UpsertResponse{Upserted: upsertedCount}, nil
+	sendWg.Wait()
+	if sendErr != nil {
+		return nil, sendErr
+	}
+
+	return &pb.UpsertResponse{Upserted: int32(len(req.Points))}, nil
 }
 
 func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.SearchResponse, error) {
@@ -554,9 +799,20 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 		return cached, nil
 	}
 
-	workerTopK := req.TopK * 2
-	if workerTopK > 100 {
-		workerTopK = 100
+	workerTopK := int(req.TopK * 2)
+	if workerTopK < int(req.TopK) {
+		workerTopK = int(req.TopK)
+	}
+	capLimit := 100
+	if int(req.TopK) > capLimit {
+		capLimit = int(req.TopK)
+	}
+	if workerTopK > capLimit {
+		workerTopK = capLimit
+	}
+	candidateLimit := int(req.TopK * 2)
+	if candidateLimit > workerTopK {
+		candidateLimit = workerTopK
 	}
 
 	placementClient, err := s.getPlacementClient()
@@ -564,28 +820,33 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 		return nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
 	}
 
-	workerListResp, err := placementClient.ListWorkersForCollection(ctx, &placementpb.ListWorkersForCollectionRequest{
-		Collection: req.Collection,
-	})
-	if err != nil {
-		// Attempt to update leader and retry if the placement driver client is stale
-		if st, ok := status.FromError(err); ok && (st.Code() == codes.Unavailable || st.Code() == codes.Internal) {
-			placementClient, err = s.updateLeader()
-			if err != nil {
-				return nil, status.Errorf(codes.Internal, "could not update placement driver leader: %v", err)
+	var workerAddresses []string
+	if cachedAddresses, ok := s.workerListCache.Get(req.Collection); ok {
+		workerAddresses = cachedAddresses
+	} else {
+		workerListResp, err := placementClient.ListWorkersForCollection(ctx, &placementpb.ListWorkersForCollectionRequest{
+			Collection: req.Collection,
+		})
+		if err != nil {
+			// Attempt to update leader and retry if the placement driver client is stale
+			if st, ok := status.FromError(err); ok && (st.Code() == codes.Unavailable || st.Code() == codes.Internal) {
+				placementClient, err = s.updateLeader()
+				if err != nil {
+					return nil, status.Errorf(codes.Internal, "could not update placement driver leader: %v", err)
+				}
+				workerListResp, err = placementClient.ListWorkersForCollection(ctx, &placementpb.ListWorkersForCollectionRequest{
+					Collection: req.Collection,
+				})
+				if err != nil {
+					return nil, status.Errorf(codes.Internal, "could not list workers for collection %q after leader update: %v", req.Collection, err)
+				}
+			} else {
+				return nil, status.Errorf(codes.Internal, "could not list workers for collection %q: %v", req.Collection, err)
 			}
-			workerListResp, err = placementClient.ListWorkersForCollection(ctx, &placementpb.ListWorkersForCollectionRequest{
-				Collection: req.Collection,
-			})
-			if err != nil {
-				return nil, status.Errorf(codes.Internal, "could not list workers for collection %q after leader update: %v", req.Collection, err)
-			}
-		} else {
-			return nil, status.Errorf(codes.Internal, "could not list workers for collection %q: %v", req.Collection, err)
 		}
+		workerAddresses = workerListResp.GetGrpcAddresses()
+		s.workerListCache.Set(req.Collection, workerAddresses)
 	}
-
-	workerAddresses := workerListResp.GetGrpcAddresses()
 	if len(workerAddresses) == 0 {
 		return &pb.SearchResponse{}, nil // No workers, no results
 	}
@@ -593,26 +854,25 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 	var (
 		wg         sync.WaitGroup
 		mu         sync.Mutex
-		allResults []*pb.SearchResult
+		topResults = &searchResultHeap{}
 		errs       []error
 	)
+	heap.Init(topResults)
 
 	for _, addr := range workerAddresses {
 		wg.Add(1)
 		go func(workerAddr string) {
 			defer wg.Done()
 
-			conn, err := grpc.Dial(workerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+			workerClient, err := s.workerPool.GetClient(workerAddr)
 			if err != nil {
 				mu.Lock()
 				errs = append(errs, fmt.Errorf("worker %s unreachable: %v", workerAddr, err))
 				mu.Unlock()
 				return
 			}
-			defer conn.Close()
 
-			workerClient := workerpb.NewWorkerServiceClient(conn)
-			workerReq := translator.ToWorkerSearchRequest(req, 0) // ShardID 0 for broadcast search
+			workerReq := translator.ToWorkerSearchRequest(req, 0, cfg.SearchLinearizable) // ShardID 0 for broadcast search
 			workerReq.K = int32(workerTopK)
 
 			res, err := workerClient.Search(ctx, workerReq)
@@ -623,9 +883,21 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 				return
 			}
 
-			mu.Lock()
 			workerSearchResponse := translator.FromWorkerSearchResponse(res)
-			allResults = append(allResults, workerSearchResponse.Results...)
+			mu.Lock()
+			for _, result := range workerSearchResponse.Results {
+				if candidateLimit <= 0 {
+					continue
+				}
+				if topResults.Len() < candidateLimit {
+					heap.Push(topResults, result)
+					continue
+				}
+				if topResults.Len() > 0 && result.Score > (*topResults)[0].Score {
+					(*topResults)[0] = result
+					heap.Fix(topResults, 0)
+				}
+			}
 			mu.Unlock()
 		}(addr)
 	}
@@ -637,22 +909,35 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 		return nil, status.Errorf(codes.Internal, "failed to search all workers: %v", errs[0])
 	}
 
-	searchResponse := &pb.SearchResponse{
-		Results: allResults,
+	results := searchResultSlicePool.Get().([]*pb.SearchResult)
+	results = results[:topResults.Len()]
+	for i := len(results) - 1; i >= 0; i-- {
+		results[i] = heap.Pop(topResults).(*pb.SearchResult)
 	}
+	searchResponse := &pb.SearchResponse{Results: results}
 
 	if len(searchResponse.Results) == 0 {
+		searchResultSlicePool.Put(results[:0])
 		return searchResponse, nil
 	}
 
+	// Limit candidates before reranking to reduce latency and CPU usage.
+	// Keep 2x TopK (capped by workerTopK) to preserve quality while shrinking work.
+	if candidateLimit > 0 && len(searchResponse.Results) > candidateLimit {
+		sort.Slice(searchResponse.Results, func(i, j int) bool {
+			return searchResponse.Results[i].Score > searchResponse.Results[j].Score
+		})
+		searchResponse.Results = searchResponse.Results[:candidateLimit]
+	}
+
 	candidates := make([]*reranker.Candidate, len(searchResponse.Results))
+	metadataByID := make(map[string]map[string]string, len(searchResponse.Results))
 	for i, result := range searchResponse.Results {
-		metadata := make(map[string]string)
-		if result.Payload != nil {
-			for k, v := range result.Payload {
-				metadata[k] = v
-			}
+		metadata := result.Payload
+		if metadata == nil {
+			metadata = map[string]string{}
 		}
+		metadataByID[result.Id] = metadata
 
 		candidates[i] = &reranker.Candidate{
 			Id:       result.Id,
@@ -661,13 +946,33 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 		}
 	}
 
+	// Standard practice: skip reranking when no query text is provided.
+	// This avoids unnecessary RPCs and latency on pure vector search.
+	if req.Query == "" {
+		sort.Slice(searchResponse.Results, func(i, j int) bool {
+			return searchResponse.Results[i].Score > searchResponse.Results[j].Score
+		})
+		if len(searchResponse.Results) > int(req.TopK) {
+			searchResponse.Results = searchResponse.Results[:req.TopK]
+		}
+		s.searchCache.Set(req, searchResponse)
+		searchResultSlicePool.Put(results[:0])
+		return searchResponse, nil
+	}
+
 	rerankReq := &reranker.RerankRequest{
 		Query:      req.Query, // Pass the query from the API Gateway's SearchRequest
 		Candidates: candidates,
 		TopN:       int32(req.TopK),
 	}
 
-	rerankResp, err := s.rerankerClient.Rerank(ctx, rerankReq)
+	rerankCtx := ctx
+	var cancel context.CancelFunc
+	if cfg.RerankTimeoutMs > 0 {
+		rerankCtx, cancel = context.WithTimeout(ctx, time.Duration(cfg.RerankTimeoutMs)*time.Millisecond)
+		defer cancel()
+	}
+	rerankResp, err := s.rerankerClient.Rerank(rerankCtx, rerankReq)
 	if err != nil {
 		log.Println("Reranking failed, returning original results:", err)
 		// Sort original results by score in descending order before returning
@@ -680,18 +985,13 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 		}
 		// Cache the results before returning
 		s.searchCache.Set(req, searchResponse)
+		searchResultSlicePool.Put(results[:0])
 		return searchResponse, nil
 	}
 
 	rerankedResults := make([]*pb.SearchResult, len(rerankResp.Results))
 	for i, result := range rerankResp.Results {
-		payload := make(map[string]string)
-		for _, candidate := range candidates {
-			if candidate.Id == result.Id {
-				payload = candidate.Metadata
-				break
-			}
-		}
+		payload := metadataByID[result.Id]
 
 		rerankedResults[i] = &pb.SearchResult{
 			Id:      result.Id,
@@ -705,6 +1005,7 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 	}
 	// Cache the results before returning
 	s.searchCache.Set(req, finalResponse)
+	searchResultSlicePool.Put(results[:0])
 	return finalResponse, nil
 }
 
@@ -859,14 +1160,14 @@ func managementHandlers(mgr *management.Manager) http.Handler {
 // Start initializes and runs the API Gateway's gRPC and HTTP servers.
 func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.ClientConn) {
 	// Establish gRPC connection to Auth service
-	authConn, err := grpc.Dial(config.AuthServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	authConn, err := grpc.Dial(config.AuthServiceAddr, grpcClientOptions()...)
 	if err != nil {
 		log.Fatalf("Failed to connect to Auth service: %v", err)
 	}
 	authClient := authpb.NewAuthServiceClient(authConn)
 
 	// Establish gRPC connection to Reranker service
-	rerankerConn, err := grpc.Dial(config.RerankerServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	rerankerConn, err := grpc.Dial(config.RerankerServiceAddr, grpcClientOptions()...)
 	if err != nil {
 		log.Fatalf("Failed to connect to Reranker service: %v", err)
 	}
@@ -886,6 +1187,8 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 		feedbackService: feedbackService,
 		workerPool:      NewWorkerConnPool(),                 // Initialize worker connection pool for reuse
 		searchCache:     NewSearchCache(5*time.Second, 1000), // Cache search results for 5s, max 1000 entries
+		workerListCache: NewWorkerListCache(2 * time.Second),
+		resolveCache:    NewWorkerResolveCache(5*time.Second, 10000),
 	}
 
 	// Initialize the leader connection with retry logic
@@ -915,18 +1218,20 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 	server.managementMgr = managementMgr
 
 	// Create the gRPC server with a chain of unary interceptors for middleware.
-	grpcServer := grpc.NewServer(
+	grpcOpts := append(
+		grpcServerOptions(),
 		grpc.ChainUnaryInterceptor(
 			middleware.AuthInterceptor(authClient, config.JWTSecret),
 			middleware.LoggingInterceptor,
 			middleware.RateLimitInterceptor(config.RateLimitRPS),
 		),
 	)
+	grpcServer := grpc.NewServer(grpcOpts...)
 	pb.RegisterVectronServiceServer(grpcServer, server)
 
 	// Set up the HTTP/JSON gateway to proxy requests to the gRPC server.
 	mux := runtime.NewServeMux()
-	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+	opts := grpcClientOptions()
 	if err := pb.RegisterVectronServiceHandlerFromEndpoint(context.Background(), mux, config.GRPCAddr, opts); err != nil {
 		log.Fatalf("Failed to register VectronServiceHandlerFromEndpoint: %v", err)
 	}

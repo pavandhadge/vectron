@@ -7,6 +7,7 @@ package idxhnsw
 import (
 	"container/heap"
 	"sort"
+	"sync"
 )
 
 // candidate represents a node being considered during a search.
@@ -55,6 +56,24 @@ func (pq *maxPriorityQueue) Pop() interface{} {
 	return item
 }
 
+var visitedPool = sync.Pool{
+	New: func() interface{} {
+		return make(map[uint32]struct{}, 1024)
+	},
+}
+
+var candidateSlicePool = sync.Pool{
+	New: func() interface{} {
+		return make([]candidate, 0, 256)
+	},
+}
+
+var resultSlicePool = sync.Pool{
+	New: func() interface{} {
+		return make([]candidate, 0, 256)
+	},
+}
+
 // search is the public entry point for finding the k-nearest neighbors to a query vector.
 func (h *HNSW) search(vec []float32, k int) ([]string, []float32) {
 	h.mu.RLock()
@@ -95,7 +114,7 @@ func (h *HNSW) search(vec []float32, k int) ([]string, []float32) {
 // within a single layer. It's used to navigate down the layers of the graph.
 func (h *HNSW) searchLayerSingle(vec []float32, start *Node, layer int) *Node {
 	bestNode := start
-	bestDist := h.distance(vec, start.Vec)
+	bestDist := h.distanceWithNode(vec, start.Vec, start.Norm)
 
 	for {
 		foundCloser := false
@@ -104,7 +123,7 @@ func (h *HNSW) searchLayerSingle(vec []float32, start *Node, layer int) *Node {
 			if n == nil {
 				continue
 			}
-			d := h.distance(vec, n.Vec)
+			d := h.distanceWithNode(vec, n.Vec, n.Norm)
 			if d < bestDist {
 				bestDist = d
 				bestNode = n
@@ -121,57 +140,67 @@ func (h *HNSW) searchLayerSingle(vec []float32, start *Node, layer int) *Node {
 // searchLayer performs an expanded search within a single layer using a priority queue.
 // It explores neighbors of neighbors up to `ef` (efConstruction or efSearch) candidates.
 func (h *HNSW) searchLayer(vec []float32, start *Node, ef, layer int) []candidate {
-	visited := make(map[uint32]bool)
+	visited := visitedPool.Get().(map[uint32]struct{})
+	for key := range visited {
+		delete(visited, key)
+	}
+	defer visitedPool.Put(visited)
 
 	// Candidate queue (min-heap) to explore promising nodes.
-	candidates := &priorityQueue{}
-	heap.Init(candidates)
-	heap.Push(candidates, candidate{id: start.ID, dist: h.distance(vec, start.Vec), node: start})
+	candidateSlice := candidateSlicePool.Get().([]candidate)
+	candidateSlice = candidateSlice[:0]
+	candidates := priorityQueue(candidateSlice)
+	heap.Init(&candidates)
+	heap.Push(&candidates, candidate{id: start.ID, dist: h.distanceWithNode(vec, start.Vec, start.Norm), node: start})
 
 	// Results queue (max-heap) to keep track of the best `ef` candidates found so far.
-	results := &maxPriorityQueue{}
-	heap.Init(results)
-	heap.Push(results, candidate{id: start.ID, dist: h.distance(vec, start.Vec), node: start})
+	resultSlice := resultSlicePool.Get().([]candidate)
+	resultSlice = resultSlice[:0]
+	results := maxPriorityQueue(resultSlice)
+	heap.Init(&results)
+	heap.Push(&results, candidate{id: start.ID, dist: h.distanceWithNode(vec, start.Vec, start.Norm), node: start})
 
-	visited[start.ID] = true
+	visited[start.ID] = struct{}{}
 
 	for candidates.Len() > 0 {
 		// Get the closest candidate from the min-heap to explore next.
-		c := heap.Pop(candidates).(candidate)
+		c := heap.Pop(&candidates).(candidate)
 
 		// If this candidate is further than the furthest in our results, we can stop exploring this path.
-		if results.Len() >= ef && c.dist > (*results)[0].dist {
+		if results.Len() >= ef && c.dist > results[0].dist {
 			break
 		}
 
 		// Explore the neighbors of the current candidate.
 		for _, nid := range c.node.Neighbors[layer] {
-			if visited[nid] {
+			if _, ok := visited[nid]; ok {
 				continue
 			}
-			visited[nid] = true
+			visited[nid] = struct{}{}
 
 			n := h.getNode(nid)
 			if n == nil {
 				continue
 			}
-			d := h.distance(vec, n.Vec)
+			d := h.distanceWithNode(vec, n.Vec, n.Norm)
 
 			// If we have room in the results max-heap, or if this node is closer than the furthest one in it...
-			if results.Len() < ef || d < (*results)[0].dist {
-				heap.Push(candidates, candidate{id: nid, dist: d, node: n})
-				heap.Push(results, candidate{id: nid, dist: d, node: n})
+			if results.Len() < ef || d < results[0].dist {
+				heap.Push(&candidates, candidate{id: nid, dist: d, node: n})
+				heap.Push(&results, candidate{id: nid, dist: d, node: n})
 				// If the results heap is too large, remove the furthest element.
 				if results.Len() > ef {
-					heap.Pop(results)
+					heap.Pop(&results)
 				}
 			}
 		}
 	}
 
 	// The result is a max-heap, so we need to convert it to a simple slice.
-	finalResults := make([]candidate, len(*results))
-	copy(finalResults, *results)
+	finalResults := make([]candidate, len(results))
+	copy(finalResults, results)
+	candidateSlicePool.Put([]candidate(candidates)[:0])
+	resultSlicePool.Put([]candidate(results)[:0])
 	return finalResults
 }
 

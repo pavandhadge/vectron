@@ -2,10 +2,14 @@ package shard
 
 import (
 	"archive/zip"
+	"bytes"
+	"encoding/binary"
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 	"os"
 	"path/filepath"
 
@@ -21,11 +25,223 @@ const (
 	StoreVector CommandType = iota
 	// DeleteVector deletes a vector.
 	DeleteVector
+	// StoreVectorBatch stores multiple vectors.
+	StoreVectorBatch
 )
 
 // Command is a command to be applied to the state machine.
 type Command struct {
 	Type     CommandType
+	ID       string
+	Vector   []float32
+	Metadata []byte
+	Vectors  []VectorEntry
+}
+
+const (
+	commandEncodingGob    byte = 1
+	commandEncodingBinary byte = 2
+)
+
+// EncodeCommand serializes a command to bytes using a versioned binary format.
+func EncodeCommand(cmd Command) ([]byte, error) {
+	var buf bytes.Buffer
+	buf.WriteByte(commandEncodingBinary)
+	if err := writeUint32(&buf, uint32(cmd.Type)); err != nil {
+		return nil, err
+	}
+	if err := writeString(&buf, cmd.ID); err != nil {
+		return nil, err
+	}
+	if err := writeFloat32Slice(&buf, cmd.Vector); err != nil {
+		return nil, err
+	}
+	if err := writeBytes(&buf, cmd.Metadata); err != nil {
+		return nil, err
+	}
+	if err := writeUint32(&buf, uint32(len(cmd.Vectors))); err != nil {
+		return nil, err
+	}
+	for _, v := range cmd.Vectors {
+		if err := writeString(&buf, v.ID); err != nil {
+			return nil, err
+		}
+		if err := writeFloat32Slice(&buf, v.Vector); err != nil {
+			return nil, err
+		}
+		if err := writeBytes(&buf, v.Metadata); err != nil {
+			return nil, err
+		}
+	}
+	return buf.Bytes(), nil
+}
+
+// DecodeCommand deserializes a command from bytes.
+// It supports legacy JSON-encoded commands for backward compatibility.
+func DecodeCommand(data []byte) (Command, error) {
+	var cmd Command
+	if len(data) == 0 {
+		return cmd, fmt.Errorf("empty command payload")
+	}
+	if data[0] == '{' {
+		if err := json.Unmarshal(data, &cmd); err != nil {
+			return cmd, err
+		}
+		return cmd, nil
+	}
+	switch data[0] {
+	case commandEncodingGob:
+		if err := gob.NewDecoder(bytes.NewReader(data[1:])).Decode(&cmd); err != nil {
+			return cmd, err
+		}
+		return cmd, nil
+	case commandEncodingBinary:
+		dec := bytes.NewReader(data[1:])
+		typ, err := readUint32(dec)
+		if err != nil {
+			return cmd, err
+		}
+		cmd.Type = CommandType(typ)
+		cmd.ID, err = readString(dec)
+		if err != nil {
+			return cmd, err
+		}
+		cmd.Vector, err = readFloat32Slice(dec)
+		if err != nil {
+			return cmd, err
+		}
+		cmd.Metadata, err = readBytes(dec)
+		if err != nil {
+			return cmd, err
+		}
+		vecCount, err := readUint32(dec)
+		if err != nil {
+			return cmd, err
+		}
+		if vecCount > 0 {
+			cmd.Vectors = make([]VectorEntry, 0, vecCount)
+			for i := uint32(0); i < vecCount; i++ {
+				id, err := readString(dec)
+				if err != nil {
+					return cmd, err
+				}
+				vec, err := readFloat32Slice(dec)
+				if err != nil {
+					return cmd, err
+				}
+				meta, err := readBytes(dec)
+				if err != nil {
+					return cmd, err
+				}
+				cmd.Vectors = append(cmd.Vectors, VectorEntry{
+					ID:       id,
+					Vector:   vec,
+					Metadata: meta,
+				})
+			}
+		}
+		return cmd, nil
+	default:
+		return cmd, fmt.Errorf("unknown command encoding version: %d", data[0])
+	}
+}
+
+func writeUint32(w io.Writer, v uint32) error {
+	var buf [4]byte
+	binary.LittleEndian.PutUint32(buf[:], v)
+	_, err := w.Write(buf[:])
+	return err
+}
+
+func readUint32(r io.Reader) (uint32, error) {
+	var buf [4]byte
+	if _, err := io.ReadFull(r, buf[:]); err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint32(buf[:]), nil
+}
+
+func writeString(w io.Writer, s string) error {
+	if err := writeUint32(w, uint32(len(s))); err != nil {
+		return err
+	}
+	_, err := w.Write([]byte(s))
+	return err
+}
+
+func readString(r io.Reader) (string, error) {
+	n, err := readUint32(r)
+	if err != nil {
+		return "", err
+	}
+	if n == 0 {
+		return "", nil
+	}
+	buf := make([]byte, n)
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return "", err
+	}
+	return string(buf), nil
+}
+
+func writeBytes(w io.Writer, b []byte) error {
+	if err := writeUint32(w, uint32(len(b))); err != nil {
+		return err
+	}
+	_, err := w.Write(b)
+	return err
+}
+
+func readBytes(r io.Reader) ([]byte, error) {
+	n, err := readUint32(r)
+	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		return nil, nil
+	}
+	buf := make([]byte, n)
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
+
+func writeFloat32Slice(w io.Writer, vals []float32) error {
+	if err := writeUint32(w, uint32(len(vals))); err != nil {
+		return err
+	}
+	var buf [4]byte
+	for _, v := range vals {
+		binary.LittleEndian.PutUint32(buf[:], math.Float32bits(v))
+		if _, err := w.Write(buf[:]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func readFloat32Slice(r io.Reader) ([]float32, error) {
+	n, err := readUint32(r)
+	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		return nil, nil
+	}
+	out := make([]float32, n)
+	var buf [4]byte
+	for i := uint32(0); i < n; i++ {
+		if _, err := io.ReadFull(r, buf[:]); err != nil {
+			return nil, err
+		}
+		out[i] = math.Float32frombits(binary.LittleEndian.Uint32(buf[:]))
+	}
+	return out, nil
+}
+
+// VectorEntry represents a single vector payload for batch commands.
+type VectorEntry struct {
 	ID       string
 	Vector   []float32
 	Metadata []byte
@@ -90,8 +306,8 @@ func (s *StateMachine) Open(stopc <-chan struct{}) (uint64, error) {
 // Update applies commands from the Raft log to the state machine.
 func (s *StateMachine) Update(entries []sm.Entry) ([]sm.Entry, error) {
 	for i, entry := range entries {
-		var cmd Command
-		if err := json.Unmarshal(entry.Cmd, &cmd); err != nil {
+		cmd, err := DecodeCommand(entry.Cmd)
+		if err != nil {
 			return nil, fmt.Errorf("failed to unmarshal command: %w", err)
 		}
 
@@ -99,6 +315,18 @@ func (s *StateMachine) Update(entries []sm.Entry) ([]sm.Entry, error) {
 		case StoreVector:
 			if err := s.StoreVector(cmd.ID, cmd.Vector, cmd.Metadata); err != nil {
 				return nil, fmt.Errorf("failed to store vector: %w", err)
+			}
+		case StoreVectorBatch:
+			batch := make([]storage.VectorEntry, 0, len(cmd.Vectors))
+			for _, v := range cmd.Vectors {
+				batch = append(batch, storage.VectorEntry{
+					ID:       v.ID,
+					Vector:   v.Vector,
+					Metadata: v.Metadata,
+				})
+			}
+			if err := s.StoreVectorBatch(batch); err != nil {
+				return nil, fmt.Errorf("failed to store vector batch: %w", err)
 			}
 		case DeleteVector:
 			if err := s.DeleteVector(cmd.ID); err != nil {

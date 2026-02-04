@@ -21,6 +21,8 @@ type HNSWConfig struct {
 	EfSearch       int    // The size of the dynamic candidate list during search.
 	DistanceMetric string // The distance metric to use (e.g., "euclidean", "cosine").
 	WALEnabled     bool   // If true, enable the write-ahead log for the HNSW index.
+	PersistNodes   bool   // If true, persist individual HNSW nodes on every update.
+	EnableNorms    bool   // If true, store vector norms to speed up cosine distance.
 }
 
 // BatchOperations holds a set of write and delete operations to be performed atomically.

@@ -110,6 +110,8 @@ func (r *PebbleDB) loadHNSW(opts *Options) error {
 		EfConstruction: opts.HNSWConfig.EfConstruction,
 		EfSearch:       opts.HNSWConfig.EfSearch,
 		Distance:       opts.HNSWConfig.DistanceMetric,
+		PersistNodes:   opts.HNSWConfig.PersistNodes,
+		EnableNorms:    opts.HNSWConfig.EnableNorms,
 	})
 
 	data, closer, err := r.db.Get([]byte(hnswIndexKey))
@@ -130,6 +132,8 @@ func (r *PebbleDB) loadHNSW(opts *Options) error {
 			EfConstruction: opts.HNSWConfig.EfConstruction,
 			EfSearch:       opts.HNSWConfig.EfSearch,
 			Distance:       opts.HNSWConfig.DistanceMetric,
+			PersistNodes:   opts.HNSWConfig.PersistNodes,
+			EnableNorms:    opts.HNSWConfig.EnableNorms,
 		})
 		return nil
 	}

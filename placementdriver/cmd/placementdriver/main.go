@@ -21,6 +21,7 @@ import (
 	"github.com/pavandhadge/vectron/placementdriver/internal/server"
 	pb "github.com/pavandhadge/vectron/shared/proto/placementdriver"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 )
 
 // Command-line flags
@@ -86,6 +87,17 @@ func Start(nodeID, clusterID uint64, raftAddr, grpcAddr, dataDir string, initial
 	s := grpc.NewServer(
 		grpc.UnaryInterceptor(graceful.TimeoutInterceptor(30*time.Second)),
 		grpc.StreamInterceptor(graceful.TimeoutInterceptorStream(30*time.Second)),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    30 * time.Second,
+			Timeout: 10 * time.Second,
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
+		grpc.ReadBufferSize(64*1024),
+		grpc.WriteBufferSize(64*1024),
+		grpc.MaxConcurrentStreams(1024),
 	)
 	pb.RegisterPlacementServiceServer(s, grpcServer)
 

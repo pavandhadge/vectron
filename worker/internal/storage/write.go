@@ -112,6 +112,72 @@ func (r *PebbleDB) StoreVector(id string, vector []float32, metadata []byte) err
 	return nil
 }
 
+// StoreVectorBatch stores multiple vectors in a single atomic batch.
+// It updates the HNSW index for each vector and writes all records in one commit.
+func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
+	if r.db == nil {
+		return errors.New("db not initialized")
+	}
+	if len(vectors) == 0 {
+		return nil
+	}
+
+	added := make([]string, 0, len(vectors))
+	batch := r.db.NewBatch()
+	defer batch.Close()
+
+	for _, v := range vectors {
+		if v.ID == "" || len(v.Vector) == 0 {
+			for _, id := range added {
+				_ = r.hnsw.Delete(id)
+			}
+			return errors.New("vector id or data missing")
+		}
+
+		if err := r.hnsw.Add(v.ID, v.Vector); err != nil {
+			for _, id := range added {
+				_ = r.hnsw.Delete(id)
+			}
+			return fmt.Errorf("failed to add vector to HNSW index: %w", err)
+		}
+		added = append(added, v.ID)
+
+		val, err := encodeVectorWithMeta(v.Vector, v.Metadata)
+		if err != nil {
+			for _, id := range added {
+				_ = r.hnsw.Delete(id)
+			}
+			return fmt.Errorf("failed to encode vector with meta: %w", err)
+		}
+
+		if err := batch.Set(vectorKey(v.ID), val, nil); err != nil {
+			for _, id := range added {
+				_ = r.hnsw.Delete(id)
+			}
+			return fmt.Errorf("failed to set vector in batch: %w", err)
+		}
+
+		if r.opts.HNSWConfig.WALEnabled {
+			walKey := []byte(fmt.Sprintf("%s%d_%s", hnswWALPrefix, time.Now().UnixNano(), v.ID))
+			if err := batch.Set(walKey, val, nil); err != nil {
+				for _, id := range added {
+					_ = r.hnsw.Delete(id)
+				}
+				return fmt.Errorf("failed to set WAL in batch: %w", err)
+			}
+		}
+	}
+
+	if err := batch.Commit(r.writeOpts); err != nil {
+		for _, id := range added {
+			_ = r.hnsw.Delete(id)
+		}
+		return fmt.Errorf("failed to commit batch for StoreVectorBatch: %w", err)
+	}
+
+	return nil
+}
+
 // DeleteVector deletes a vector by its ID from both the HNSW index and PebbleDB.
 // It performs a soft delete in the HNSW index and a hard delete in PebbleDB.
 func (r *PebbleDB) DeleteVector(id string) error {
