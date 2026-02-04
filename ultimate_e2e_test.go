@@ -165,6 +165,7 @@ func TestUltimateE2E(t *testing.T) {
 
 	suite := &UltimateE2ETest{t: t}
 	suite.ctx, suite.cancel = context.WithTimeout(context.Background(), ultimateTestTimeout)
+	t.Cleanup(suite.cleanup) // Register cleanup function
 	defer suite.cancel()
 
 	// Run all test scenarios
@@ -1269,6 +1270,7 @@ func (s *UltimateE2ETest) TestQuickVectors(t *testing.T) {
 			continue
 		}
 		totalResults += len(resp.Results)
+		log.Print("search result :",resp.Results,"\n")
 		if len(resp.Results) > 0 {
 			t.Logf("Search attempt %d returned %d results", i+1, len(resp.Results))
 			break
@@ -1619,15 +1621,32 @@ func (s *UltimateE2ETest) registerProcess(cmd *exec.Cmd) {
 }
 
 func (s *UltimateE2ETest) cleanup() {
-	// s.processesMutex.Lock()
-	// defer s.processesMutex.Unlock()
+	s.processesMutex.Lock()
+	defer s.processesMutex.Unlock()
+	s.dataDirsMutex.Lock()
+	defer s.dataDirsMutex.Unlock()
 
-	// log.Println("🧹 Cleaning up processes...")
-	// for _, cmd := range s.processes {
-	// 	if cmd.Process != nil {
-	// 		cmd.Process.Kill()
-	// 	}
-	// }
+	log.Println("🧹 Cleaning up processes and data directories...")
+	// Kill processes in reverse order to shut down gateway first
+	for i := len(s.processes) - 1; i >= 0; i-- {
+		cmd := s.processes[i]
+		if cmd.Process != nil {
+			log.Printf("Killing process %d (%s)", cmd.Process.Pid, filepath.Base(cmd.Path))
+			if err := cmd.Process.Kill(); err != nil {
+				log.Printf("Warning: failed to kill process %d: %v", cmd.Process.Pid, err)
+			}
+		}
+	}
+	s.processes = nil // Clear the slice
+
+	// Remove data directories
+	for _, dir := range s.dataDirs {
+		log.Printf("Removing data directory: %s", dir)
+		if err := os.RemoveAll(dir); err != nil {
+			log.Printf("Warning: failed to remove data directory %s: %v", dir, err)
+		}
+	}
+	s.dataDirs = nil // Clear the slice
 }
 
 func (s *UltimateE2ETest) isPortOpen(port int) bool {

@@ -21,6 +21,8 @@ service PlacementService {
   // List all workers (for monitoring)
   rpc ListWorkers(ListWorkersRequest) returns (ListWorkersResponse) {}
 
+  rpc ListWorkersForCollection(ListWorkersForCollectionRequest) returns (ListWorkersForCollectionResponse) {}
+
   // Admin: force rebalance (future)
   rpc Rebalance(RebalanceRequest) returns (RebalanceResponse) {}
   // Collection management
@@ -102,6 +104,14 @@ message ListWorkersRequest {}
 
 message ListWorkersResponse {
   repeated WorkerInfo workers = 1;
+}
+
+message ListWorkersForCollectionRequest {
+  string collection = 1;
+}
+
+message ListWorkersForCollectionResponse {
+  repeated string grpc_addresses = 1;
 }
 
 message WorkerInfo {

@@ -272,6 +272,41 @@ func (s *Server) ListWorkers(ctx context.Context, req *pb.ListWorkersRequest) (*
 	}, nil
 }
 
+func (s *Server) ListWorkersForCollection(ctx context.Context, req *pb.ListWorkersForCollectionRequest) (*pb.ListWorkersForCollectionResponse, error) {
+	if req.Collection == "" {
+		return nil, status.Error(codes.InvalidArgument, "collection name is required")
+	}
+
+	collection, ok := s.fsm.GetCollection(req.Collection)
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "collection '%s' not found", req.Collection)
+	}
+
+	// Use a map to store unique gRPC addresses
+	uniqueGrpcAddresses := make(map[string]struct{})
+
+	for _, shard := range collection.Shards {
+		for _, replicaID := range shard.Replicas {
+			worker, ok := s.fsm.GetWorker(replicaID)
+			if !ok {
+				// This should ideally not happen if FSM state is consistent
+				fmt.Printf("Warning: worker with ID '%d' not found for shard '%d'\n", replicaID, shard.ShardID)
+				continue
+			}
+			uniqueGrpcAddresses[worker.GrpcAddress] = struct{}{}
+		}
+	}
+
+	grpcAddresses := make([]string, 0, len(uniqueGrpcAddresses))
+	for addr := range uniqueGrpcAddresses {
+		grpcAddresses = append(grpcAddresses, addr)
+	}
+
+	return &pb.ListWorkersForCollectionResponse{
+		GrpcAddresses: grpcAddresses,
+	}, nil
+}
+
 // CreateCollection handles the RPC to create a new collection.
 // It proposes a `CreateCollection` command to the Raft log.
 func (s *Server) CreateCollection(ctx context.Context, req *pb.CreateCollectionRequest) (*pb.CreateCollectionResponse, error) {

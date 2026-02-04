@@ -59,7 +59,7 @@ service AuthService {
   // Delete the current user's account (requires JWT authentication and optional password confirmation).
   rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse) {
     option (google.api.http) = {
-      delete: "/v1/user"
+      post: "/v1/user/delete"
       body: "*"
     };
   }

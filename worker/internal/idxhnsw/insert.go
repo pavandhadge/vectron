@@ -141,9 +141,17 @@ func (h *HNSW) add(id string, vec []float32) error {
 		return nil
 	}
 
+	curr := h.getNode(h.entry)
+	if curr == nil {
+		// This can happen if the entry point was deleted.
+		// In this case, we make the new node the entry point.
+		h.entry = internalID
+		h.maxLayer = layer
+		return nil
+	}
+
 	// 3. Find the entry point for the insertion layer.
 	// Start from the top layer of the graph and greedily search down to the new node's layer.
-	curr := h.getNode(h.entry)
 	for l := h.maxLayer; l > layer; l-- {
 		curr = h.searchLayerSingle(vec, curr, l)
 	}

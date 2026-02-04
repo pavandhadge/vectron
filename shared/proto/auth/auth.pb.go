@@ -1218,6 +1218,185 @@ func (x *GetAuthDetailsForSDKResponse) GetSuccess() bool {
 	return false
 }
 
+// --- User Account Deletion ---
+type DeleteUserRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Optional: Password confirmation for extra security
+	Password      string `protobuf:"bytes,1,opt,name=password,proto3" json:"password,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteUserRequest) Reset() {
+	*x = DeleteUserRequest{}
+	mi := &file_auth_auth_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteUserRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteUserRequest) ProtoMessage() {}
+
+func (x *DeleteUserRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_auth_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteUserRequest.ProtoReflect.Descriptor instead.
+func (*DeleteUserRequest) Descriptor() ([]byte, []int) {
+	return file_auth_auth_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *DeleteUserRequest) GetPassword() string {
+	if x != nil {
+		return x.Password
+	}
+	return ""
+}
+
+type DeleteUserResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteUserResponse) Reset() {
+	*x = DeleteUserResponse{}
+	mi := &file_auth_auth_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteUserResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteUserResponse) ProtoMessage() {}
+
+func (x *DeleteUserResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_auth_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteUserResponse.ProtoReflect.Descriptor instead.
+func (*DeleteUserResponse) Descriptor() ([]byte, []int) {
+	return file_auth_auth_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *DeleteUserResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+// --- Token Refresh ---
+type RefreshTokenRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefreshTokenRequest) Reset() {
+	*x = RefreshTokenRequest{}
+	mi := &file_auth_auth_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefreshTokenRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefreshTokenRequest) ProtoMessage() {}
+
+func (x *RefreshTokenRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_auth_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefreshTokenRequest.ProtoReflect.Descriptor instead.
+func (*RefreshTokenRequest) Descriptor() ([]byte, []int) {
+	return file_auth_auth_proto_rawDescGZIP(), []int{24}
+}
+
+type RefreshTokenResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	JwtToken      string                 `protobuf:"bytes,1,opt,name=jwt_token,json=jwtToken,proto3" json:"jwt_token,omitempty"`
+	ExpiresAt     int64                  `protobuf:"varint,2,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefreshTokenResponse) Reset() {
+	*x = RefreshTokenResponse{}
+	mi := &file_auth_auth_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefreshTokenResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefreshTokenResponse) ProtoMessage() {}
+
+func (x *RefreshTokenResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_auth_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefreshTokenResponse.ProtoReflect.Descriptor instead.
+func (*RefreshTokenResponse) Descriptor() ([]byte, []int) {
+	return file_auth_auth_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *RefreshTokenResponse) GetJwtToken() string {
+	if x != nil {
+		return x.JwtToken
+	}
+	return ""
+}
+
+func (x *RefreshTokenResponse) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
 var File_auth_auth_proto protoreflect.FileDescriptor
 
 const file_auth_auth_proto_rawDesc = "" +
@@ -1288,7 +1467,16 @@ const file_auth_auth_proto_rawDesc = "" +
 	"\x1cGetAuthDetailsForSDKResponse\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12)\n" +
 	"\x04plan\x18\x02 \x01(\x0e2\x15.vectron.auth.v1.PlanR\x04plan\x12\x18\n" +
-	"\asuccess\x18\x03 \x01(\bR\asuccess*0\n" +
+	"\asuccess\x18\x03 \x01(\bR\asuccess\"/\n" +
+	"\x11DeleteUserRequest\x12\x1a\n" +
+	"\bpassword\x18\x01 \x01(\tR\bpassword\".\n" +
+	"\x12DeleteUserResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"\x15\n" +
+	"\x13RefreshTokenRequest\"R\n" +
+	"\x14RefreshTokenResponse\x12\x1b\n" +
+	"\tjwt_token\x18\x01 \x01(\tR\bjwtToken\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\x02 \x01(\x03R\texpiresAt*0\n" +
 	"\x04Plan\x12\x14\n" +
 	"\x10PLAN_UNSPECIFIED\x10\x00\x12\b\n" +
 	"\x04FREE\x10\x01\x12\b\n" +
@@ -1298,12 +1486,15 @@ const file_auth_auth_proto_rawDesc = "" +
 	"\n" +
 	"\x06ACTIVE\x10\x01\x12\f\n" +
 	"\bCANCELED\x10\x02\x12\f\n" +
-	"\bPAST_DUE\x10\x032\xbb\t\n" +
+	"\bPAST_DUE\x10\x032\xa8\v\n" +
 	"\vAuthService\x12z\n" +
 	"\fRegisterUser\x12$.vectron.auth.v1.RegisterUserRequest\x1a%.vectron.auth.v1.RegisterUserResponse\"\x1d\x82\xd3\xe4\x93\x02\x17:\x01*\"\x12/v1/users/register\x12b\n" +
 	"\x05Login\x12\x1d.vectron.auth.v1.LoginRequest\x1a\x1e.vectron.auth.v1.LoginResponse\"\x1a\x82\xd3\xe4\x93\x02\x14:\x01*\"\x0f/v1/users/login\x12{\n" +
 	"\x0eGetUserProfile\x12&.vectron.auth.v1.GetUserProfileRequest\x1a'.vectron.auth.v1.GetUserProfileResponse\"\x18\x82\xd3\xe4\x93\x02\x12\x12\x10/v1/user/profile\x12\x87\x01\n" +
-	"\x11UpdateUserProfile\x12).vectron.auth.v1.UpdateUserProfileRequest\x1a*.vectron.auth.v1.UpdateUserProfileResponse\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\x1a\x10/v1/user/profile\x12p\n" +
+	"\x11UpdateUserProfile\x12).vectron.auth.v1.UpdateUserProfileRequest\x1a*.vectron.auth.v1.UpdateUserProfileResponse\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\x1a\x10/v1/user/profile\x12q\n" +
+	"\n" +
+	"DeleteUser\x12\".vectron.auth.v1.DeleteUserRequest\x1a#.vectron.auth.v1.DeleteUserResponse\"\x1a\x82\xd3\xe4\x93\x02\x14:\x01*\"\x0f/v1/user/delete\x12x\n" +
+	"\fRefreshToken\x12$.vectron.auth.v1.RefreshTokenRequest\x1a%.vectron.auth.v1.RefreshTokenResponse\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\"\x10/v1/auth/refresh\x12p\n" +
 	"\fCreateAPIKey\x12$.vectron.auth.v1.CreateAPIKeyRequest\x1a%.vectron.auth.v1.CreateAPIKeyResponse\"\x13\x82\xd3\xe4\x93\x02\r:\x01*\"\b/v1/keys\x12j\n" +
 	"\vListAPIKeys\x12#.vectron.auth.v1.ListAPIKeysRequest\x1a$.vectron.auth.v1.ListAPIKeysResponse\"\x10\x82\xd3\xe4\x93\x02\n" +
 	"\x12\b/v1/keys\x12z\n" +
@@ -1325,7 +1516,7 @@ func file_auth_auth_proto_rawDescGZIP() []byte {
 }
 
 var file_auth_auth_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_auth_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_auth_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_auth_auth_proto_goTypes = []any{
 	(Plan)(0),                            // 0: vectron.auth.v1.Plan
 	(SubscriptionStatus)(0),              // 1: vectron.auth.v1.SubscriptionStatus
@@ -1351,6 +1542,10 @@ var file_auth_auth_proto_goTypes = []any{
 	(*CreateSDKJWTResponse)(nil),         // 21: vectron.auth.v1.CreateSDKJWTResponse
 	(*GetAuthDetailsForSDKRequest)(nil),  // 22: vectron.auth.v1.GetAuthDetailsForSDKRequest
 	(*GetAuthDetailsForSDKResponse)(nil), // 23: vectron.auth.v1.GetAuthDetailsForSDKResponse
+	(*DeleteUserRequest)(nil),            // 24: vectron.auth.v1.DeleteUserRequest
+	(*DeleteUserResponse)(nil),           // 25: vectron.auth.v1.DeleteUserResponse
+	(*RefreshTokenRequest)(nil),          // 26: vectron.auth.v1.RefreshTokenRequest
+	(*RefreshTokenResponse)(nil),         // 27: vectron.auth.v1.RefreshTokenResponse
 }
 var file_auth_auth_proto_depIdxs = []int32{
 	0,  // 0: vectron.auth.v1.UserProfile.plan:type_name -> vectron.auth.v1.Plan
@@ -1367,24 +1562,28 @@ var file_auth_auth_proto_depIdxs = []int32{
 	6,  // 11: vectron.auth.v1.AuthService.Login:input_type -> vectron.auth.v1.LoginRequest
 	8,  // 12: vectron.auth.v1.AuthService.GetUserProfile:input_type -> vectron.auth.v1.GetUserProfileRequest
 	10, // 13: vectron.auth.v1.AuthService.UpdateUserProfile:input_type -> vectron.auth.v1.UpdateUserProfileRequest
-	12, // 14: vectron.auth.v1.AuthService.CreateAPIKey:input_type -> vectron.auth.v1.CreateAPIKeyRequest
-	14, // 15: vectron.auth.v1.AuthService.ListAPIKeys:input_type -> vectron.auth.v1.ListAPIKeysRequest
-	16, // 16: vectron.auth.v1.AuthService.DeleteAPIKey:input_type -> vectron.auth.v1.DeleteAPIKeyRequest
-	18, // 17: vectron.auth.v1.AuthService.ValidateAPIKey:input_type -> vectron.auth.v1.ValidateAPIKeyRequest
-	20, // 18: vectron.auth.v1.AuthService.CreateSDKJWT:input_type -> vectron.auth.v1.CreateSDKJWTRequest
-	22, // 19: vectron.auth.v1.AuthService.GetAuthDetailsForSDK:input_type -> vectron.auth.v1.GetAuthDetailsForSDKRequest
-	5,  // 20: vectron.auth.v1.AuthService.RegisterUser:output_type -> vectron.auth.v1.RegisterUserResponse
-	7,  // 21: vectron.auth.v1.AuthService.Login:output_type -> vectron.auth.v1.LoginResponse
-	9,  // 22: vectron.auth.v1.AuthService.GetUserProfile:output_type -> vectron.auth.v1.GetUserProfileResponse
-	11, // 23: vectron.auth.v1.AuthService.UpdateUserProfile:output_type -> vectron.auth.v1.UpdateUserProfileResponse
-	13, // 24: vectron.auth.v1.AuthService.CreateAPIKey:output_type -> vectron.auth.v1.CreateAPIKeyResponse
-	15, // 25: vectron.auth.v1.AuthService.ListAPIKeys:output_type -> vectron.auth.v1.ListAPIKeysResponse
-	17, // 26: vectron.auth.v1.AuthService.DeleteAPIKey:output_type -> vectron.auth.v1.DeleteAPIKeyResponse
-	19, // 27: vectron.auth.v1.AuthService.ValidateAPIKey:output_type -> vectron.auth.v1.ValidateAPIKeyResponse
-	21, // 28: vectron.auth.v1.AuthService.CreateSDKJWT:output_type -> vectron.auth.v1.CreateSDKJWTResponse
-	23, // 29: vectron.auth.v1.AuthService.GetAuthDetailsForSDK:output_type -> vectron.auth.v1.GetAuthDetailsForSDKResponse
-	20, // [20:30] is the sub-list for method output_type
-	10, // [10:20] is the sub-list for method input_type
+	24, // 14: vectron.auth.v1.AuthService.DeleteUser:input_type -> vectron.auth.v1.DeleteUserRequest
+	26, // 15: vectron.auth.v1.AuthService.RefreshToken:input_type -> vectron.auth.v1.RefreshTokenRequest
+	12, // 16: vectron.auth.v1.AuthService.CreateAPIKey:input_type -> vectron.auth.v1.CreateAPIKeyRequest
+	14, // 17: vectron.auth.v1.AuthService.ListAPIKeys:input_type -> vectron.auth.v1.ListAPIKeysRequest
+	16, // 18: vectron.auth.v1.AuthService.DeleteAPIKey:input_type -> vectron.auth.v1.DeleteAPIKeyRequest
+	18, // 19: vectron.auth.v1.AuthService.ValidateAPIKey:input_type -> vectron.auth.v1.ValidateAPIKeyRequest
+	20, // 20: vectron.auth.v1.AuthService.CreateSDKJWT:input_type -> vectron.auth.v1.CreateSDKJWTRequest
+	22, // 21: vectron.auth.v1.AuthService.GetAuthDetailsForSDK:input_type -> vectron.auth.v1.GetAuthDetailsForSDKRequest
+	5,  // 22: vectron.auth.v1.AuthService.RegisterUser:output_type -> vectron.auth.v1.RegisterUserResponse
+	7,  // 23: vectron.auth.v1.AuthService.Login:output_type -> vectron.auth.v1.LoginResponse
+	9,  // 24: vectron.auth.v1.AuthService.GetUserProfile:output_type -> vectron.auth.v1.GetUserProfileResponse
+	11, // 25: vectron.auth.v1.AuthService.UpdateUserProfile:output_type -> vectron.auth.v1.UpdateUserProfileResponse
+	25, // 26: vectron.auth.v1.AuthService.DeleteUser:output_type -> vectron.auth.v1.DeleteUserResponse
+	27, // 27: vectron.auth.v1.AuthService.RefreshToken:output_type -> vectron.auth.v1.RefreshTokenResponse
+	13, // 28: vectron.auth.v1.AuthService.CreateAPIKey:output_type -> vectron.auth.v1.CreateAPIKeyResponse
+	15, // 29: vectron.auth.v1.AuthService.ListAPIKeys:output_type -> vectron.auth.v1.ListAPIKeysResponse
+	17, // 30: vectron.auth.v1.AuthService.DeleteAPIKey:output_type -> vectron.auth.v1.DeleteAPIKeyResponse
+	19, // 31: vectron.auth.v1.AuthService.ValidateAPIKey:output_type -> vectron.auth.v1.ValidateAPIKeyResponse
+	21, // 32: vectron.auth.v1.AuthService.CreateSDKJWT:output_type -> vectron.auth.v1.CreateSDKJWTResponse
+	23, // 33: vectron.auth.v1.AuthService.GetAuthDetailsForSDK:output_type -> vectron.auth.v1.GetAuthDetailsForSDKResponse
+	22, // [22:34] is the sub-list for method output_type
+	10, // [10:22] is the sub-list for method input_type
 	10, // [10:10] is the sub-list for extension type_name
 	10, // [10:10] is the sub-list for extension extendee
 	0,  // [0:10] is the sub-list for field type_name
@@ -1401,7 +1600,7 @@ func file_auth_auth_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auth_auth_proto_rawDesc), len(file_auth_auth_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   22,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

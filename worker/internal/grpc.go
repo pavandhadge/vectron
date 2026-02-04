@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/lni/dragonboat/v3"
@@ -82,25 +83,61 @@ func (s *GrpcServer) Search(ctx context.Context, req *worker.SearchRequest) (*wo
 		return nil, status.Error(codes.InvalidArgument, "search vector is empty")
 	}
 
-	// The query to be passed to the FSM's Lookup method.
 	query := shard.SearchQuery{
 		Vector: req.GetVector(),
 		K:      int(req.GetK()),
 	}
 
-	// Perform a linearizable read on the shard's state machine.
-	// This ensures we are reading the latest committed state.
-	res, err := s.nodeHost.SyncRead(ctx, req.GetShardId(), query)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to perform search: %v", err)
-	}
+	// If ShardId is 0, it's a broadcast search. Search all shards on this worker.
+	if req.GetShardId() == 0 {
+		var (
+			wg        sync.WaitGroup
+			mu        sync.Mutex
+			allIDs    []string
+			allScores []float32
+		)
 
-	searchResult, ok := res.(*shard.SearchResult)
-	if !ok {
-		return nil, status.Errorf(codes.Internal, "unexpected search result type: %T", res)
-	}
+		shardIDs := s.shardManager.GetShards()
+		for _, shardID := range shardIDs {
+			wg.Add(1)
+			go func(id uint64) {
+				defer wg.Done()
+				res, err := s.nodeHost.SyncRead(ctx, id, query)
+				if err != nil {
+					// Log error but don't fail the whole search for one failed shard.
+					log.Printf("Failed to search shard %d: %v", id, err)
+					return
+				}
+				searchResult, ok := res.(*shard.SearchResult)
+				if !ok {
+					log.Printf("Unexpected search result type from shard %d: %T", id, res)
+					return
+				}
 
-	return &worker.SearchResponse{Ids: searchResult.IDs, Scores: searchResult.Scores}, nil
+				mu.Lock()
+				allIDs = append(allIDs, searchResult.IDs...)
+				allScores = append(allScores, searchResult.Scores...)
+				mu.Unlock()
+			}(shardID)
+		}
+		wg.Wait()
+
+		return &worker.SearchResponse{Ids: allIDs, Scores: allScores}, nil
+
+	} else {
+		// Original logic for single-shard search
+		res, err := s.nodeHost.SyncRead(ctx, req.GetShardId(), query)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to perform search: %v", err)
+		}
+
+		searchResult, ok := res.(*shard.SearchResult)
+		if !ok {
+			return nil, status.Errorf(codes.Internal, "unexpected search result type: %T", res)
+		}
+
+		return &worker.SearchResponse{Ids: searchResult.IDs, Scores: searchResult.Scores}, nil
+	}
 }
 
 // GetVector retrieves a vector by its ID.

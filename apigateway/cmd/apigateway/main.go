@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -329,20 +330,87 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 		workerTopK = 100
 	}
 
-	result, err := s.forwardToWorker(ctx, req.Collection, "", func(c workerpb.WorkerServiceClient, shardID uint64) (interface{}, error) {
-		workerReq := translator.ToWorkerSearchRequest(req, shardID)
-		workerReq.K = int32(workerTopK)
-		res, err := c.Search(ctx, workerReq)
-		if err != nil {
-			return nil, err
-		}
-		return translator.FromWorkerSearchResponse(res), nil
-	})
+	placementClient, err := s.getPlacementClient()
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
 	}
 
-	searchResponse := result.(*pb.SearchResponse)
+	workerListResp, err := placementClient.ListWorkersForCollection(ctx, &placementpb.ListWorkersForCollectionRequest{
+		Collection: req.Collection,
+	})
+	if err != nil {
+		// Attempt to update leader and retry if the placement driver client is stale
+		if st, ok := status.FromError(err); ok && (st.Code() == codes.Unavailable || st.Code() == codes.Internal) {
+			placementClient, err = s.updateLeader()
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "could not update placement driver leader: %v", err)
+			}
+			workerListResp, err = placementClient.ListWorkersForCollection(ctx, &placementpb.ListWorkersForCollectionRequest{
+				Collection: req.Collection,
+			})
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "could not list workers for collection %q after leader update: %v", req.Collection, err)
+			}
+		} else {
+			return nil, status.Errorf(codes.Internal, "could not list workers for collection %q: %v", req.Collection, err)
+		}
+	}
+
+	workerAddresses := workerListResp.GetGrpcAddresses()
+	if len(workerAddresses) == 0 {
+		return &pb.SearchResponse{}, nil // No workers, no results
+	}
+
+	var (
+		wg        sync.WaitGroup
+		mu        sync.Mutex
+		allResults []*pb.SearchResult
+		errs      []error
+	)
+
+	for _, addr := range workerAddresses {
+		wg.Add(1)
+		go func(workerAddr string) {
+			defer wg.Done()
+
+			conn, err := grpc.Dial(workerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+			if err != nil {
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("worker %s unreachable: %v", workerAddr, err))
+				mu.Unlock()
+				return
+			}
+			defer conn.Close()
+
+			workerClient := workerpb.NewWorkerServiceClient(conn)
+			workerReq := translator.ToWorkerSearchRequest(req, 0) // ShardID 0 for broadcast search
+			workerReq.K = int32(workerTopK)
+
+			res, err := workerClient.Search(ctx, workerReq)
+			if err != nil {
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("worker %s search failed: %v", workerAddr, err))
+				mu.Unlock()
+				return
+			}
+
+			mu.Lock()
+			workerSearchResponse := translator.FromWorkerSearchResponse(res)
+			allResults = append(allResults, workerSearchResponse.Results...)
+			mu.Unlock()
+		}(addr)
+	}
+	wg.Wait()
+
+	if len(errs) > 0 {
+		// For now, return the first error. In a production system,
+		// you might want to log all errors and potentially return partial results.
+		return nil, status.Errorf(codes.Internal, "failed to search all workers: %v", errs[0])
+	}
+
+	searchResponse := &pb.SearchResponse{
+		Results: allResults,
+	}
 
 	if len(searchResponse.Results) == 0 {
 		return searchResponse, nil
@@ -372,7 +440,8 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 
 	rerankResp, err := s.rerankerClient.Rerank(ctx, rerankReq)
 	if err != nil {
-		log.Printf("Reranking failed, returning original results: %v", err)
+		log.Println("Reranking failed, returning original results:", err)
+		// Truncate to TopK if reranking fails
 		if len(searchResponse.Results) > int(req.TopK) {
 			searchResponse.Results = searchResponse.Results[:req.TopK]
 		}

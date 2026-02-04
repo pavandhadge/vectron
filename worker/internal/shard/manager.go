@@ -161,3 +161,16 @@ func (m *Manager) GetShardLeaderInfo() []*placementdriver.ShardLeaderInfo {
 	}
 	return leaderInfo
 }
+
+// GetShards returns the IDs of all shard replicas currently running on this node.
+func (m *Manager) GetShards() []uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	ids := make([]uint64, 0, len(m.runningReplicas))
+	for id := range m.runningReplicas {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
