@@ -38,6 +38,13 @@ func NewManager(nh *dragonboat.NodeHost, workerDataDir string, nodeID uint64) *M
 	}
 }
 
+// SetNodeID updates the node ID used for shard replication.
+func (m *Manager) SetNodeID(nodeID uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.nodeID = nodeID
+}
+
 // SyncShards is the core reconciliation loop. It compares the desired shard
 // assignments from the placement driver with the currently running replicas
 // and starts or stops replicas as needed.

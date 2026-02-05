@@ -80,6 +80,11 @@ func Start(nodeID uint64, raftAddr, grpcAddr string, pdAddrs []string, workerDat
 		time.Sleep(1 * time.Second)
 	}
 
+	// Ensure shard manager uses the PD-assigned worker ID for raft membership.
+	if assignedID := pdClient.WorkerID(); assignedID > 0 {
+		shardManager.SetNodeID(assignedID)
+	}
+
 	// Start the two main background loops for the worker.
 	shardUpdateChan := make(chan []*pd.ShardAssignment)
 	// 1. The heartbeat loop periodically sends heartbeats to the PD and receives shard assignments.

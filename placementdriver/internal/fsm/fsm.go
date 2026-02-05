@@ -233,6 +233,16 @@ func (f *FSM) applyRegisterWorker(payload RegisterWorkerPayload) uint64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	// Reuse existing worker ID if the addresses match to avoid ID drift.
+	for id, info := range f.Workers {
+		if info.GrpcAddress == payload.GrpcAddress && info.RaftAddress == payload.RaftAddress {
+			info.LastHeartbeat = time.Now().UTC()
+			f.Workers[id] = info
+			fmt.Printf("Worker already registered as %d (GRPC %s, Raft %s)\n", id, info.GrpcAddress, info.RaftAddress)
+			return id
+		}
+	}
+
 	workerID := f.NextWorkerID
 	f.NextWorkerID++
 

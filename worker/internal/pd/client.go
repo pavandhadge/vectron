@@ -47,6 +47,11 @@ type Client struct {
 	shardManager ShardManager
 }
 
+// WorkerID returns the assigned worker ID from the placement driver.
+func (c *Client) WorkerID() uint64 {
+	return c.workerID
+}
+
 func (c *Client) getLeader() (*LeaderInfo, error) {
 	c.leaderMu.RLock()
 	defer c.leaderMu.RUnlock()

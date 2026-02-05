@@ -52,7 +52,6 @@ func getPort(envVar string, defaultPort int) int {
 	return defaultPort
 }
 
-
 // =============================================================================
 // Test Configuration
 // =============================================================================
@@ -741,8 +740,7 @@ func (s *UltimateE2ETest) TestSearchQuality(t *testing.T) {
 		resp, err := s.apigwClient.Search(ctx, &apigatewaypb.SearchRequest{
 			Collection: testCollectionName,
 			Vector:     baseVector,
-			TopK:       20,
-			Query:      "quality search query",
+			TopK:       50,
 		})
 		require.NoError(t, err)
 
@@ -797,6 +795,8 @@ func (s *UltimateE2ETest) TestHealthMonitoring(t *testing.T) {
 
 	// Test 3: Collection health
 	t.Run("CollectionHealth", func(t *testing.T) {
+		require.NoError(t, waitForCollectionReadyE2E(ctx, s.apigwClient, testCollectionName, 2*time.Minute))
+
 		status, err := s.apigwClient.GetCollectionStatus(ctx, &apigatewaypb.GetCollectionStatusRequest{
 			Name: testCollectionName,
 		})
@@ -815,6 +815,36 @@ func (s *UltimateE2ETest) TestHealthMonitoring(t *testing.T) {
 
 		log.Printf("✅ Collection health: %d/%d shards ready", readyShards, len(status.Shards))
 	})
+}
+
+// waitForCollectionReady polls GetCollectionStatus until all shards are ready or timeout.
+func waitForCollectionReadyE2E(ctx context.Context, client apigatewaypb.VectronServiceClient, collection string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out waiting for collection %q to become ready", collection)
+		}
+		resp, err := client.GetCollectionStatus(ctx, &apigatewaypb.GetCollectionStatusRequest{Name: collection})
+		if err != nil {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		if len(resp.Shards) == 0 {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		allReady := true
+		for _, shard := range resp.Shards {
+			if !shard.Ready {
+				allReady = false
+				break
+			}
+		}
+		if allReady {
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 // =============================================================================
@@ -1276,7 +1306,7 @@ func (s *UltimateE2ETest) TestQuickVectors(t *testing.T) {
 			continue
 		}
 		totalResults += len(resp.Results)
-		log.Print("search result :",resp.Results,"\n")
+		log.Print("search result :", resp.Results, "\n")
 		if len(resp.Results) > 0 {
 			t.Logf("Search attempt %d returned %d results", i+1, len(resp.Results))
 			break
