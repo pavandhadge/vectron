@@ -36,7 +36,7 @@ Legend: [DONE] implemented, [PENDING] not implemented, [EXPERIMENT] requires val
 1. [DONE] Pebble tuning defaults: memtable, cache size, compaction thresholds.
 2. [DONE] Adaptive HNSW snapshot cadence (avoid heavy saves during hot ingest).
 3. [DONE] Switch HNSW serialization from gob to a compact binary encoder (done for Raft; extend to snapshots).
-4. [PENDING] WAL‑only fast recovery for HNSW with periodic snapshots.
+4. [DONE] WAL‑only fast recovery for HNSW with periodic snapshots.
 5. [DONE] Use bulk loading path for initial indexing.
 
 ## Tier 4 — Architecture / Roadmap
@@ -45,6 +45,11 @@ Legend: [DONE] implemented, [PENDING] not implemented, [EXPERIMENT] requires val
 3. [DONE] Optional vector quantization / compression for RAM reduction.
 4. [PENDING] Multi‑tenant isolation (rate limits, resource caps per tenant).
 5. [DONE] Async index rebuild / background maintenance scheduling.
+6. [PENDING] Load‑aware shard placement using worker heartbeat metrics.
+7. [PENDING] Capacity‑weighted placement (bigger nodes get more shards).
+8. [PENDING] Failure‑domain aware placement (rack/zone separation).
+9. [PENDING] Hot‑shard detection with targeted replica moves.
+10. [PENDING] Background rebalancing with throttling to avoid compaction storms.
 
 ## Notes
 - Items marked DONE are already implemented in the codebase (as of current changes).

@@ -346,3 +346,16 @@ Retrieves detailed metadata about a collection and its shards by querying the FS
 The `Heartbeat` RPC also serves as the mechanism for the `placementdriver` to send shard assignments to workers.
 1.  After processing the incoming heartbeat (and proposing relevant updates to the FSM), it reads the current FSM state to determine all `ShardAssignment`s for the heartbeating worker.
 2.  It constructs a JSON-encoded list of these `ShardAssignment`s (including `ShardInfo` and `InitialMembers`) and sends it back to the worker in the `HeartbeatResponse.Message` field. This is how the `placementdriver` instructs workers on which shards they should host and what the initial Raft configuration for those shards should be.
+
+## 8. Placement Optimization
+Current optimizations:
+- Consistent hashing maps vector IDs to shards deterministically, keeping service discovery O(1).
+- Service discovery reads (`GetWorker`, `ListWorkers`, `ListCollections`, `GetLeader`) are served directly from the in-memory FSM for low latency.
+- Initial replica placement uses round-robin to spread shards across available workers quickly.
+
+Future placement optimizations (possible next steps):
+- Load-aware placement using worker heartbeats (CPU, memory, disk, shard leader load).
+- Hot-shard detection and targeted replica moves to reduce tail latency.
+- Rack/zone-aware placement with failure-domain separation for higher availability.
+- Capacity-weighted placement so larger workers receive proportionally more shards.
+- Background rebalancing with rate limits to avoid compaction storms on workers.

@@ -39,6 +39,14 @@ type HNSWConfig struct {
 	HotIndexMaxSize        int           // Max vectors to keep in the hot index.
 	HotIndexColdEfScale    float64       // Scale factor for cold ef when hot index is enabled.
 	HotIndexEf             int           // EfSearch override for hot index (0 = use ef).
+	AsyncIndexingEnabled   bool          // If true, index updates are applied asynchronously.
+	IndexingQueueSize      int           // Max queued index operations.
+	IndexingBatchSize      int           // Max ops per indexer batch.
+	IndexingFlushInterval  time.Duration // Max time to wait before flushing queued ops.
+	VectorCompressionEnabled bool        // If true, store vectors in compressed int8 form on disk (cosine+normalized only).
+	AdaptiveQualityEnabled bool          // If true, adjust ef based on query quality.
+	LowNormThreshold       float64       // Query norm threshold to consider low quality.
+	LowQualityEfScale      float64       // Scale ef for low-quality queries.
 	SnapshotInterval       time.Duration // Base interval for HNSW snapshotting.
 	SnapshotMaxInterval    time.Duration // Max interval between forced snapshots.
 	SnapshotWriteThreshold uint64        // Writes since last snapshot before deferring.

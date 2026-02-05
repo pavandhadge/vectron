@@ -108,6 +108,7 @@ type UltimateE2ETest struct {
 	jwtToken       string
 	apiKey         string
 	userID         string
+	userEmail      string
 
 	// gRPC clients
 	authClient      authpb.AuthServiceClient
@@ -341,10 +342,10 @@ func (s *UltimateE2ETest) TestDistributedConsensus(t *testing.T) {
 
 func (s *UltimateE2ETest) TestAuthentication(t *testing.T) {
 	log.Println("🔐 Testing Authentication...")
+	email := fmt.Sprintf("test-%d@example.com", time.Now().Unix())
 
 	// Test 1: User registration with validation
 	t.Run("UserRegistration", func(t *testing.T) {
-		email := fmt.Sprintf("test-%d@example.com", time.Now().Unix())
 		resp, err := s.authClient.RegisterUser(s.ctx, &authpb.RegisterUserRequest{
 			Email:    email,
 			Password: "TestPassword123!",
@@ -352,13 +353,14 @@ func (s *UltimateE2ETest) TestAuthentication(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, resp.User)
 		s.userID = resp.User.Id
+		s.userEmail = email
 		log.Printf("✅ User registered: %s", s.userID)
 	})
 
 	// Test 2: Login and JWT token generation
 	t.Run("LoginAndJWT", func(t *testing.T) {
 		resp, err := s.authClient.Login(s.ctx, &authpb.LoginRequest{
-			Email:    fmt.Sprintf("test-%d@example.com", time.Now().Unix()),
+			Email:    email,
 			Password: "TestPassword123!",
 		})
 		require.NoError(t, err)
@@ -693,11 +695,12 @@ func (s *UltimateE2ETest) TestSearchQuality(t *testing.T) {
 	ctx := s.getAuthenticatedContext()
 
 	s.ensureTestCollection()
+	var baseVector []float32
 
 	// Create vectors with known similarities
 	t.Run("InsertKnownSimilarities", func(t *testing.T) {
 		// Create base vector
-		baseVector := make([]float32, vectorDimension)
+		baseVector = make([]float32, vectorDimension)
 		for i := range baseVector {
 			baseVector[i] = rand.Float32()
 		}
@@ -733,11 +736,7 @@ func (s *UltimateE2ETest) TestSearchQuality(t *testing.T) {
 
 	// Test search quality
 	t.Run("SearchQualityMetrics", func(t *testing.T) {
-		// Search with base vector
-		baseVector := make([]float32, vectorDimension)
-		for i := range baseVector {
-			baseVector[i] = 0.5 // Neutral value
-		}
+		require.NotEmpty(t, baseVector)
 
 		resp, err := s.apigwClient.Search(ctx, &apigatewaypb.SearchRequest{
 			Collection: testCollectionName,

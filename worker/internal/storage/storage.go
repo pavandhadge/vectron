@@ -90,6 +90,22 @@ type PebbleDB struct {
 	hotMu                      sync.Mutex
 	hotQueue                   []string
 	hotSet                     map[string]struct{}
+	indexerCh                  chan indexOp
+	indexerStop                chan struct{}
+	indexerWg                  sync.WaitGroup
+}
+
+type indexOpType int
+
+const (
+	indexOpAdd indexOpType = iota
+	indexOpDelete
+)
+
+type indexOp struct {
+	opType indexOpType
+	id     string
+	vector []float32
 }
 
 // NewPebbleDB creates a new, uninitialized instance of PebbleDB.

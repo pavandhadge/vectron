@@ -82,6 +82,17 @@ func (r *PebbleDB) Init(path string, opts *Options) error {
 		go r.persistenceLoop(baseInterval) // Periodically save the index.
 	}
 
+	if opts.HNSWConfig.AsyncIndexingEnabled {
+		queueSize := opts.HNSWConfig.IndexingQueueSize
+		if queueSize <= 0 {
+			queueSize = 10000
+		}
+		r.indexerCh = make(chan indexOp, queueSize)
+		r.indexerStop = make(chan struct{})
+		r.indexerWg.Add(1)
+		go r.indexerLoop()
+	}
+
 	if opts.HNSWConfig.MaintenanceEnabled {
 		interval := opts.HNSWConfig.MaintenanceInterval
 		if interval <= 0 {
@@ -105,6 +116,11 @@ func (r *PebbleDB) Close() error {
 	close(r.stop)
 	// Wait for all background goroutines to finish.
 	r.wg.Wait()
+
+	if r.indexerStop != nil {
+		close(r.indexerStop)
+		r.indexerWg.Wait()
+	}
 
 	// Perform a final flush to ensure all data is written to disk.
 	if err := r.Flush(); err != nil {
@@ -153,8 +169,13 @@ func (r *PebbleDB) loadHNSW(opts *Options) error {
 	data, closer, err := r.db.Get([]byte(hnswIndexKey))
 	if err != nil {
 		if errors.Is(err, pebble.ErrNotFound) {
-			log.Println("No existing HNSW index found, creating a new one.")
-			return nil // No index exists, so nothing to load.
+			log.Println("No existing HNSW index found.")
+			if opts.HNSWConfig.WALEnabled {
+				if err := r.replayWALFrom(0); err != nil {
+					return err
+				}
+			}
+			return nil
 		}
 		return err
 	}
@@ -174,6 +195,9 @@ func (r *PebbleDB) loadHNSW(opts *Options) error {
 			QuantizeVectors:   opts.HNSWConfig.QuantizeVectors,
 			SearchParallelism: opts.HNSWConfig.SearchParallelism,
 		})
+		if opts.HNSWConfig.WALEnabled {
+			return r.replayWALFrom(0)
+		}
 		return nil
 	}
 
@@ -263,6 +287,71 @@ func (r *PebbleDB) recordHNSWWrite(count uint64) {
 	}
 }
 
+func (r *PebbleDB) indexerLoop() {
+	defer r.indexerWg.Done()
+
+	batchSize := r.opts.HNSWConfig.IndexingBatchSize
+	if batchSize <= 0 {
+		batchSize = 512
+	}
+	flushInterval := r.opts.HNSWConfig.IndexingFlushInterval
+	if flushInterval <= 0 {
+		flushInterval = 200 * time.Millisecond
+	}
+
+	timer := time.NewTimer(flushInterval)
+	defer timer.Stop()
+
+	var ops []indexOp
+
+	flush := func() {
+		if len(ops) == 0 {
+			return
+		}
+		applied := 0
+		for _, op := range ops {
+			switch op.opType {
+			case indexOpAdd:
+				if err := r.hnsw.Add(op.id, op.vector); err == nil {
+					applied++
+				}
+				r.hotAdd(op.id, op.vector)
+			case indexOpDelete:
+				_ = r.hnsw.Delete(op.id)
+				r.hotDelete(op.id)
+				applied++
+			}
+		}
+		if applied > 0 {
+			r.recordHNSWWrite(uint64(applied))
+		}
+		ops = ops[:0]
+	}
+
+	for {
+		select {
+		case <-r.indexerStop:
+			flush()
+			return
+		case op := <-r.indexerCh:
+			ops = append(ops, op)
+			if len(ops) >= batchSize {
+				flush()
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(flushInterval)
+			}
+		case <-timer.C:
+			flush()
+			timer.Reset(flushInterval)
+		}
+	}
+}
+
 func (r *PebbleDB) maintenanceLoop(interval time.Duration) {
 	defer r.wg.Done()
 	ticker := time.NewTicker(interval)
@@ -347,7 +436,11 @@ func (r *PebbleDB) replayWAL() error {
 		return fmt.Errorf("failed to parse WAL timestamp: %w", err)
 	}
 
-	// Iterate over WAL entries created after the last snapshot timestamp.
+	return r.replayWALFrom(ts)
+}
+
+func (r *PebbleDB) replayWALFrom(ts int64) error {
+	// Iterate over WAL entries created after the provided timestamp.
 	iter := r.db.NewIter(&pebble.IterOptions{
 		LowerBound: []byte(fmt.Sprintf("%s%d", hnswWALPrefix, ts)),
 	})
