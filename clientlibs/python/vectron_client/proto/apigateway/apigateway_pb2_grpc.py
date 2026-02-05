@@ -43,6 +43,11 @@ class VectronServiceStub(object):
                 request_serializer=apigateway_dot_apigateway__pb2.CreateCollectionRequest.SerializeToString,
                 response_deserializer=apigateway_dot_apigateway__pb2.CreateCollectionResponse.FromString,
                 _registered_method=True)
+        self.DeleteCollection = channel.unary_unary(
+                '/vectron.v1.VectronService/DeleteCollection',
+                request_serializer=apigateway_dot_apigateway__pb2.DeleteCollectionRequest.SerializeToString,
+                response_deserializer=apigateway_dot_apigateway__pb2.DeleteCollectionResponse.FromString,
+                _registered_method=True)
         self.Upsert = channel.unary_unary(
                 '/vectron.v1.VectronService/Upsert',
                 request_serializer=apigateway_dot_apigateway__pb2.UpsertRequest.SerializeToString,
@@ -78,6 +83,11 @@ class VectronServiceStub(object):
                 request_serializer=apigateway_dot_apigateway__pb2.UpdateUserProfileRequest.SerializeToString,
                 response_deserializer=apigateway_dot_apigateway__pb2.UpdateUserProfileResponse.FromString,
                 _registered_method=True)
+        self.SubmitFeedback = channel.unary_unary(
+                '/vectron.v1.VectronService/SubmitFeedback',
+                request_serializer=apigateway_dot_apigateway__pb2.SubmitFeedbackRequest.SerializeToString,
+                response_deserializer=apigateway_dot_apigateway__pb2.SubmitFeedbackResponse.FromString,
+                _registered_method=True)
 
 
 class VectronServiceServicer(object):
@@ -89,6 +99,13 @@ class VectronServiceServicer(object):
 
     def CreateCollection(self, request, context):
         """Create a new collection
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DeleteCollection(self, request, context):
+        """Delete a collection and all its data
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -143,6 +160,13 @@ class VectronServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def SubmitFeedback(self, request, context):
+        """Submit search feedback
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_VectronServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -150,6 +174,11 @@ def add_VectronServiceServicer_to_server(servicer, server):
                     servicer.CreateCollection,
                     request_deserializer=apigateway_dot_apigateway__pb2.CreateCollectionRequest.FromString,
                     response_serializer=apigateway_dot_apigateway__pb2.CreateCollectionResponse.SerializeToString,
+            ),
+            'DeleteCollection': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteCollection,
+                    request_deserializer=apigateway_dot_apigateway__pb2.DeleteCollectionRequest.FromString,
+                    response_serializer=apigateway_dot_apigateway__pb2.DeleteCollectionResponse.SerializeToString,
             ),
             'Upsert': grpc.unary_unary_rpc_method_handler(
                     servicer.Upsert,
@@ -186,6 +215,11 @@ def add_VectronServiceServicer_to_server(servicer, server):
                     request_deserializer=apigateway_dot_apigateway__pb2.UpdateUserProfileRequest.FromString,
                     response_serializer=apigateway_dot_apigateway__pb2.UpdateUserProfileResponse.SerializeToString,
             ),
+            'SubmitFeedback': grpc.unary_unary_rpc_method_handler(
+                    servicer.SubmitFeedback,
+                    request_deserializer=apigateway_dot_apigateway__pb2.SubmitFeedbackRequest.FromString,
+                    response_serializer=apigateway_dot_apigateway__pb2.SubmitFeedbackResponse.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'vectron.v1.VectronService', rpc_method_handlers)
@@ -218,6 +252,33 @@ class VectronService(object):
             '/vectron.v1.VectronService/CreateCollection',
             apigateway_dot_apigateway__pb2.CreateCollectionRequest.SerializeToString,
             apigateway_dot_apigateway__pb2.CreateCollectionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeleteCollection(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vectron.v1.VectronService/DeleteCollection',
+            apigateway_dot_apigateway__pb2.DeleteCollectionRequest.SerializeToString,
+            apigateway_dot_apigateway__pb2.DeleteCollectionResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -407,6 +468,33 @@ class VectronService(object):
             '/vectron.v1.VectronService/UpdateUserProfile',
             apigateway_dot_apigateway__pb2.UpdateUserProfileRequest.SerializeToString,
             apigateway_dot_apigateway__pb2.UpdateUserProfileResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SubmitFeedback(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vectron.v1.VectronService/SubmitFeedback',
+            apigateway_dot_apigateway__pb2.SubmitFeedbackRequest.SerializeToString,
+            apigateway_dot_apigateway__pb2.SubmitFeedbackResponse.FromString,
             options,
             channel_credentials,
             insecure,

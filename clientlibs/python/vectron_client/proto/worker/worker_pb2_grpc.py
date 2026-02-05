@@ -40,6 +40,11 @@ class WorkerServiceStub(object):
                 request_serializer=worker_dot_worker__pb2.StoreVectorRequest.SerializeToString,
                 response_deserializer=worker_dot_worker__pb2.StoreVectorResponse.FromString,
                 _registered_method=True)
+        self.BatchStoreVector = channel.unary_unary(
+                '/vectron.worker.v1.WorkerService/BatchStoreVector',
+                request_serializer=worker_dot_worker__pb2.BatchStoreVectorRequest.SerializeToString,
+                response_deserializer=worker_dot_worker__pb2.BatchStoreVectorResponse.FromString,
+                _registered_method=True)
         self.GetVector = channel.unary_unary(
                 '/vectron.worker.v1.WorkerService/GetVector',
                 request_serializer=worker_dot_worker__pb2.GetVectorRequest.SerializeToString,
@@ -89,6 +94,12 @@ class WorkerServiceServicer(object):
     def StoreVector(self, request, context):
         """Vector operations
         """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def BatchStoreVector(self, request, context):
+        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -150,6 +161,11 @@ def add_WorkerServiceServicer_to_server(servicer, server):
                     servicer.StoreVector,
                     request_deserializer=worker_dot_worker__pb2.StoreVectorRequest.FromString,
                     response_serializer=worker_dot_worker__pb2.StoreVectorResponse.SerializeToString,
+            ),
+            'BatchStoreVector': grpc.unary_unary_rpc_method_handler(
+                    servicer.BatchStoreVector,
+                    request_deserializer=worker_dot_worker__pb2.BatchStoreVectorRequest.FromString,
+                    response_serializer=worker_dot_worker__pb2.BatchStoreVectorResponse.SerializeToString,
             ),
             'GetVector': grpc.unary_unary_rpc_method_handler(
                     servicer.GetVector,
@@ -220,6 +236,33 @@ class WorkerService(object):
             '/vectron.worker.v1.WorkerService/StoreVector',
             worker_dot_worker__pb2.StoreVectorRequest.SerializeToString,
             worker_dot_worker__pb2.StoreVectorResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def BatchStoreVector(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vectron.worker.v1.WorkerService/BatchStoreVector',
+            worker_dot_worker__pb2.BatchStoreVectorRequest.SerializeToString,
+            worker_dot_worker__pb2.BatchStoreVectorResponse.FromString,
             options,
             channel_credentials,
             insecure,

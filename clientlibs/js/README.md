@@ -40,6 +40,50 @@ const client = new VectronClient("localhost:8081", "YOUR_API_KEY");
 client.close();
 ```
 
+### Client Options and Help
+
+The client exposes a help function and a typed options object for safety and performance.
+
+```typescript
+import { VectronClient } from "vectron-client";
+
+const help = VectronClient.help();
+console.log(help.text);
+console.log(help.options);
+
+const client = new VectronClient("my-host:8081", "YOUR_API_KEY", {
+  useTLS: true,
+  timeoutMs: 15000,
+  expectedVectorDim: 128,
+  compression: "gzip",
+  hedgedReads: true,
+  hedgeDelayMs: 75,
+});
+```
+
+Retries are enabled by default for read-only operations. To retry writes, set `retryOnWrites: true`.
+
+### Batch Upsert and Client Pooling
+
+```typescript
+const count = await client.upsertBatch("my-collection", points, 512, 4);
+```
+
+To cap batch payload size, set `maxBatchBytes` in options:
+
+```typescript
+const client = new VectronClient("my-host:8081", "YOUR_API_KEY", {
+  maxBatchBytes: 8 * 1024 * 1024,
+});
+```
+
+```typescript
+import { VectronClientPool } from "vectron-client";
+
+const pool = new VectronClientPool("my-host:8081", "YOUR_API_KEY", { useTLS: true }, 4);
+const client = pool.next();
+```
+
 ### API Operations
 
 All API operations are `async` and return a `Promise`. They will throw an exception if the call fails.

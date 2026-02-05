@@ -58,6 +58,16 @@ class AuthServiceStub(object):
                 request_serializer=auth_dot_auth__pb2.UpdateUserProfileRequest.SerializeToString,
                 response_deserializer=auth_dot_auth__pb2.UpdateUserProfileResponse.FromString,
                 _registered_method=True)
+        self.DeleteUser = channel.unary_unary(
+                '/vectron.auth.v1.AuthService/DeleteUser',
+                request_serializer=auth_dot_auth__pb2.DeleteUserRequest.SerializeToString,
+                response_deserializer=auth_dot_auth__pb2.DeleteUserResponse.FromString,
+                _registered_method=True)
+        self.RefreshToken = channel.unary_unary(
+                '/vectron.auth.v1.AuthService/RefreshToken',
+                request_serializer=auth_dot_auth__pb2.RefreshTokenRequest.SerializeToString,
+                response_deserializer=auth_dot_auth__pb2.RefreshTokenResponse.FromString,
+                _registered_method=True)
         self.CreateAPIKey = channel.unary_unary(
                 '/vectron.auth.v1.AuthService/CreateAPIKey',
                 request_serializer=auth_dot_auth__pb2.CreateAPIKeyRequest.SerializeToString,
@@ -120,6 +130,20 @@ class AuthServiceServicer(object):
 
     def UpdateUserProfile(self, request, context):
         """Update the current user's profile (requires JWT authentication).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DeleteUser(self, request, context):
+        """Delete the current user's account (requires JWT authentication and optional password confirmation).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RefreshToken(self, request, context):
+        """Refresh the current user's JWT token (requires valid JWT).
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -193,6 +217,16 @@ def add_AuthServiceServicer_to_server(servicer, server):
                     servicer.UpdateUserProfile,
                     request_deserializer=auth_dot_auth__pb2.UpdateUserProfileRequest.FromString,
                     response_serializer=auth_dot_auth__pb2.UpdateUserProfileResponse.SerializeToString,
+            ),
+            'DeleteUser': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteUser,
+                    request_deserializer=auth_dot_auth__pb2.DeleteUserRequest.FromString,
+                    response_serializer=auth_dot_auth__pb2.DeleteUserResponse.SerializeToString,
+            ),
+            'RefreshToken': grpc.unary_unary_rpc_method_handler(
+                    servicer.RefreshToken,
+                    request_deserializer=auth_dot_auth__pb2.RefreshTokenRequest.FromString,
+                    response_serializer=auth_dot_auth__pb2.RefreshTokenResponse.SerializeToString,
             ),
             'CreateAPIKey': grpc.unary_unary_rpc_method_handler(
                     servicer.CreateAPIKey,
@@ -337,6 +371,60 @@ class AuthService(object):
             '/vectron.auth.v1.AuthService/UpdateUserProfile',
             auth_dot_auth__pb2.UpdateUserProfileRequest.SerializeToString,
             auth_dot_auth__pb2.UpdateUserProfileResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeleteUser(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vectron.auth.v1.AuthService/DeleteUser',
+            auth_dot_auth__pb2.DeleteUserRequest.SerializeToString,
+            auth_dot_auth__pb2.DeleteUserResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RefreshToken(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vectron.auth.v1.AuthService/RefreshToken',
+            auth_dot_auth__pb2.RefreshTokenRequest.SerializeToString,
+            auth_dot_auth__pb2.RefreshTokenResponse.FromString,
             options,
             channel_credentials,
             insecure,

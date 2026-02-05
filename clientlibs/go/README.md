@@ -44,6 +44,54 @@ func main() {
 }
 ```
 
+### Client Options and Help
+
+The client exposes a help function and a configurable options struct for safety and performance.
+
+```go
+helpText, options := vectron.Help()
+fmt.Println(helpText)
+fmt.Printf("Defaults: %+v\n", options)
+```
+
+```go
+opts := vectron.ClientOptions{
+    UseTLS:            true,
+    Timeout:           15 * time.Second,
+    ExpectedVectorDim: 128,
+    Compression:       "gzip",
+    HedgedReads:       true,
+    HedgeDelay:        75 * time.Millisecond,
+}
+client, err := vectron.NewClientWithOptions("my-host:8081", "YOUR_API_KEY", &opts)
+```
+
+Retries are enabled by default for read-only operations. To retry writes, set `RetryPolicy.RetryOnWrites = true`.
+
+### Batch Upsert and Client Pooling
+
+For high throughput, use client-side batching and optional pooling:
+
+```go
+batchOpts := &vectron.BatchOptions{BatchSize: 512, Concurrency: 4}
+count, err := client.UpsertBatch("my-collection", points, batchOpts)
+```
+
+To cap batch payload size, set `MaxBatchBytes`:
+
+```go
+batchOpts := &vectron.BatchOptions{BatchSize: 512, MaxBatchBytes: 8 * 1024 * 1024}
+```
+
+```go
+pool, err := vectron.NewClientPool("my-host:8081", "YOUR_API_KEY", &opts, 4)
+if err != nil {
+    log.Fatal(err)
+}
+defer pool.Close()
+client = pool.Next()
+```
+
 ### API Operations
 
 All API operations return an `error` if the call fails.

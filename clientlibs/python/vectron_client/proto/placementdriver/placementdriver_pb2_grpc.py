@@ -54,6 +54,11 @@ class PlacementServiceStub(object):
                 request_serializer=placementdriver_dot_placementdriver__pb2.ListWorkersRequest.SerializeToString,
                 response_deserializer=placementdriver_dot_placementdriver__pb2.ListWorkersResponse.FromString,
                 _registered_method=True)
+        self.ListWorkersForCollection = channel.unary_unary(
+                '/vectron.placementdriver.v1.PlacementService/ListWorkersForCollection',
+                request_serializer=placementdriver_dot_placementdriver__pb2.ListWorkersForCollectionRequest.SerializeToString,
+                response_deserializer=placementdriver_dot_placementdriver__pb2.ListWorkersForCollectionResponse.FromString,
+                _registered_method=True)
         self.Rebalance = channel.unary_unary(
                 '/vectron.placementdriver.v1.PlacementService/Rebalance',
                 request_serializer=placementdriver_dot_placementdriver__pb2.RebalanceRequest.SerializeToString,
@@ -113,6 +118,12 @@ class PlacementServiceServicer(object):
     def ListWorkers(self, request, context):
         """List all workers (for monitoring)
         """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListWorkersForCollection(self, request, context):
+        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -177,6 +188,11 @@ def add_PlacementServiceServicer_to_server(servicer, server):
                     servicer.ListWorkers,
                     request_deserializer=placementdriver_dot_placementdriver__pb2.ListWorkersRequest.FromString,
                     response_serializer=placementdriver_dot_placementdriver__pb2.ListWorkersResponse.SerializeToString,
+            ),
+            'ListWorkersForCollection': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListWorkersForCollection,
+                    request_deserializer=placementdriver_dot_placementdriver__pb2.ListWorkersForCollectionRequest.FromString,
+                    response_serializer=placementdriver_dot_placementdriver__pb2.ListWorkersForCollectionResponse.SerializeToString,
             ),
             'Rebalance': grpc.unary_unary_rpc_method_handler(
                     servicer.Rebalance,
@@ -317,6 +333,33 @@ class PlacementService(object):
             '/vectron.placementdriver.v1.PlacementService/ListWorkers',
             placementdriver_dot_placementdriver__pb2.ListWorkersRequest.SerializeToString,
             placementdriver_dot_placementdriver__pb2.ListWorkersResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListWorkersForCollection(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vectron.placementdriver.v1.PlacementService/ListWorkersForCollection',
+            placementdriver_dot_placementdriver__pb2.ListWorkersForCollectionRequest.SerializeToString,
+            placementdriver_dot_placementdriver__pb2.ListWorkersForCollectionResponse.FromString,
             options,
             channel_credentials,
             insecure,

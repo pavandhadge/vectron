@@ -74,25 +74,33 @@ protoc ${PROTO_INCLUDE_PATHS} \
 # =================================================
 # JAVASCRIPT — COMMON CLIENT LIB
 # =================================================
-# echo "📦 Generating JavaScript client code"
+echo "📦 Generating JavaScript client code"
 
-# mkdir -p clientlibs/js/proto
+mkdir -p clientlibs/js/proto
 
-# protoc ${PROTO_INCLUDE_PATHS} \
-#   --js_out=import_style=commonjs,binary:clientlibs/js/proto \
-#   --grpc-web_out=import_style=commonjs,mode=grpcwebtext:clientlibs/js/proto \
-#   "${ALL_PROTOS[@]}"
+TS_PROTO_BIN="$(pwd)/clientlibs/js/node_modules/.bin/protoc-gen-ts_proto"
+if [ ! -x "$TS_PROTO_BIN" ]; then
+  echo "❌ protoc-gen-ts_proto not found at $TS_PROTO_BIN"
+  echo "   Run: (cd clientlibs/js && npm install)"
+  exit 1
+fi
+
+protoc ${PROTO_INCLUDE_PATHS} \
+  --plugin=protoc-gen-ts_proto="$TS_PROTO_BIN" \
+  --ts_proto_out=clientlibs/js/proto \
+  --ts_proto_opt=outputServices=grpc-js,env=node,esModuleInterop=true,forceLong=string \
+  "${ALL_PROTOS[@]}"
 
 # =================================================
 # PYTHON — COMMON CLIENT LIB
 # =================================================
-# echo "🐍 Generating Python client code"
+echo "🐍 Generating Python client code"
 
-# mkdir -p clientlibs/python/vectron_client/proto
+mkdir -p clientlibs/python/vectron_client/proto
 
-# python3 -m grpc_tools.protoc ${PROTO_INCLUDE_PATHS} \
-#   --python_out=clientlibs/python/vectron_client/proto \
-#   --grpc_python_out=clientlibs/python/vectron_client/proto \
-#   "${ALL_PROTOS[@]}"
+python3 -m grpc_tools.protoc ${PROTO_INCLUDE_PATHS} \
+  --python_out=clientlibs/python/vectron_client/proto \
+  --grpc_python_out=clientlibs/python/vectron_client/proto \
+  "${ALL_PROTOS[@]}"
 
 echo "✅ Protobuf generation complete."

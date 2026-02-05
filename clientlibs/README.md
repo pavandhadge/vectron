@@ -10,6 +10,8 @@ All client libraries share a common design philosophy:
 - **Robust Error Handling:** Translate gRPC status codes into a clear hierarchy of custom errors or exceptions, making it easy for developers to handle failures.
 - **Authentication:** Handle the API key authentication mechanism automatically. Developers simply provide their key at initialization, and the library manages adding the correct `Authorization` header to every request.
 - **Type Safety:** Provide simple, user-friendly data types (like `Point` or `SearchResult`) and handle the conversion to and from the underlying protobuf message types.
+- **Safety and Performance Defaults:** Ship with sensible defaults for timeouts, message size caps, and connection reuse. Each library includes a help function that describes configuration options.
+- **Throughput Tools:** Each SDK includes optional batch upsert helpers and simple client pooling for high-QPS workloads.
 
 ---
 

@@ -39,6 +39,54 @@ with VectronClient(host="localhost:8081", api_key="YOUR_API_KEY") as client:
     pass
 ```
 
+### Client Options and Help
+
+The client exposes a help function and a `ClientOptions` configuration object for safety and performance.
+
+```python
+from vectron_client import VectronClient, ClientOptions
+
+help_text, options = VectronClient.help()
+print(help_text)
+print(options)
+
+opts = ClientOptions(use_tls=True, timeout_seconds=15.0, expected_vector_dim=128)
+with VectronClient(host="my-host:8081", api_key="YOUR_API_KEY", options=opts) as client:
+    pass
+```
+
+Retries are enabled by default for read-only operations. To retry writes, set `retry_on_writes=True`.
+
+You can also enable compression and hedged reads for performance:
+
+```python
+opts = ClientOptions(
+    use_tls=True,
+    compression="gzip",
+    hedged_reads=True,
+    hedge_delay_ms=75,
+)
+```
+
+### Batch Upsert and Client Pooling
+
+```python
+count = client.upsert_batch("my-collection", points, batch_size=512, concurrency=4)
+```
+
+To cap batch payload size, set `max_batch_bytes` in options:
+
+```python
+opts = ClientOptions(max_batch_bytes=8 * 1024 * 1024)
+```
+
+```python
+from vectron_client import VectronClientPool
+
+pool = VectronClientPool("my-host:8081", api_key="YOUR_API_KEY", options=opts, size=4)
+client = pool.next()
+```
+
 ### API Operations
 
 All API methods will raise a `VectronError`-derived exception if the call fails.
