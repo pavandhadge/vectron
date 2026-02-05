@@ -2,7 +2,7 @@
 BINARY_DIR := ./bin
 GO_BUILD_FLAGS := -trimpath   # optional: cleaner builds
 
-.PHONY: all build clean windows linux \
+.PHONY: all build clean windows linux test-e2e \
         build-placementdriver build-worker build-apigateway build-auth build-reranker
 
 all: build windows
@@ -45,6 +45,9 @@ build-auth:
 build-reranker:
 	mkdir -p $(BINARY_DIR)
 	go build $(GO_BUILD_FLAGS) -o $(BINARY_DIR)/reranker ./reranker/cmd/reranker
+
+test-e2e:
+	go test -v ./tests/e2e -run 'Test' -timeout 30m
 
 clean:
 	rm -rf $(BINARY_DIR)
