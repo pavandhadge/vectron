@@ -17,6 +17,7 @@ import (
 type Node struct {
 	ID        uint32
 	Vec       []float32
+	QVec      []int8
 	Norm      float32
 	Layer     int
 	Neighbors [][]uint32 // A slice of slices, where Neighbors[i] are the neighbors at layer i.
@@ -36,7 +37,7 @@ func (h *HNSW) distance(a, b []float32) float32 {
 
 func (h *HNSW) distanceWithNode(a []float32, b []float32, normB float32) float32 {
 	if h.config.Distance == "cosine" && h.config.NormalizeVectors {
-		return 1 - dotProduct(a, b)
+		return 1 - dotProductSIMD(a, b)
 	}
 	if h.config.Distance != "cosine" || !h.config.EnableNorms {
 		return h.distance(a, b)
@@ -50,6 +51,58 @@ func (h *HNSW) distanceWithNode(a []float32, b []float32, normB float32) float32
 		return 2.0
 	}
 	return 1 - dot/(float32(math.Sqrt(float64(normA)))*normB)
+}
+
+func (h *HNSW) distanceToNode(query []float32, qvec []int8, node *Node) float32 {
+	if node == nil {
+		return float32(math.MaxFloat32)
+	}
+	if node.QVec != nil {
+		if qvec == nil {
+			qvec = quantizeVector(query)
+		}
+		dot := dotProductInt8(qvec, node.QVec)
+		return 1 - float32(dot)/(127*127)
+	}
+	return h.distanceWithNode(query, node.Vec, node.Norm)
+}
+
+func (h *HNSW) distanceExact(query []float32, node *Node) float32 {
+	if node == nil {
+		return float32(math.MaxFloat32)
+	}
+	if node.Vec != nil {
+		return h.distanceWithNode(query, node.Vec, node.Norm)
+	}
+	if node.QVec != nil {
+		vec := dequantizeVector(node.QVec)
+		norm := float32(0)
+		if h.config.Distance == "cosine" && h.config.EnableNorms {
+			norm = VectorNorm(vec)
+		}
+		return h.distanceWithNode(query, vec, norm)
+	}
+	return float32(math.MaxFloat32)
+}
+
+func (h *HNSW) maybeQuantizeQuery(vec []float32) []int8 {
+	if !h.config.QuantizeVectors {
+		return nil
+	}
+	return quantizeVector(vec)
+}
+
+func (h *HNSW) nodeVector(node *Node) []float32 {
+	if node == nil {
+		return nil
+	}
+	if node.Vec != nil {
+		return node.Vec
+	}
+	if node.QVec != nil {
+		return dequantizeVector(node.QVec)
+	}
+	return nil
 }
 
 // EuclideanDistance calculates the squared Euclidean distance between two vectors.
@@ -102,17 +155,65 @@ func NormalizeVector(a []float32) []float32 {
 	return out
 }
 
+func quantizeVector(vec []float32) []int8 {
+	q := make([]int8, len(vec))
+	for i, v := range vec {
+		if v > 1 {
+			v = 1
+		} else if v < -1 {
+			v = -1
+		}
+		q[i] = int8(v * 127)
+	}
+	return q
+}
+
+func dequantizeVector(q []int8) []float32 {
+	out := make([]float32, len(q))
+	for i, v := range q {
+		out[i] = float32(v) / 127
+	}
+	return out
+}
+
+func dotProductInt8(a, b []int8) int32 {
+	n := len(a)
+	var sum0, sum1, sum2, sum3 int32
+	var sum4, sum5, sum6, sum7 int32
+	i := 0
+	for ; i+7 < n; i += 8 {
+		sum0 += int32(a[i]) * int32(b[i])
+		sum1 += int32(a[i+1]) * int32(b[i+1])
+		sum2 += int32(a[i+2]) * int32(b[i+2])
+		sum3 += int32(a[i+3]) * int32(b[i+3])
+		sum4 += int32(a[i+4]) * int32(b[i+4])
+		sum5 += int32(a[i+5]) * int32(b[i+5])
+		sum6 += int32(a[i+6]) * int32(b[i+6])
+		sum7 += int32(a[i+7]) * int32(b[i+7])
+	}
+	sum := (sum0 + sum1) + (sum2 + sum3) + (sum4 + sum5) + (sum6 + sum7)
+	for ; i < n; i++ {
+		sum += int32(a[i]) * int32(b[i])
+	}
+	return sum
+}
+
 func dotProduct(a, b []float32) float32 {
 	n := len(a)
 	var sum0, sum1, sum2, sum3 float32
+	var sum4, sum5, sum6, sum7 float32
 	i := 0
-	for ; i+3 < n; i += 4 {
+	for ; i+7 < n; i += 8 {
 		sum0 += a[i] * b[i]
 		sum1 += a[i+1] * b[i+1]
 		sum2 += a[i+2] * b[i+2]
 		sum3 += a[i+3] * b[i+3]
+		sum4 += a[i+4] * b[i+4]
+		sum5 += a[i+5] * b[i+5]
+		sum6 += a[i+6] * b[i+6]
+		sum7 += a[i+7] * b[i+7]
 	}
-	sum := sum0 + sum1 + sum2 + sum3
+	sum := (sum0 + sum1) + (sum2 + sum3) + (sum4 + sum5) + (sum6 + sum7)
 	for ; i < n; i++ {
 		sum += a[i] * b[i]
 	}
@@ -122,14 +223,19 @@ func dotProduct(a, b []float32) float32 {
 func sumSquares(a []float32) float32 {
 	n := len(a)
 	var sum0, sum1, sum2, sum3 float32
+	var sum4, sum5, sum6, sum7 float32
 	i := 0
-	for ; i+3 < n; i += 4 {
+	for ; i+7 < n; i += 8 {
 		sum0 += a[i] * a[i]
 		sum1 += a[i+1] * a[i+1]
 		sum2 += a[i+2] * a[i+2]
 		sum3 += a[i+3] * a[i+3]
+		sum4 += a[i+4] * a[i+4]
+		sum5 += a[i+5] * a[i+5]
+		sum6 += a[i+6] * a[i+6]
+		sum7 += a[i+7] * a[i+7]
 	}
-	sum := sum0 + sum1 + sum2 + sum3
+	sum := (sum0 + sum1) + (sum2 + sum3) + (sum4 + sum5) + (sum6 + sum7)
 	for ; i < n; i++ {
 		sum += a[i] * a[i]
 	}
@@ -142,7 +248,7 @@ func sumSquares(a []float32) float32 {
 
 // getNode retrieves a node by its internal ID, ensuring it's not marked as deleted.
 func (h *HNSW) getNode(id uint32) *Node {
-	if n, ok := h.nodes[id]; ok && n.Vec != nil {
+	if n, ok := h.nodes[id]; ok && (n.Vec != nil || n.QVec != nil) {
 		return n
 	}
 	return nil // Return nil if the node doesn't exist or is marked as deleted.
@@ -166,18 +272,22 @@ func (h *HNSW) persistNode(n *Node) error {
 func (h *HNSW) delete(id string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	return h.deleteNoLock(id)
+}
 
+func (h *HNSW) deleteNoLock(id string) error {
 	internalID, ok := h.idToUint32[id]
 	if !ok {
 		return nil // ID not found, nothing to delete.
 	}
 
 	node, exists := h.nodes[internalID]
-	if !exists || node.Vec == nil {
+	if !exists || (node.Vec == nil && node.QVec == nil) {
 		return nil // Node already deleted.
 	}
 
 	node.Vec = nil // Mark as deleted.
+	node.QVec = nil
 	atomic.AddInt64(&h.deletedCount, 1)
 
 	// Persist the deleted marker.
@@ -193,9 +303,13 @@ func (h *HNSW) item(id string) ([]float32, bool) {
 		return nil, false
 	}
 	node := h.nodes[internalID]
-	if node != nil && node.Vec != nil {
-		// Return a copy to prevent modification of the original vector.
-		return append([]float32(nil), node.Vec...), true
+	if node != nil {
+		if node.Vec != nil {
+			return append([]float32(nil), node.Vec...), true
+		}
+		if node.QVec != nil {
+			return dequantizeVector(node.QVec), true
+		}
 	}
 	return nil, false
 }
@@ -263,7 +377,7 @@ func (h *HNSW) performCleanup(batchSize int) {
 		if removed >= batchSize {
 			break
 		}
-		if node.Vec != nil { // Skip live nodes.
+		if node.Vec != nil || node.QVec != nil { // Skip live nodes.
 			continue
 		}
 
@@ -286,7 +400,7 @@ func (h *HNSW) performCleanup(batchSize int) {
 	// Phase 2: Clean the connection lists of only the affected nodes.
 	for affectedID := range affected {
 		node := h.nodes[affectedID]
-		if node == nil || node.Vec == nil {
+		if node == nil || (node.Vec == nil && node.QVec == nil) {
 			continue // This node might have been deleted in the same batch.
 		}
 
@@ -328,7 +442,7 @@ func (h *HNSW) maybeUpdateEntryPoint() {
 	// Find a new entry point, preferably at the highest layer.
 	for l := h.maxLayer; l >= 0; l-- {
 		for _, node := range h.nodes {
-			if node.Vec != nil && node.Layer == l {
+			if (node.Vec != nil || node.QVec != nil) && node.Layer == l {
 				h.entry = node.ID
 				h.maxLayer = l
 				return

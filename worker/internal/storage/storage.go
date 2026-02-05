@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/pebble"
 	"github.com/pavandhadge/vectron/worker/internal/idxhnsw"
@@ -68,13 +69,22 @@ type VectorEntry struct {
 
 // PebbleDB is the implementation of the Storage interface using PebbleDB as the backend.
 type PebbleDB struct {
-	db        *pebble.DB
-	writeOpts *pebble.WriteOptions
-	hnsw      *idxhnsw.HNSW // The HNSW index for approximate nearest neighbor search.
-	opts      *Options
-	stop      chan struct{}
-	wg        sync.WaitGroup
-	path      string // The path to the database directory
+	db                         *pebble.DB
+	writeOpts                  *pebble.WriteOptions
+	hnsw                       *idxhnsw.HNSW // The HNSW index for approximate nearest neighbor search.
+	opts                       *Options
+	stop                       chan struct{}
+	wg                         sync.WaitGroup
+	path                       string // The path to the database directory
+	hnswWriteCount             uint64
+	hnswSnapshotBaseInterval   time.Duration
+	hnswSnapshotMaxInterval    time.Duration
+	hnswSnapshotWriteThreshold uint64
+	hnswSnapshotMu             sync.Mutex
+	hnswLastSnapshot           time.Time
+	hnswSnapshotLoaded         bool
+	hnswRebuildMu              sync.Mutex
+	hnswRebuildInProgress      bool
 }
 
 // NewPebbleDB creates a new, uninitialized instance of PebbleDB.
@@ -106,6 +116,18 @@ func (r *PebbleDB) Search(query []float32, k int) ([]string, []float32, error) {
 		if adaptive < ef {
 			ef = adaptive
 		}
+	}
+	if r.opts != nil && r.opts.HNSWConfig.MultiStageEnabled {
+		stage1Ef := r.opts.HNSWConfig.Stage1Ef
+		if stage1Ef <= 0 {
+			stage1Ef = ef / 2
+		}
+		candidateFactor := r.opts.HNSWConfig.Stage1CandidateFactor
+		if candidateFactor <= 0 {
+			candidateFactor = 4
+		}
+		ids, scores := r.hnsw.SearchTwoStage(searchVec, k, stage1Ef, candidateFactor)
+		return ids, scores, nil
 	}
 	ids, scores := r.hnsw.SearchWithEf(searchVec, k, ef)
 	return ids, scores, nil

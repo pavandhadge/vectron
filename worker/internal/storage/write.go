@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/pavandhadge/vectron/worker/internal/idxhnsw"
@@ -115,6 +116,7 @@ func (r *PebbleDB) StoreVector(id string, vector []float32, metadata []byte) err
 		return fmt.Errorf("failed to commit batch for StoreVector: %w", err)
 	}
 
+	r.recordHNSWWrite(1)
 	return nil
 }
 
@@ -126,6 +128,9 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 	}
 	if len(vectors) == 0 {
 		return nil
+	}
+	if r.shouldBulkLoad(len(vectors)) {
+		return r.bulkLoadVectors(vectors)
 	}
 
 	added := make([]string, 0, len(vectors))
@@ -185,6 +190,7 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 		return fmt.Errorf("failed to commit batch for StoreVectorBatch: %w", err)
 	}
 
+	r.recordHNSWWrite(uint64(len(added)))
 	return nil
 }
 
@@ -223,6 +229,102 @@ func (r *PebbleDB) DeleteVector(id string) error {
 		return fmt.Errorf("failed to commit batch for DeleteVector: %w", err)
 	}
 
+	r.recordHNSWWrite(1)
+	return nil
+}
+
+func (r *PebbleDB) shouldBulkLoad(batchSize int) bool {
+	if r.opts == nil || !r.opts.HNSWConfig.BulkLoadEnabled {
+		return false
+	}
+	threshold := r.opts.HNSWConfig.BulkLoadThreshold
+	if threshold <= 0 {
+		threshold = 1000
+	}
+	if batchSize < threshold {
+		return false
+	}
+	if r.hnswSnapshotLoaded {
+		return false
+	}
+	if r.hnsw != nil && r.hnsw.Size() > 0 {
+		return false
+	}
+	return true
+}
+
+func (r *PebbleDB) bulkLoadVectors(vectors []VectorEntry) error {
+	added := make([]string, 0, len(vectors))
+	batch := r.db.NewBatch()
+	defer batch.Close()
+
+	for _, v := range vectors {
+		if v.ID == "" || len(v.Vector) == 0 {
+			for _, id := range added {
+				_ = r.hnsw.Delete(id)
+			}
+			return errors.New("vector id or data missing")
+		}
+
+		indexVector := v.Vector
+		if r.opts != nil && r.opts.HNSWConfig.DistanceMetric == "cosine" && r.opts.HNSWConfig.NormalizeVectors {
+			indexVector = idxhnsw.NormalizeVector(v.Vector)
+		}
+		if err := r.hnsw.Add(v.ID, indexVector); err != nil {
+			for _, id := range added {
+				_ = r.hnsw.Delete(id)
+			}
+			return fmt.Errorf("failed to add vector to HNSW index: %w", err)
+		}
+		added = append(added, v.ID)
+
+		val, err := encodeVectorWithMeta(v.Vector, v.Metadata)
+		if err != nil {
+			for _, id := range added {
+				_ = r.hnsw.Delete(id)
+			}
+			return fmt.Errorf("failed to encode vector with meta: %w", err)
+		}
+
+		if err := batch.Set(vectorKey(v.ID), val, nil); err != nil {
+			for _, id := range added {
+				_ = r.hnsw.Delete(id)
+			}
+			return fmt.Errorf("failed to set vector in batch: %w", err)
+		}
+	}
+
+	var buf bytes.Buffer
+	if err := r.hnsw.Save(&buf); err != nil {
+		for _, id := range added {
+			_ = r.hnsw.Delete(id)
+		}
+		return fmt.Errorf("failed to serialize HNSW index: %w", err)
+	}
+
+	ts := time.Now().UnixNano()
+	tsStr := strconv.FormatInt(ts, 10)
+	if err := batch.Set([]byte(hnswIndexKey), buf.Bytes(), r.writeOpts); err != nil {
+		for _, id := range added {
+			_ = r.hnsw.Delete(id)
+		}
+		return err
+	}
+	if err := batch.Set([]byte(hnswIndexTimestampKey), []byte(tsStr), r.writeOpts); err != nil {
+		for _, id := range added {
+			_ = r.hnsw.Delete(id)
+		}
+		return err
+	}
+
+	if err := batch.Commit(r.writeOpts); err != nil {
+		for _, id := range added {
+			_ = r.hnsw.Delete(id)
+		}
+		return fmt.Errorf("failed to commit batch for bulk load: %w", err)
+	}
+
+	r.markHNSWSnapshotSaved(ts)
 	return nil
 }
 

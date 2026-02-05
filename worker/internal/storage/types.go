@@ -3,6 +3,8 @@
 
 package storage
 
+import "time"
+
 // Options defines the configuration for the PebbleDB instance.
 type Options struct {
 	Path            string     // The directory path for the database files.
@@ -15,15 +17,28 @@ type Options struct {
 
 // HNSWConfig defines the configuration for the HNSW index.
 type HNSWConfig struct {
-	Dim              int    // The dimension of the vectors.
-	M                int    // The max number of connections per node per layer.
-	EfConstruction   int    // The size of the dynamic candidate list during index construction.
-	EfSearch         int    // The size of the dynamic candidate list during search.
-	DistanceMetric   string // The distance metric to use (e.g., "euclidean", "cosine").
-	WALEnabled       bool   // If true, enable the write-ahead log for the HNSW index.
-	PersistNodes     bool   // If true, persist individual HNSW nodes on every update.
-	EnableNorms      bool   // If true, store vector norms to speed up cosine distance.
-	NormalizeVectors bool   // If true, normalize vectors for cosine distance.
+	Dim                    int           // The dimension of the vectors.
+	M                      int           // The max number of connections per node per layer.
+	EfConstruction         int           // The size of the dynamic candidate list during index construction.
+	EfSearch               int           // The size of the dynamic candidate list during search.
+	DistanceMetric         string        // The distance metric to use (e.g., "euclidean", "cosine").
+	WALEnabled             bool          // If true, enable the write-ahead log for the HNSW index.
+	PersistNodes           bool          // If true, persist individual HNSW nodes on every update.
+	EnableNorms            bool          // If true, store vector norms to speed up cosine distance.
+	NormalizeVectors       bool          // If true, normalize vectors for cosine distance.
+	QuantizeVectors        bool          // If true, store vectors in int8 form (cosine+normalized only).
+	MultiStageEnabled      bool          // If true, use multi-stage search for latency/recall balance.
+	Stage1Ef               int           // EfSearch for stage 1 (candidate generation).
+	Stage1CandidateFactor  int           // Candidate multiplier for stage 2 refinement.
+	SnapshotInterval       time.Duration // Base interval for HNSW snapshotting.
+	SnapshotMaxInterval    time.Duration // Max interval between forced snapshots.
+	SnapshotWriteThreshold uint64        // Writes since last snapshot before deferring.
+	BulkLoadEnabled        bool          // If true, allow bulk load path for initial indexing.
+	BulkLoadThreshold      int           // Minimum batch size to trigger bulk load.
+	MaintenanceEnabled     bool          // If true, run background HNSW maintenance.
+	MaintenanceInterval    time.Duration // Interval between maintenance checks.
+	RebuildDeletedRatio    float64       // Rebuild when deleted/total ratio exceeds this.
+	RebuildMinDeleted      int64         // Minimum deleted nodes before rebuild.
 }
 
 // BatchOperations holds a set of write and delete operations to be performed atomically.

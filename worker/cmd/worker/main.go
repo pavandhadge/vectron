@@ -25,6 +25,7 @@ import (
 	"github.com/pavandhadge/vectron/worker/internal/pd"
 	"github.com/pavandhadge/vectron/worker/internal/shard"
 	"google.golang.org/grpc"
+	_ "google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/keepalive"
 )
 

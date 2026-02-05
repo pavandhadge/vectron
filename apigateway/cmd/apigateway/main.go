@@ -9,7 +9,6 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	runtime "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"hash/maphash"
@@ -37,6 +36,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -71,8 +71,8 @@ const (
 	grpcWindowSize      = 1 << 20
 )
 
-func grpcClientOptions() []grpc.DialOption {
-	return []grpc.DialOption{
+func grpcClientOptions(enableCompression bool) []grpc.DialOption {
+	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                20 * time.Second,
@@ -84,6 +84,10 @@ func grpcClientOptions() []grpc.DialOption {
 		grpc.WithReadBufferSize(grpcReadBufferSize),
 		grpc.WithWriteBufferSize(grpcWriteBufferSize),
 	}
+	if enableCompression {
+		opts = append(opts, grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)))
+	}
+	return opts
 }
 
 func grpcServerOptions() []grpc.ServerOption {
@@ -116,7 +120,14 @@ type SearchCacheEntry struct {
 // SearchCache provides LRU caching for search results with TTL
 type SearchCache struct {
 	mu      sync.RWMutex
-	entries map[string]*SearchCacheEntry
+	entries map[uint64]*SearchCacheEntry
+	ttl     time.Duration
+	maxSize int
+}
+
+type RerankWarmupCache struct {
+	mu      sync.RWMutex
+	entries map[uint64]*SearchCacheEntry
 	ttl     time.Duration
 	maxSize int
 }
@@ -234,7 +245,7 @@ func (h *searchResultHeap) Pop() interface{} {
 // NewSearchCache creates a new search cache with specified TTL and max size
 func NewSearchCache(ttl time.Duration, maxSize int) *SearchCache {
 	cache := &SearchCache{
-		entries: make(map[string]*SearchCacheEntry),
+		entries: make(map[uint64]*SearchCacheEntry),
 		ttl:     ttl,
 		maxSize: maxSize,
 	}
@@ -243,8 +254,18 @@ func NewSearchCache(ttl time.Duration, maxSize int) *SearchCache {
 	return cache
 }
 
-// computeCacheKey generates a cache key from search request
-func (c *SearchCache) computeCacheKey(req *pb.SearchRequest) string {
+func NewRerankWarmupCache(ttl time.Duration, maxSize int) *RerankWarmupCache {
+	cache := &RerankWarmupCache{
+		entries: make(map[uint64]*SearchCacheEntry),
+		ttl:     ttl,
+		maxSize: maxSize,
+	}
+	go cache.cleanupLoop()
+	return cache
+}
+
+// computeSearchCacheKey generates a cache key from search request
+func computeSearchCacheKey(req *pb.SearchRequest) uint64 {
 	// Use collection + topK + vector hash as key (fast hash)
 	var h maphash.Hash
 	h.SetSeed(cacheHashSeed)
@@ -257,9 +278,7 @@ func (c *SearchCache) computeCacheKey(req *pb.SearchRequest) string {
 	h.WriteString(req.Query)
 	binary.LittleEndian.PutUint32(buf[:], uint32(req.TopK))
 	h.Write(buf[:])
-	var out [8]byte
-	binary.LittleEndian.PutUint64(out[:], h.Sum64())
-	return hex.EncodeToString(out[:])
+	return h.Sum64()
 }
 
 // Get retrieves cached results if available and not expired
@@ -267,7 +286,7 @@ func (c *SearchCache) Get(req *pb.SearchRequest) (*pb.SearchResponse, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	key := c.computeCacheKey(req)
+	key := computeSearchCacheKey(req)
 	entry, exists := c.entries[key]
 	if !exists {
 		return nil, false
@@ -294,7 +313,7 @@ func (c *SearchCache) Set(req *pb.SearchRequest, resp *pb.SearchResponse) {
 		}
 	}
 
-	key := c.computeCacheKey(req)
+	key := computeSearchCacheKey(req)
 	c.entries[key] = &SearchCacheEntry{
 		Response:  resp,
 		Timestamp: time.Now(),
@@ -318,12 +337,133 @@ func (c *SearchCache) cleanupLoop() {
 	}
 }
 
+func (c *RerankWarmupCache) Get(key uint64) (*pb.SearchResponse, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	entry, exists := c.entries[key]
+	if !exists {
+		return nil, false
+	}
+
+	if time.Since(entry.Timestamp) > c.ttl {
+		return nil, false
+	}
+
+	return entry.Response, true
+}
+
+func (c *RerankWarmupCache) Set(key uint64, resp *pb.SearchResponse) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if len(c.entries) >= c.maxSize {
+		for k := range c.entries {
+			delete(c.entries, k)
+			break
+		}
+	}
+
+	c.entries[key] = &SearchCacheEntry{
+		Response:  resp,
+		Timestamp: time.Now(),
+	}
+}
+
+func (c *RerankWarmupCache) cleanupLoop() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		c.mu.Lock()
+		now := time.Now()
+		for key, entry := range c.entries {
+			if now.Sub(entry.Timestamp) > c.ttl {
+				delete(c.entries, key)
+			}
+		}
+		c.mu.Unlock()
+	}
+}
+
+func (s *gatewayServer) startRerankWarmup(key uint64, req *pb.SearchRequest, candidates []*reranker.Candidate, metadataByID map[string]map[string]string, rerankTopN int, rerankTimeoutMs int) {
+	if s.rerankWarmupCache == nil || s.rerankWarmupSem == nil {
+		return
+	}
+
+	s.rerankWarmupMu.Lock()
+	if _, exists := s.rerankWarmupInFlight[key]; exists {
+		s.rerankWarmupMu.Unlock()
+		return
+	}
+	s.rerankWarmupInFlight[key] = struct{}{}
+	s.rerankWarmupMu.Unlock()
+
+	select {
+	case s.rerankWarmupSem <- struct{}{}:
+		// proceed
+	default:
+		s.rerankWarmupMu.Lock()
+		delete(s.rerankWarmupInFlight, key)
+		s.rerankWarmupMu.Unlock()
+		return
+	}
+
+	candidatesCopy := make([]*reranker.Candidate, len(candidates))
+	copy(candidatesCopy, candidates)
+
+	go func() {
+		defer func() {
+			<-s.rerankWarmupSem
+			s.rerankWarmupMu.Lock()
+			delete(s.rerankWarmupInFlight, key)
+			s.rerankWarmupMu.Unlock()
+		}()
+
+		rerankReq := &reranker.RerankRequest{
+			Query:      req.Query,
+			Candidates: candidatesCopy,
+			TopN:       int32(rerankTopN),
+		}
+
+		rerankCtx := context.Background()
+		var cancel context.CancelFunc
+		if rerankTimeoutMs > 0 {
+			rerankCtx, cancel = context.WithTimeout(rerankCtx, time.Duration(rerankTimeoutMs)*time.Millisecond)
+		}
+		if cancel != nil {
+			defer cancel()
+		}
+
+		rerankResp, err := s.rerankerClient.Rerank(rerankCtx, rerankReq)
+		if err != nil {
+			return
+		}
+
+		rerankedResults := make([]*pb.SearchResult, len(rerankResp.Results))
+		for i, result := range rerankResp.Results {
+			var payload map[string]string
+			if metadataByID != nil {
+				payload = metadataByID[result.Id]
+			}
+			rerankedResults[i] = &pb.SearchResult{
+				Id:      result.Id,
+				Score:   result.RerankScore,
+				Payload: payload,
+			}
+		}
+
+		s.rerankWarmupCache.Set(key, &pb.SearchResponse{Results: rerankedResults})
+	}()
+}
+
 // WorkerConnPool manages gRPC connections to workers with connection reuse
 // to avoid the overhead of creating new connections for each request.
 type WorkerConnPool struct {
-	mu      sync.RWMutex
-	conns   map[string]*grpc.ClientConn
-	clients map[string]workerpb.WorkerServiceClient
+	mu                     sync.RWMutex
+	conns                  map[string]*grpc.ClientConn
+	clients                map[string]workerpb.WorkerServiceClient
+	grpcCompressionEnabled bool
 }
 
 // GetClient returns a cached gRPC client for the given worker address.
@@ -364,7 +504,7 @@ func (p *WorkerConnPool) GetClient(addr string) (workerpb.WorkerServiceClient, e
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	opts := append(grpcClientOptions(), grpc.WithBlock())
+	opts := append(grpcClientOptions(p.grpcCompressionEnabled), grpc.WithBlock())
 	conn, err := grpc.DialContext(ctx, addr, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial worker %s: %w", addr, err)
@@ -391,10 +531,11 @@ func (p *WorkerConnPool) CloseAll() {
 }
 
 // NewWorkerConnPool creates a new worker connection pool.
-func NewWorkerConnPool() *WorkerConnPool {
+func NewWorkerConnPool(enableCompression bool) *WorkerConnPool {
 	return &WorkerConnPool{
-		conns:   make(map[string]*grpc.ClientConn),
-		clients: make(map[string]workerpb.WorkerServiceClient),
+		conns:                  make(map[string]*grpc.ClientConn),
+		clients:                make(map[string]workerpb.WorkerServiceClient),
+		grpcCompressionEnabled: enableCompression,
 	}
 }
 
@@ -402,17 +543,30 @@ func NewWorkerConnPool() *WorkerConnPool {
 // forwarding requests to the appropriate backend services (placement driver or workers).
 type gatewayServer struct {
 	pb.UnimplementedVectronServiceServer
-	pdAddrs         []string
-	leader          *LeaderInfo
-	leaderMu        sync.RWMutex
-	authClient      authpb.AuthServiceClient
-	rerankerClient  reranker.RerankServiceClient
-	feedbackService *feedback.Service
-	managementMgr   *management.Manager
-	workerPool      *WorkerConnPool // Connection pool for worker gRPC connections
-	searchCache     *SearchCache    // Cache for search results
-	workerListCache *WorkerListCache
-	resolveCache    *WorkerResolveCache
+	pdAddrs                []string
+	leader                 *LeaderInfo
+	leaderMu               sync.RWMutex
+	authClient             authpb.AuthServiceClient
+	rerankerClient         reranker.RerankServiceClient
+	feedbackService        *feedback.Service
+	managementMgr          *management.Manager
+	workerPool             *WorkerConnPool // Connection pool for worker gRPC connections
+	searchCache            *SearchCache    // Cache for search results
+	workerListCache        *WorkerListCache
+	resolveCache           *WorkerResolveCache
+	grpcCompressionEnabled bool
+	rerankWarmupCache      *RerankWarmupCache
+	rerankWarmupSem        chan struct{}
+	rerankWarmupMu         sync.Mutex
+	rerankWarmupInFlight   map[uint64]struct{}
+	inFlightMu             sync.Mutex
+	inFlightSearches       map[uint64]*inFlightSearch
+}
+
+type inFlightSearch struct {
+	done chan struct{}
+	resp *pb.SearchResponse
+	err  error
 }
 
 func (s *gatewayServer) getPlacementClient() (placementpb.PlacementServiceClient, error) {
@@ -555,7 +709,7 @@ func (s *gatewayServer) updateLeader() (placementpb.PlacementServiceClient, erro
 
 	for _, addr := range s.pdAddrs {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		opts := append(grpcClientOptions(), grpc.WithBlock())
+		opts := append(grpcClientOptions(s.grpcCompressionEnabled), grpc.WithBlock())
 		conn, err := grpc.DialContext(ctx, addr, opts...)
 		cancel()
 		if err != nil {
@@ -820,11 +974,32 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 		req.TopK = 10
 	}
 
+	var warmupKey uint64
+	warmupKeySet := false
+	if cfg.RerankWarmupEnabled && s.rerankWarmupCache != nil {
+		warmupKey = computeSearchCacheKey(req)
+		warmupKeySet = true
+		if cached, found := s.rerankWarmupCache.Get(warmupKey); found {
+			s.searchCache.Set(req, cached)
+			return cached, nil
+		}
+	}
+
 	// Check cache for identical queries to avoid redundant computation
 	if cached, found := s.searchCache.Get(req); found {
 		return cached, nil
 	}
 
+	flightKey := computeSearchCacheKey(req)
+	if resp, err, shared := s.waitForInFlight(ctx, flightKey); shared {
+		return resp, err
+	}
+	resp, err := s.searchUncached(ctx, req, warmupKey, warmupKeySet)
+	s.finishInFlight(flightKey, resp, err)
+	return resp, err
+}
+
+func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchRequest, warmupKey uint64, warmupKeySet bool) (*pb.SearchResponse, error) {
 	workerTopK := int(req.TopK * 2)
 	if workerTopK < int(req.TopK) {
 		workerTopK = int(req.TopK)
@@ -917,7 +1092,11 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 				return
 			}
 
-			workerReq := translator.ToWorkerSearchRequest(req, 0, cfg.SearchLinearizable) // ShardID 0 for broadcast search
+			linearizable := cfg.SearchLinearizable
+			if v, ok := cfg.SearchConsistencyOverrides[req.Collection]; ok {
+				linearizable = v
+			}
+			workerReq := translator.ToWorkerSearchRequest(req, 0, linearizable) // ShardID 0 for broadcast search
 			workerReq.K = int32(workerTopK)
 
 			res, err := workerClient.Search(ctx, workerReq)
@@ -977,8 +1156,8 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 
 	// Standard practice: skip reranking when no query text is provided.
 	// Also skip unless reranking is explicitly enabled.
-	allowAll := len(cfg.RerankCollections) == 0
-	enabledForCollection := allowAll || cfg.RerankCollections[req.Collection]
+	allowAll = len(cfg.RerankCollections) == 0
+	enabledForCollection = allowAll || cfg.RerankCollections[req.Collection]
 	if req.Query == "" || !cfg.RerankEnabled || !enabledForCollection {
 		sort.Slice(searchResponse.Results, func(i, j int) bool {
 			return searchResponse.Results[i].Score > searchResponse.Results[j].Score
@@ -992,13 +1171,15 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 	}
 
 	candidates := make([]*reranker.Candidate, len(searchResponse.Results))
-	metadataByID := make(map[string]map[string]string, len(searchResponse.Results))
+	var metadataByID map[string]map[string]string
 	for i, result := range searchResponse.Results {
 		metadata := result.Payload
-		if metadata == nil {
-			metadata = map[string]string{}
+		if metadata != nil {
+			if metadataByID == nil {
+				metadataByID = make(map[string]map[string]string, len(searchResponse.Results))
+			}
+			metadataByID[result.Id] = metadata
 		}
-		metadataByID[result.Id] = metadata
 
 		candidates[i] = &reranker.Candidate{
 			Id:       result.Id,
@@ -1012,6 +1193,29 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 		rerankTopN = v
 	}
 
+	rerankTimeoutMs := cfg.RerankTimeoutMs
+	if v, ok := cfg.RerankTimeoutOverrides[req.Collection]; ok && v > 0 {
+		rerankTimeoutMs = v
+	}
+
+	if cfg.RerankWarmupEnabled && s.rerankWarmupCache != nil {
+		if !warmupKeySet {
+			warmupKey = computeSearchCacheKey(req)
+			warmupKeySet = true
+		}
+		s.startRerankWarmup(warmupKey, req, candidates, metadataByID, rerankTopN, rerankTimeoutMs)
+
+		sort.Slice(searchResponse.Results, func(i, j int) bool {
+			return searchResponse.Results[i].Score > searchResponse.Results[j].Score
+		})
+		if len(searchResponse.Results) > int(req.TopK) {
+			searchResponse.Results = searchResponse.Results[:req.TopK]
+		}
+		s.searchCache.Set(req, searchResponse)
+		searchResultSlicePool.Put(results[:0])
+		return searchResponse, nil
+	}
+
 	rerankReq := &reranker.RerankRequest{
 		Query:      req.Query, // Pass the query from the API Gateway's SearchRequest
 		Candidates: candidates,
@@ -1020,10 +1224,6 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 
 	rerankCtx := ctx
 	var cancel context.CancelFunc
-	rerankTimeoutMs := cfg.RerankTimeoutMs
-	if v, ok := cfg.RerankTimeoutOverrides[req.Collection]; ok && v > 0 {
-		rerankTimeoutMs = v
-	}
 	if rerankTimeoutMs > 0 {
 		rerankCtx, cancel = context.WithTimeout(ctx, time.Duration(rerankTimeoutMs)*time.Millisecond)
 		defer cancel()
@@ -1047,7 +1247,10 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 
 	rerankedResults := make([]*pb.SearchResult, len(rerankResp.Results))
 	for i, result := range rerankResp.Results {
-		payload := metadataByID[result.Id]
+		var payload map[string]string
+		if metadataByID != nil {
+			payload = metadataByID[result.Id]
+		}
 
 		rerankedResults[i] = &pb.SearchResult{
 			Id:      result.Id,
@@ -1063,6 +1266,37 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 	s.searchCache.Set(req, finalResponse)
 	searchResultSlicePool.Put(results[:0])
 	return finalResponse, nil
+}
+
+func (s *gatewayServer) waitForInFlight(ctx context.Context, key uint64) (*pb.SearchResponse, error, bool) {
+	s.inFlightMu.Lock()
+	if flight, ok := s.inFlightSearches[key]; ok {
+		s.inFlightMu.Unlock()
+		select {
+		case <-flight.done:
+			return flight.resp, flight.err, true
+		case <-ctx.Done():
+			return nil, ctx.Err(), true
+		}
+	}
+	flight := &inFlightSearch{done: make(chan struct{})}
+	s.inFlightSearches[key] = flight
+	s.inFlightMu.Unlock()
+	return nil, nil, false
+}
+
+func (s *gatewayServer) finishInFlight(key uint64, resp *pb.SearchResponse, err error) {
+	s.inFlightMu.Lock()
+	flight, ok := s.inFlightSearches[key]
+	if ok {
+		delete(s.inFlightSearches, key)
+	}
+	s.inFlightMu.Unlock()
+	if ok {
+		flight.resp = resp
+		flight.err = err
+		close(flight.done)
+	}
 }
 
 func (s *gatewayServer) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetResponse, error) {
@@ -1216,14 +1450,14 @@ func managementHandlers(mgr *management.Manager) http.Handler {
 // Start initializes and runs the API Gateway's gRPC and HTTP servers.
 func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.ClientConn) {
 	// Establish gRPC connection to Auth service
-	authConn, err := grpc.Dial(config.AuthServiceAddr, grpcClientOptions()...)
+	authConn, err := grpc.Dial(config.AuthServiceAddr, grpcClientOptions(config.GRPCEnableCompression)...)
 	if err != nil {
 		log.Fatalf("Failed to connect to Auth service: %v", err)
 	}
 	authClient := authpb.NewAuthServiceClient(authConn)
 
 	// Establish gRPC connection to Reranker service
-	rerankerConn, err := grpc.Dial(config.RerankerServiceAddr, grpcClientOptions()...)
+	rerankerConn, err := grpc.Dial(config.RerankerServiceAddr, grpcClientOptions(config.GRPCEnableCompression)...)
 	if err != nil {
 		log.Fatalf("Failed to connect to Reranker service: %v", err)
 	}
@@ -1237,14 +1471,33 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 
 	// Create the gateway server with the list of PD addresses
 	server := &gatewayServer{
-		pdAddrs:         strings.Split(config.PlacementDriver, ","),
-		authClient:      authClient,
-		rerankerClient:  rerankerClient,
-		feedbackService: feedbackService,
-		workerPool:      NewWorkerConnPool(),                 // Initialize worker connection pool for reuse
-		searchCache:     NewSearchCache(5*time.Second, 1000), // Cache search results for 5s, max 1000 entries
-		workerListCache: NewWorkerListCache(2 * time.Second),
-		resolveCache:    NewWorkerResolveCache(5*time.Second, 10000),
+		pdAddrs:                strings.Split(config.PlacementDriver, ","),
+		authClient:             authClient,
+		rerankerClient:         rerankerClient,
+		feedbackService:        feedbackService,
+		workerPool:             NewWorkerConnPool(config.GRPCEnableCompression), // Initialize worker connection pool for reuse
+		searchCache:            NewSearchCache(5*time.Second, 1000),             // Cache search results for 5s, max 1000 entries
+		workerListCache:        NewWorkerListCache(2 * time.Second),
+		resolveCache:           NewWorkerResolveCache(5*time.Second, 10000),
+		grpcCompressionEnabled: config.GRPCEnableCompression,
+		rerankWarmupInFlight:   make(map[uint64]struct{}),
+		inFlightSearches:       make(map[uint64]*inFlightSearch),
+	}
+	if config.RerankWarmupEnabled {
+		ttl := time.Duration(config.RerankWarmupTTLms) * time.Millisecond
+		if ttl <= 0 {
+			ttl = 30 * time.Second
+		}
+		maxSize := config.RerankWarmupMaxSize
+		if maxSize <= 0 {
+			maxSize = 2000
+		}
+		concurrency := config.RerankWarmupConcurrency
+		if concurrency <= 0 {
+			concurrency = 2
+		}
+		server.rerankWarmupCache = NewRerankWarmupCache(ttl, maxSize)
+		server.rerankWarmupSem = make(chan struct{}, concurrency)
 	}
 
 	// Initialize the leader connection with retry logic
@@ -1287,7 +1540,7 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 
 	// Set up the HTTP/JSON gateway to proxy requests to the gRPC server.
 	mux := runtime.NewServeMux()
-	opts := grpcClientOptions()
+	opts := grpcClientOptions(config.GRPCEnableCompression)
 	if err := pb.RegisterVectronServiceHandlerFromEndpoint(context.Background(), mux, config.GRPCAddr, opts); err != nil {
 		log.Fatalf("Failed to register VectronServiceHandlerFromEndpoint: %v", err)
 	}

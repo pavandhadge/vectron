@@ -80,6 +80,7 @@ The service is configured using environment variables:
 | `PLACEMENT_DRIVER` | Comma-separated list of placement driver node addresses. | `placement:6300`          |
 | `JWT_SECRET`       | Secret key for signing and verifying JWT tokens.         | `CHANGE_ME_IN_PRODUCTION` |
 | `RateLimitRPS`     | Global requests-per-second limit for the rate limiter.   | `100`                     |
+| `GRPC_ENABLE_COMPRESSION` | Enable gzip compression for gRPC clients.        | `false`                   |
 
 ## Building and Running
 

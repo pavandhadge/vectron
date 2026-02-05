@@ -16,6 +16,7 @@ import (
 	"github.com/pavandhadge/vectron/reranker/internal/strategies/rule"
 	pb "github.com/pavandhadge/vectron/shared/proto/reranker"
 	"google.golang.org/grpc"
+	_ "google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 )

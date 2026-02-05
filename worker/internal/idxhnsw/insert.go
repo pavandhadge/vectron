@@ -46,7 +46,11 @@ func (h *HNSW) selectNeighborsHeuristic(query []float32, candidates []candidate,
 				continue
 			}
 			// This is a simplified diversity check. A more robust implementation might be needed.
-			if h.distanceWithNode(selectedNode.Vec, candNode.Vec, candNode.Norm) < cand.dist {
+			selectedVec := h.nodeVector(selectedNode)
+			if selectedVec == nil {
+				continue
+			}
+			if h.distanceToNode(selectedVec, nil, candNode) < cand.dist {
 				tooClose = true
 				break
 			}
@@ -79,10 +83,10 @@ func (h *HNSW) selectNeighborsHeuristic(query []float32, candidates []candidate,
 func toCandidates(ids []uint32, query []float32, h *HNSW) []candidate {
 	cands := make([]candidate, 0, len(ids))
 	for _, id := range ids {
-		if n := h.getNode(id); n != nil && n.Vec != nil {
+		if n := h.getNode(id); n != nil {
 			cands = append(cands, candidate{
 				id:   id,
-				dist: h.distanceWithNode(query, n.Vec, n.Norm),
+				dist: h.distanceToNode(query, nil, n),
 				node: n,
 			})
 		}
@@ -95,17 +99,21 @@ func (h *HNSW) add(id string, vec []float32) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	var internalID uint32
-	var ok bool
-	if internalID, ok = h.idToUint32[id]; ok {
-		// If the ID already exists, this is an update.
-		// For simplicity, we can treat it as a delete followed by an add.
-		// A more optimized approach would update the vector in place.
-		h.delete(id)
+	if internalID, ok := h.idToUint32[id]; ok {
+		// If the ID already exists, treat as delete+add under the same lock.
+		if err := h.deleteNoLock(id); err != nil {
+			return err
+		}
+		delete(h.nodes, internalID)
+		delete(h.idToUint32, id)
+		delete(h.uint32ToID, internalID)
 	}
 
-	// Assign a new internal ID.
-	internalID = h.nextID
+	return h.addNoLock(id, vec)
+}
+
+func (h *HNSW) addNoLock(id string, vec []float32) error {
+	internalID := h.nextID
 	h.idToUint32[id] = internalID
 	h.uint32ToID[internalID] = id
 	h.nextID++
@@ -118,18 +126,30 @@ func (h *HNSW) add(id string, vec []float32) error {
 	layer := h.randomLayer()
 
 	// 2. Create the new node.
+	searchVec := vec
+	nodeVec := append([]float32(nil), vec...) // Create a deep copy.
 	node := &Node{
 		ID:        internalID,
-		Vec:       append([]float32(nil), vec...), // Create a deep copy.
+		Vec:       nil,
 		Norm:      0,
 		Layer:     layer,
 		Neighbors: make([][]uint32, layer+1),
 	}
 	if h.config.Distance == "cosine" && h.config.NormalizeVectors {
-		node.Vec = NormalizeVector(node.Vec)
-		node.Norm = 1
-	} else if h.config.Distance == "cosine" && h.config.EnableNorms {
-		node.Norm = VectorNorm(node.Vec)
+		searchVec = NormalizeVector(searchVec)
+		nodeVec = NormalizeVector(nodeVec)
+		if h.config.QuantizeVectors {
+			node.QVec = quantizeVector(nodeVec)
+			node.Norm = 1
+		} else {
+			node.Vec = nodeVec
+			node.Norm = 1
+		}
+	} else {
+		node.Vec = nodeVec
+		if h.config.Distance == "cosine" && h.config.EnableNorms {
+			node.Norm = VectorNorm(node.Vec)
+		}
 	}
 	for i := range node.Neighbors {
 		node.Neighbors[i] = make([]uint32, 0, h.config.M)
@@ -159,14 +179,15 @@ func (h *HNSW) add(id string, vec []float32) error {
 
 	// 3. Find the entry point for the insertion layer.
 	// Start from the top layer of the graph and greedily search down to the new node's layer.
+	qvec := h.maybeQuantizeQuery(searchVec)
 	for l := h.maxLayer; l > layer; l-- {
-		curr = h.searchLayerSingle(vec, curr, l)
+		curr = h.searchLayerSingle(searchVec, qvec, curr, l)
 	}
 
 	// 4. Iteratively insert the node into each layer from its layer down to 0.
 	for l := min(layer, h.maxLayer); l >= 0; l-- {
 		// Find the `efConstruction` nearest neighbors to the new node at this layer.
-		candidates := h.searchLayer(vec, curr, h.config.EfConstruction, l)
+		candidates := h.searchLayer(searchVec, qvec, curr, h.config.EfConstruction, l)
 
 		// Select the best `M` neighbors from the candidates using the heuristic.
 		neighbors := h.selectNeighborsHeuristic(vec, candidates, h.config.M)
@@ -184,9 +205,13 @@ func (h *HNSW) add(id string, vec []float32) error {
 
 			// Prune the neighbor's connections if they exceed the max (M).
 			if len(neighbor.Neighbors[l]) > h.config.M {
+				neighborVec := h.nodeVector(neighbor)
+				if neighborVec == nil {
+					continue
+				}
 				prunedNeighbors := h.selectNeighborsHeuristic(
-					neighbor.Vec,
-					toCandidates(neighbor.Neighbors[l], neighbor.Vec, h),
+					neighborVec,
+					toCandidates(neighbor.Neighbors[l], neighborVec, h),
 					h.config.M,
 				)
 				neighbor.Neighbors[l] = prunedNeighbors

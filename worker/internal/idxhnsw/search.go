@@ -86,15 +86,16 @@ func (h *HNSW) search(vec []float32, k int) ([]string, []float32) {
 	if h.config.Distance == "cosine" && h.config.NormalizeVectors {
 		vec = NormalizeVector(vec)
 	}
+	qvec := h.maybeQuantizeQuery(vec)
 
 	// 1. Find the entry point at the base layer by greedily traversing from the top.
 	curr := h.getNode(h.entry)
 	for l := h.maxLayer; l > 0; l-- {
-		curr = h.searchLayerSingle(vec, curr, l)
+		curr = h.searchLayerSingle(vec, qvec, curr, l)
 	}
 
 	// 2. Perform a more thorough search at the base layer (layer 0).
-	results := h.searchLayer(vec, curr, h.config.EfSearch, 0)
+	results := h.searchLayer(vec, qvec, curr, h.config.EfSearch, 0)
 
 	// 3. Sort the final results by distance and take the top K.
 	sort.Slice(results, func(i, j int) bool {
@@ -126,6 +127,7 @@ func (h *HNSW) searchWithEf(vec []float32, k, ef int) ([]string, []float32) {
 	if h.config.Distance == "cosine" && h.config.NormalizeVectors {
 		vec = NormalizeVector(vec)
 	}
+	qvec := h.maybeQuantizeQuery(vec)
 
 	if ef < k {
 		ef = k
@@ -134,11 +136,11 @@ func (h *HNSW) searchWithEf(vec []float32, k, ef int) ([]string, []float32) {
 	// 1. Find the entry point at the base layer by greedily traversing from the top.
 	curr := h.getNode(h.entry)
 	for l := h.maxLayer; l > 0; l-- {
-		curr = h.searchLayerSingle(vec, curr, l)
+		curr = h.searchLayerSingle(vec, qvec, curr, l)
 	}
 
 	// 2. Perform a more thorough search at the base layer (layer 0).
-	results := h.searchLayer(vec, curr, ef, 0)
+	results := h.searchLayer(vec, qvec, curr, ef, 0)
 
 	// 3. Sort the final results by distance and take the top K.
 	sort.Slice(results, func(i, j int) bool {
@@ -158,11 +160,70 @@ func (h *HNSW) searchWithEf(vec []float32, k, ef int) ([]string, []float32) {
 	return ids, scores
 }
 
+// searchTwoStage performs a fast candidate search followed by exact reranking.
+func (h *HNSW) searchTwoStage(vec []float32, k, stage1Ef, candidateFactor int) ([]string, []float32) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	if h.entry == 0 {
+		return nil, nil
+	}
+	if k <= 0 {
+		return nil, nil
+	}
+	if stage1Ef < k {
+		stage1Ef = k
+	}
+	if candidateFactor <= 0 {
+		candidateFactor = 4
+	}
+
+	if h.config.Distance == "cosine" && h.config.NormalizeVectors {
+		vec = NormalizeVector(vec)
+	}
+	qvec := h.maybeQuantizeQuery(vec)
+
+	curr := h.getNode(h.entry)
+	for l := h.maxLayer; l > 0; l-- {
+		curr = h.searchLayerSingle(vec, qvec, curr, l)
+	}
+
+	candidates := h.searchLayer(vec, qvec, curr, stage1Ef, 0)
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].dist < candidates[j].dist
+	})
+	maxCandidates := k * candidateFactor
+	if maxCandidates < k {
+		maxCandidates = k
+	}
+	if len(candidates) > maxCandidates {
+		candidates = candidates[:maxCandidates]
+	}
+
+	for i := range candidates {
+		candidates[i].dist = h.distanceExact(vec, candidates[i].node)
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].dist < candidates[j].dist
+	})
+	if len(candidates) > k {
+		candidates = candidates[:k]
+	}
+
+	ids := make([]string, len(candidates))
+	scores := make([]float32, len(candidates))
+	for i, c := range candidates {
+		ids[i] = h.uint32ToID[c.id]
+		scores[i] = c.dist
+	}
+	return ids, scores
+}
+
 // searchLayerSingle performs a greedy search for the closest node to the query vector
 // within a single layer. It's used to navigate down the layers of the graph.
-func (h *HNSW) searchLayerSingle(vec []float32, start *Node, layer int) *Node {
+func (h *HNSW) searchLayerSingle(vec []float32, qvec []int8, start *Node, layer int) *Node {
 	bestNode := start
-	bestDist := h.distanceWithNode(vec, start.Vec, start.Norm)
+	bestDist := h.distanceToNode(vec, qvec, start)
 
 	for {
 		foundCloser := false
@@ -171,7 +232,7 @@ func (h *HNSW) searchLayerSingle(vec []float32, start *Node, layer int) *Node {
 			if n == nil {
 				continue
 			}
-			d := h.distanceWithNode(vec, n.Vec, n.Norm)
+			d := h.distanceToNode(vec, qvec, n)
 			if d < bestDist {
 				bestDist = d
 				bestNode = n
@@ -187,7 +248,7 @@ func (h *HNSW) searchLayerSingle(vec []float32, start *Node, layer int) *Node {
 
 // searchLayer performs an expanded search within a single layer using a priority queue.
 // It explores neighbors of neighbors up to `ef` (efConstruction or efSearch) candidates.
-func (h *HNSW) searchLayer(vec []float32, start *Node, ef, layer int) []candidate {
+func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer int) []candidate {
 	visited := visitedPool.Get().(map[uint32]struct{})
 	for key := range visited {
 		delete(visited, key)
@@ -199,14 +260,14 @@ func (h *HNSW) searchLayer(vec []float32, start *Node, ef, layer int) []candidat
 	candidateSlice = candidateSlice[:0]
 	candidates := priorityQueue(candidateSlice)
 	heap.Init(&candidates)
-	heap.Push(&candidates, candidate{id: start.ID, dist: h.distanceWithNode(vec, start.Vec, start.Norm), node: start})
+	heap.Push(&candidates, candidate{id: start.ID, dist: h.distanceToNode(vec, qvec, start), node: start})
 
 	// Results queue (max-heap) to keep track of the best `ef` candidates found so far.
 	resultSlice := resultSlicePool.Get().([]candidate)
 	resultSlice = resultSlice[:0]
 	results := maxPriorityQueue(resultSlice)
 	heap.Init(&results)
-	heap.Push(&results, candidate{id: start.ID, dist: h.distanceWithNode(vec, start.Vec, start.Norm), node: start})
+	heap.Push(&results, candidate{id: start.ID, dist: h.distanceToNode(vec, qvec, start), node: start})
 
 	visited[start.ID] = struct{}{}
 
@@ -230,7 +291,7 @@ func (h *HNSW) searchLayer(vec []float32, start *Node, ef, layer int) []candidat
 			if n == nil {
 				continue
 			}
-			d := h.distanceWithNode(vec, n.Vec, n.Norm)
+			d := h.distanceToNode(vec, qvec, n)
 
 			// If we have room in the results max-heap, or if this node is closer than the furthest one in it...
 			if results.Len() < ef || d < results[0].dist {

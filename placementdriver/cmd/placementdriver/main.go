@@ -21,6 +21,7 @@ import (
 	"github.com/pavandhadge/vectron/placementdriver/internal/server"
 	pb "github.com/pavandhadge/vectron/shared/proto/placementdriver"
 	"google.golang.org/grpc"
+	_ "google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/keepalive"
 )
 

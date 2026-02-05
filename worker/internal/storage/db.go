@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/pebble"
@@ -61,8 +62,33 @@ func (r *PebbleDB) Init(path string, opts *Options) error {
 
 	// If the HNSW WAL is enabled, start the background persistence loop.
 	if opts.HNSWConfig.WALEnabled {
+		baseInterval := opts.HNSWConfig.SnapshotInterval
+		if baseInterval <= 0 {
+			baseInterval = 5 * time.Minute
+		}
+		maxInterval := opts.HNSWConfig.SnapshotMaxInterval
+		if maxInterval <= 0 {
+			maxInterval = 30 * time.Minute
+		}
+		writeThreshold := opts.HNSWConfig.SnapshotWriteThreshold
+		if writeThreshold == 0 {
+			writeThreshold = 10000
+		}
+		r.hnswSnapshotBaseInterval = baseInterval
+		r.hnswSnapshotMaxInterval = maxInterval
+		r.hnswSnapshotWriteThreshold = writeThreshold
+
 		r.wg.Add(1)
-		go r.persistenceLoop(5 * time.Minute) // Periodically save the index.
+		go r.persistenceLoop(baseInterval) // Periodically save the index.
+	}
+
+	if opts.HNSWConfig.MaintenanceEnabled {
+		interval := opts.HNSWConfig.MaintenanceInterval
+		if interval <= 0 {
+			interval = 30 * time.Minute
+		}
+		r.wg.Add(1)
+		go r.maintenanceLoop(interval)
 	}
 
 	return nil
@@ -103,6 +129,7 @@ func (r *PebbleDB) loadHNSW(opts *Options) error {
 		PersistNodes:     opts.HNSWConfig.PersistNodes,
 		EnableNorms:      opts.HNSWConfig.EnableNorms,
 		NormalizeVectors: opts.HNSWConfig.NormalizeVectors,
+		QuantizeVectors:  opts.HNSWConfig.QuantizeVectors,
 	})
 
 	data, closer, err := r.db.Get([]byte(hnswIndexKey))
@@ -126,8 +153,19 @@ func (r *PebbleDB) loadHNSW(opts *Options) error {
 			PersistNodes:     opts.HNSWConfig.PersistNodes,
 			EnableNorms:      opts.HNSWConfig.EnableNorms,
 			NormalizeVectors: opts.HNSWConfig.NormalizeVectors,
+			QuantizeVectors:  opts.HNSWConfig.QuantizeVectors,
 		})
 		return nil
+	}
+
+	r.hnswSnapshotLoaded = true
+	if tsData, closer, err := r.db.Get([]byte(hnswIndexTimestampKey)); err == nil {
+		if ts, err := strconv.ParseInt(string(tsData), 10, 64); err == nil {
+			r.hnswSnapshotMu.Lock()
+			r.hnswLastSnapshot = time.Unix(0, ts)
+			r.hnswSnapshotMu.Unlock()
+		}
+		closer.Close()
 	}
 
 	// If WAL is enabled, replay any operations that occurred after the last snapshot.
@@ -177,7 +215,101 @@ func (r *PebbleDB) saveHNSW() error {
 		return err
 	}
 
-	return batch.Commit(r.writeOpts)
+	if err := batch.Commit(r.writeOpts); err != nil {
+		return err
+	}
+
+	r.markHNSWSnapshotSaved(ts)
+	return nil
+}
+
+func (r *PebbleDB) markHNSWSnapshotSaved(ts int64) {
+	atomic.StoreUint64(&r.hnswWriteCount, 0)
+	r.hnswSnapshotMu.Lock()
+	if ts > 0 {
+		r.hnswLastSnapshot = time.Unix(0, ts)
+	} else {
+		r.hnswLastSnapshot = time.Now()
+	}
+	r.hnswSnapshotMu.Unlock()
+	r.hnswSnapshotLoaded = true
+}
+
+func (r *PebbleDB) recordHNSWWrite(count uint64) {
+	if count == 0 {
+		return
+	}
+	if r.opts != nil && r.opts.HNSWConfig.WALEnabled {
+		atomic.AddUint64(&r.hnswWriteCount, count)
+	}
+}
+
+func (r *PebbleDB) maintenanceLoop(interval time.Duration) {
+	defer r.wg.Done()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			r.maybeRebuildHNSW()
+		case <-r.stop:
+			log.Println("Stopping HNSW maintenance loop.")
+			return
+		}
+	}
+}
+
+func (r *PebbleDB) maybeRebuildHNSW() {
+	if r.hnsw == nil {
+		return
+	}
+	stats := r.hnsw.Stats()
+	if stats.TotalNodes == 0 {
+		return
+	}
+	minDeleted := r.opts.HNSWConfig.RebuildMinDeleted
+	if minDeleted <= 0 {
+		minDeleted = 5000
+	}
+	threshold := r.opts.HNSWConfig.RebuildDeletedRatio
+	if threshold <= 0 {
+		threshold = 0.30
+	}
+	if stats.DeletedNodes < minDeleted {
+		return
+	}
+	deletedRatio := float64(stats.DeletedNodes) / float64(stats.TotalNodes)
+	if deletedRatio < threshold {
+		return
+	}
+
+	r.hnswRebuildMu.Lock()
+	if r.hnswRebuildInProgress {
+		r.hnswRebuildMu.Unlock()
+		return
+	}
+	r.hnswRebuildInProgress = true
+	r.hnswRebuildMu.Unlock()
+
+	go func() {
+		defer func() {
+			r.hnswRebuildMu.Lock()
+			r.hnswRebuildInProgress = false
+			r.hnswRebuildMu.Unlock()
+		}()
+
+		log.Printf("Starting HNSW rebuild: total=%d deleted=%d ratio=%.2f", stats.TotalNodes, stats.DeletedNodes, deletedRatio)
+		if err := r.hnsw.Rebuild(); err != nil {
+			log.Printf("HNSW rebuild failed: %v", err)
+			return
+		}
+		if err := r.saveHNSW(); err != nil {
+			log.Printf("HNSW rebuild snapshot failed: %v", err)
+			return
+		}
+		log.Printf("HNSW rebuild completed")
+	}()
 }
 
 // replayWAL replays write-ahead log entries that occurred after the last HNSW snapshot.
@@ -231,15 +363,62 @@ func (r *PebbleDB) replayWAL() error {
 // persistenceLoop is a background goroutine that periodically saves the HNSW index.
 func (r *PebbleDB) persistenceLoop(interval time.Duration) {
 	defer r.wg.Done()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	baseInterval := interval
+	if baseInterval <= 0 {
+		baseInterval = 5 * time.Minute
+	}
+	maxInterval := r.hnswSnapshotMaxInterval
+	if maxInterval <= 0 {
+		maxInterval = 30 * time.Minute
+	}
+	writeThreshold := r.hnswSnapshotWriteThreshold
+	if writeThreshold == 0 {
+		writeThreshold = 10000
+	}
+	currentInterval := baseInterval
+
+	timer := time.NewTimer(currentInterval)
+	defer timer.Stop()
 
 	for {
 		select {
-		case <-ticker.C:
-			if err := r.saveHNSW(); err != nil {
-				log.Printf("Error during periodic HNSW save: %v", err)
+		case <-timer.C:
+			writes := atomic.LoadUint64(&r.hnswWriteCount)
+			r.hnswSnapshotMu.Lock()
+			lastSnapshot := r.hnswLastSnapshot
+			r.hnswSnapshotMu.Unlock()
+
+			timeSinceSnapshot := time.Duration(0)
+			if !lastSnapshot.IsZero() {
+				timeSinceSnapshot = time.Since(lastSnapshot)
 			}
+
+			shouldSave := false
+			if writes == 0 {
+				shouldSave = false
+			} else if timeSinceSnapshot >= maxInterval {
+				shouldSave = true
+			} else if writes >= writeThreshold {
+				shouldSave = false
+			} else {
+				shouldSave = true
+			}
+
+			if shouldSave {
+				if err := r.saveHNSW(); err != nil {
+					log.Printf("Error during periodic HNSW save: %v", err)
+				}
+				currentInterval = baseInterval
+			} else {
+				if currentInterval < maxInterval {
+					currentInterval *= 2
+					if currentInterval > maxInterval {
+						currentInterval = maxInterval
+					}
+				}
+			}
+
+			timer.Reset(currentInterval)
 		case <-r.stop:
 			log.Println("Stopping HNSW persistence loop.")
 			return

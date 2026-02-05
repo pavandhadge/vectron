@@ -9,7 +9,10 @@ package internal
 import (
 	"container/heap"
 	"context"
+	"encoding/binary"
+	"hash/maphash"
 	"log"
+	"math"
 	"os"
 	"runtime"
 	"strconv"
@@ -98,13 +101,24 @@ type GrpcServer struct {
 	worker.UnimplementedWorkerServiceServer
 	nodeHost     *dragonboat.NodeHost // The Dragonboat node host that manages all shards on this worker.
 	shardManager *shard.Manager       // The manager for all shards hosted on this worker.
+	inFlightMu   sync.Mutex
+	inFlight     map[uint64]*inFlightSearch
 }
+
+type inFlightSearch struct {
+	done chan struct{}
+	resp *worker.SearchResponse
+	err  error
+}
+
+var searchHashSeed = maphash.MakeSeed()
 
 // NewGrpcServer creates a new instance of the gRPC server.
 func NewGrpcServer(nh *dragonboat.NodeHost, sm *shard.Manager) *GrpcServer {
 	return &GrpcServer{
 		nodeHost:     nh,
 		shardManager: sm,
+		inFlight:     make(map[uint64]*inFlightSearch),
 	}
 }
 
@@ -194,6 +208,17 @@ func (s *GrpcServer) Search(ctx context.Context, req *worker.SearchRequest) (*wo
 		return nil, status.Error(codes.InvalidArgument, "search vector is empty")
 	}
 
+	key := computeSearchKey(req)
+	if resp, err, shared := s.waitForInFlight(ctx, key); shared {
+		return resp, err
+	}
+
+	resp, err := s.searchCore(ctx, req)
+	s.finishInFlight(key, resp, err)
+	return resp, err
+}
+
+func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) (*worker.SearchResponse, error) {
 	query := shard.SearchQuery{
 		Vector: req.GetVector(),
 		K:      int(req.GetK()),
@@ -293,6 +318,62 @@ func (s *GrpcServer) Search(ctx context.Context, req *worker.SearchRequest) (*wo
 		}
 
 		return &worker.SearchResponse{Ids: searchResult.IDs, Scores: searchResult.Scores}, nil
+	}
+}
+
+func computeSearchKey(req *worker.SearchRequest) uint64 {
+	var h maphash.Hash
+	h.SetSeed(searchHashSeed)
+	var buf8 [8]byte
+	var buf4 [4]byte
+	binary.LittleEndian.PutUint64(buf8[:], req.GetShardId())
+	h.Write(buf8[:])
+	binary.LittleEndian.PutUint32(buf4[:], uint32(req.GetK()))
+	h.Write(buf4[:])
+	flags := byte(0)
+	if req.GetLinearizable() {
+		flags |= 1 << 0
+	}
+	if req.GetBruteForce() {
+		flags |= 1 << 1
+	}
+	h.Write([]byte{flags})
+	h.WriteString(req.GetCollection())
+	for _, v := range req.GetVector() {
+		binary.LittleEndian.PutUint32(buf4[:], math.Float32bits(v))
+		h.Write(buf4[:])
+	}
+	return h.Sum64()
+}
+
+func (s *GrpcServer) waitForInFlight(ctx context.Context, key uint64) (*worker.SearchResponse, error, bool) {
+	s.inFlightMu.Lock()
+	if flight, ok := s.inFlight[key]; ok {
+		s.inFlightMu.Unlock()
+		select {
+		case <-flight.done:
+			return flight.resp, flight.err, true
+		case <-ctx.Done():
+			return nil, ctx.Err(), true
+		}
+	}
+	flight := &inFlightSearch{done: make(chan struct{})}
+	s.inFlight[key] = flight
+	s.inFlightMu.Unlock()
+	return nil, nil, false
+}
+
+func (s *GrpcServer) finishInFlight(key uint64, resp *worker.SearchResponse, err error) {
+	s.inFlightMu.Lock()
+	flight, ok := s.inFlight[key]
+	if ok {
+		delete(s.inFlight, key)
+	}
+	s.inFlightMu.Unlock()
+	if ok {
+		flight.resp = resp
+		flight.err = err
+		close(flight.done)
 	}
 }
 
