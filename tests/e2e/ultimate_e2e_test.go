@@ -1726,6 +1726,18 @@ func (s *UltimateE2ETest) cleanup() {
 	if err := os.RemoveAll(dataTempDir); err != nil {
 		log.Printf("Warning: failed to remove base data directory %s: %v", dataTempDir, err)
 	}
+	log.Printf("Removing base log directory: %s", logTempDir)
+	if err := os.RemoveAll(logTempDir); err != nil {
+		log.Printf("Warning: failed to remove base log directory %s: %v", logTempDir, err)
+	}
+	// Keep base temp folder but ensure it's empty.
+	log.Printf("Resetting base temp directory: %s", baseTempDir)
+	if err := os.RemoveAll(baseTempDir); err != nil {
+		log.Printf("Warning: failed to remove base temp directory %s: %v", baseTempDir, err)
+	}
+	if err := os.MkdirAll(baseTempDir, 0o755); err != nil {
+		log.Printf("Warning: failed to recreate base temp directory %s: %v", baseTempDir, err)
+	}
 }
 
 func (s *UltimateE2ETest) isPortOpen(port int) bool {
