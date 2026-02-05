@@ -69,11 +69,21 @@ const VectorOperationsPage: React.FC = () => {
     try {
       const response = await apiGatewayApiClient.get("/v1/collections");
       const data = response.data;
-      const mapped = (data.collections || []).map((c: any) => ({
-        ...c,
-        status: c.status || "ready",
-        count: c.count || 0,
-      }));
+      const mapped = (data.collections || []).map((c: any) => {
+        if (typeof c === "string") {
+          return {
+            name: c,
+            dimension: 0,
+            count: 0,
+          };
+        }
+        return {
+          ...c,
+          name: c.name || "Unnamed Collection",
+          dimension: typeof c.dimension === "number" ? c.dimension : 0,
+          count: typeof c.count === "number" ? c.count : 0,
+        };
+      });
       setCollections(mapped);
       if (mapped.length > 0 && !selectedCollection) {
         setSelectedCollection(mapped[0].name);
@@ -278,7 +288,7 @@ const VectorOperationsPage: React.FC = () => {
               <Database className="w-4 h-4 text-purple-400" />
               <span>
                 {selectedCollectionData
-                  ? `${selectedCollectionData.name} (${selectedCollectionData.dimension}D)`
+                  ? `${selectedCollectionData.name} (${selectedCollectionData.dimension > 0 ? `${selectedCollectionData.dimension}D` : "--"})`
                   : "Select a collection..."}
               </span>
             </div>
@@ -301,9 +311,9 @@ const VectorOperationsPage: React.FC = () => {
                     No collections available
                   </div>
                 ) : (
-                  collections.map((collection) => (
+                  collections.map((collection, index) => (
                     <button
-                      key={collection.name}
+                      key={collection.name || `collection-${index}`}
                       onClick={() => {
                         setSelectedCollection(collection.name);
                         setIsDropdownOpen(false);
@@ -313,7 +323,7 @@ const VectorOperationsPage: React.FC = () => {
                       <Database className="w-4 h-4 text-neutral-500" />
                       <span>{collection.name}</span>
                       <span className="text-neutral-500 text-xs ml-auto">
-                        {collection.dimension}D • {collection.count} vectors
+                        {(collection.dimension > 0 ? `${collection.dimension}D` : "--")} • {collection.count} vectors
                       </span>
                     </button>
                   ))

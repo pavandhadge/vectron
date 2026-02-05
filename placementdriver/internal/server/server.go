@@ -259,11 +259,24 @@ func (s *Server) ListWorkers(ctx context.Context, req *pb.ListWorkersRequest) (*
 
 	workerInfos := make([]*pb.WorkerInfo, 0, len(workers))
 	for _, w := range workers {
+		// Derive collections hosted on this worker.
+		collectionSet := make(map[string]struct{})
+		for _, shard := range s.fsm.GetShardsOnWorker(w.ID) {
+			collectionSet[shard.Collection] = struct{}{}
+		}
+		collections := make([]string, 0, len(collectionSet))
+		for name := range collectionSet {
+			collections = append(collections, name)
+		}
+
 		workerInfos = append(workerInfos, &pb.WorkerInfo{
 			WorkerId:      strconv.FormatUint(w.ID, 10),
 			GrpcAddress:   w.GrpcAddress,
 			RaftAddress:   w.RaftAddress,
+			Collections:   collections,
 			LastHeartbeat: w.LastHeartbeat.Unix(),
+			Healthy:       s.fsm.IsWorkerHealthy(w.ID),
+			Metadata:      map[string]string{},
 		})
 	}
 

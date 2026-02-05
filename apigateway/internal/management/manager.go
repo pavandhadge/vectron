@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -420,6 +421,7 @@ func (m *Manager) GetWorkers(ctx context.Context) ([]WorkerInfo, error) {
 	}
 
 	workers := make([]WorkerInfo, 0, len(res.Workers))
+	log.Printf("management: ListWorkers returned %d workers", len(res.Workers))
 
 	for _, w := range res.Workers {
 		worker := WorkerInfo{
@@ -439,6 +441,16 @@ func (m *Manager) GetWorkers(ctx context.Context) ([]WorkerInfo, error) {
 				ShardInfo:   make([]ShardInfo, 0),
 			},
 		}
+
+		log.Printf(
+			"management: worker=%s healthy=%t last_heartbeat_s=%d grpc=%s raft=%s collections=%d",
+			w.WorkerId,
+			w.Healthy,
+			w.LastHeartbeat,
+			w.GrpcAddress,
+			w.RaftAddress,
+			len(w.Collections),
+		)
 
 		workers = append(workers, worker)
 	}
@@ -553,10 +565,12 @@ func (m *Manager) HandleWorkers(w http.ResponseWriter, r *http.Request) {
 
 	workers, err := m.GetWorkers(ctx)
 	if err != nil {
+		log.Printf("management: HandleWorkers failed: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to get workers: %v", err), http.StatusInternalServerError)
 		return
 	}
 
+	log.Printf("management: HandleWorkers responding with %d workers", len(workers))
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"workers": workers,

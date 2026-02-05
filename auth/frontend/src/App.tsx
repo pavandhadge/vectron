@@ -11,6 +11,7 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import { Documentation } from "./pages/Documentation";
 import NotYetImplemented from "./pages/NotYetImplemented";
 import BillingPage from "./pages/BillingPage";
+import PlanChangePage from "./pages/PlanChangePage";
 import ProfilePage from "./pages/ProfilePage";
 import SDKDownloadPage from "./pages/SDKDownloadPage";
 import CollectionsPage from "./pages/CollectionsPage";
@@ -44,6 +45,7 @@ function App() {
             <Route path="settings" element={<NotYetImplemented />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="billing" element={<BillingPage />} />
+            <Route path="billing/change" element={<PlanChangePage />} />
             <Route path="collections" element={<CollectionsPage />} />
             <Route path="vectors" element={<VectorOperationsPage />} />
             <Route path="sdk" element={<SDKDownloadPage />} />

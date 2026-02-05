@@ -37,12 +37,16 @@ export PD_GRPC_2=10003
 export PD_RAFT_2=10004
 export PD_GRPC_3=10005
 export PD_RAFT_3=10006
-export WORKER_GRPC=10007
+export WORKER_GRPC_1=10007
+export WORKER_RAFT_1=11007
+export WORKER_GRPC_2=10014
+export WORKER_RAFT_2=11014
 export AUTH_GRPC=10008
 export AUTH_HTTP=10009
 export APIGATEWAY_GRPC=10010
 export FRONTEND_PORT=10011
 export RERANKER_PORT=10013
+export FEEDBACK_DB_PATH="/tmp/vectron/feedback.db"
 
 # Endpoints
 export ETCD_ENDPOINTS="127.0.0.1:2379"
@@ -60,6 +64,17 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 echo "✅ Binaries built successfully."
+
+# Ensure local data directories exist
+mkdir -p /tmp/vectron
+
+# --- Logging Helpers ---
+# Stream logs to both console and a log file with line buffering.
+run_bg() {
+    local log_file="$1"
+    shift
+    stdbuf -oL -eL "$@" 2>&1 | tee -a "$log_file" &
+}
 
 # --- Start Services ---
 
@@ -92,70 +107,83 @@ PD_INITIAL_MEMBERS="1:127.0.0.1:${PD_RAFT_1},2:127.0.0.1:${PD_RAFT_2},3:127.0.0.
 
 # Node 1
 PD_DATA_DIR_1=$(mktemp -d /tmp/pd_dev_1.XXXXXX)
-./bin/placementdriver \
+run_bg /tmp/vectron-pd1.log ./bin/placementdriver \
     --node-id=1 \
     --cluster-id=1 \
     --raft-addr="127.0.0.1:${PD_RAFT_1}" \
     --grpc-addr="127.0.0.1:${PD_GRPC_1}" \
     --data-dir="${PD_DATA_DIR_1}" \
-    --initial-members="${PD_INITIAL_MEMBERS}" > /tmp/vectron-pd1.log 2>&1 &
+    --initial-members="${PD_INITIAL_MEMBERS}"
 
 # Node 2
 PD_DATA_DIR_2=$(mktemp -d /tmp/pd_dev_2.XXXXXX)
-./bin/placementdriver \
+run_bg /tmp/vectron-pd2.log ./bin/placementdriver \
     --node-id=2 \
     --cluster-id=1 \
     --raft-addr="127.0.0.1:${PD_RAFT_2}" \
     --grpc-addr="127.0.0.1:${PD_GRPC_2}" \
     --data-dir="${PD_DATA_DIR_2}" \
-    --initial-members="${PD_INITIAL_MEMBERS}" > /tmp/vectron-pd2.log 2>&1 &
+    --initial-members="${PD_INITIAL_MEMBERS}"
 
 # Node 3
 PD_DATA_DIR_3=$(mktemp -d /tmp/pd_dev_3.XXXXXX)
-./bin/placementdriver \
+run_bg /tmp/vectron-pd3.log ./bin/placementdriver \
     --node-id=3 \
     --cluster-id=1 \
     --raft-addr="127.0.0.1:${PD_RAFT_3}" \
     --grpc-addr="127.0.0.1:${PD_GRPC_3}" \
     --data-dir="${PD_DATA_DIR_3}" \
-    --initial-members="${PD_INITIAL_MEMBERS}" > /tmp/vectron-pd3.log 2>&1 &
+    --initial-members="${PD_INITIAL_MEMBERS}"
 sleep 5 # Give PD cluster time to elect a leader
 
-# 3. Start Worker
-echo "▶️  Starting Worker service..."
-WORKER_DATA_DIR=$(mktemp -d /tmp/worker_dev.XXXXXX)
-./bin/worker \
+# 3. Start Workers
+echo "▶️  Starting 2 Worker nodes..."
+WORKER_DATA_DIR_1=$(mktemp -d /tmp/worker_dev_1.XXXXXX)
+run_bg /tmp/vectron-worker1.log ./bin/worker \
     --node-id=1 \
-    --grpc-addr="127.0.0.1:${WORKER_GRPC}" \
+    --grpc-addr="127.0.0.1:${WORKER_GRPC_1}" \
+    --raft-addr="127.0.0.1:${WORKER_RAFT_1}" \
     --pd-addrs="${PD_ADDRS}" \
-    --data-dir="${WORKER_DATA_DIR}" > /tmp/vectron-worker.log 2>&1 &
+    --data-dir="${WORKER_DATA_DIR_1}"
+
+WORKER_DATA_DIR_2=$(mktemp -d /tmp/worker_dev_2.XXXXXX)
+run_bg /tmp/vectron-worker2.log ./bin/worker \
+    --node-id=2 \
+    --grpc-addr="127.0.0.1:${WORKER_GRPC_2}" \
+    --raft-addr="127.0.0.1:${WORKER_RAFT_2}" \
+    --pd-addrs="${PD_ADDRS}" \
+    --data-dir="${WORKER_DATA_DIR_2}"
 sleep 2
 
 # 4. Start Auth Service
 echo "▶️  Starting Auth service..."
-GRPC_PORT=":${AUTH_GRPC}" HTTP_PORT=":${AUTH_HTTP}" ./bin/authsvc > /tmp/vectron-auth.log 2>&1 &
+run_bg /tmp/vectron-auth.log env GRPC_PORT=":${AUTH_GRPC}" HTTP_PORT=":${AUTH_HTTP}" ./bin/authsvc
 sleep 2
 
 # 5. Start Reranker Service
 echo "▶️  Starting Reranker service..."
-RULE_EXACT_MATCH_BOOST=0.3 \
-RULE_TITLE_BOOST=0.2 \
-RULE_METADATA_BOOSTS="verified:0.3,featured:0.2" \
-RULE_METADATA_PENALTIES="deprecated:0.5" \
-./bin/reranker \
+run_bg /tmp/vectron-reranker.log \
+  env \
+  RULE_EXACT_MATCH_BOOST=0.3 \
+  RULE_TITLE_BOOST=0.2 \
+  RULE_METADATA_BOOSTS="verified:0.3,featured:0.2" \
+  RULE_METADATA_PENALTIES="deprecated:0.5" \
+  ./bin/reranker \
   --port="${RERANKER_PORT}" \
   --strategy="rule" \
-  --cache="memory" > /tmp/vectron-reranker.log 2>&1 &
+  --cache="memory"
 sleep 2
 
 # 6. Start API Gateway
 echo "▶️  Starting API Gateway service..."
-GRPC_ADDR="127.0.0.1:${APIGATEWAY_GRPC}" \
-HTTP_ADDR="127.0.0.1:10012" \
-PLACEMENT_DRIVER="${PD_ADDRS}" \
-AUTH_SERVICE_ADDR="${AUTH_SERVICE_ADDR}" \
-RERANKER_SERVICE_ADDR="127.0.0.1:${RERANKER_PORT}" \
-./bin/apigateway > /tmp/vectron-apigw.log 2>&1 &
+run_bg /tmp/vectron-apigw.log \
+  env \
+  GRPC_ADDR="127.0.0.1:${APIGATEWAY_GRPC}" \
+  HTTP_ADDR="127.0.0.1:10012" \
+  PLACEMENT_DRIVER="${PD_ADDRS}" \
+  AUTH_SERVICE_ADDR="${AUTH_SERVICE_ADDR}" \
+  RERANKER_SERVICE_ADDR="127.0.0.1:${RERANKER_PORT}" \
+  ./bin/apigateway
 sleep 2
 
 # 7. Start Frontend
@@ -163,15 +191,15 @@ echo "▶️  Starting Frontend development server..."
 (
     cd auth/frontend
     echo "    (Running npm install in auth/frontend...)"
-    npm install > /tmp/vectron-frontend-install.log 2>&1
-    
+    npm install | tee -a /tmp/vectron-frontend-install.log
+
     # Export environment variables for the frontend
     export VITE_AUTH_API_BASE_URL="http://localhost:${AUTH_HTTP}"
     export VITE_APIGATEWAY_API_BASE_URL="http://localhost:10012"
     export VITE_PLACEMENT_DRIVER_API_BASE_URL="http://localhost:${PD_GRPC_1}"
-    
+
     npm run dev -- --port ${FRONTEND_PORT}
-)
+) 2>&1 | tee -a /tmp/vectron-frontend.log &
 
 echo " "
 echo "🎉 All services are running!"
@@ -181,6 +209,8 @@ echo "Auth Service (HTTP)   > http://localhost:${AUTH_HTTP}"
 echo "API Gateway (HTTP)    > http://localhost:10012"
 echo "API Gateway (gRPC)    > 127.0.0.1:${APIGATEWAY_GRPC}"
 echo "Placement Driver      > 127.0.0.1:${PD_GRPC_1}"
+echo "Worker Node 1         > 127.0.0.1:${WORKER_GRPC_1} (raft ${WORKER_RAFT_1})"
+echo "Worker Node 2         > 127.0.0.1:${WORKER_GRPC_2} (raft ${WORKER_RAFT_2})"
 echo "Reranker Service      > 127.0.0.1:${RERANKER_PORT}"
 echo "-----------------------------------"
 echo "Frontend Environment Variables:"

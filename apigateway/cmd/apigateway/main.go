@@ -734,6 +734,13 @@ func (s *gatewayServer) updateLeader() (placementpb.PlacementServiceClient, erro
 }
 
 func (s *gatewayServer) forwardToWorker(ctx context.Context, collection string, vectorID string, call func(workerpb.WorkerServiceClient, uint64) (interface{}, error)) (interface{}, error) {
+	// Ensure we always have a deadline for raft proposals on workers.
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+	}
+
 	placementClient, err := s.getPlacementClient()
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)

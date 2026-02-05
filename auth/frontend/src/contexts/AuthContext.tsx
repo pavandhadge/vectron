@@ -16,6 +16,8 @@ import {
   RegisterUserRequest,
   RegisterUserResponse,
   UserProfile,
+  Plan,
+  SubscriptionStatus,
 } from "../api-types";
 
 /* =======================
@@ -78,6 +80,36 @@ authApiClient.interceptors.request.use(authInterceptor);
 apiGatewayApiClient.interceptors.request.use(authInterceptor);
 
 /* =======================
+   Normalization Helpers
+======================= */
+
+const normalizePlan = (plan: unknown): Plan => {
+  if (typeof plan === "number") return plan as Plan;
+  if (typeof plan === "string") {
+    const mapped = (Plan as Record<string, unknown>)[plan];
+    if (typeof mapped === "number") return mapped as Plan;
+  }
+  return Plan.FREE;
+};
+
+const normalizeSubscriptionStatus = (status: unknown): SubscriptionStatus => {
+  if (typeof status === "number") return status as SubscriptionStatus;
+  if (typeof status === "string") {
+    const mapped = (SubscriptionStatus as Record<string, unknown>)[status];
+    if (typeof mapped === "number") return mapped as SubscriptionStatus;
+  }
+  return SubscriptionStatus.SUBSCRIPTION_STATUS_UNSPECIFIED;
+};
+
+const normalizeUserProfile = (user: UserProfile): UserProfile => ({
+  ...user,
+  plan: normalizePlan(user.plan as unknown),
+  subscription_status: normalizeSubscriptionStatus(
+    user.subscription_status as unknown,
+  ),
+});
+
+/* =======================
    Provider
 ======================= */
 
@@ -98,7 +130,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const updateUserAndToken = (user: UserProfile, token: string) => {
     setToken(token);
-    setUser(user);
+    setUser(normalizeUserProfile(user));
     localStorage.setItem("jwt_token", token);
   };
 
@@ -107,7 +139,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       authApiClient
         .get("/v1/user/profile")
         .then((response) => {
-          setUser(response.data.user);
+          setUser(normalizeUserProfile(response.data.user));
         })
         .catch((err) => {
           console.error("Error fetching user profile:", err);

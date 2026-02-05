@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import { Outlet, useLocation, Link as RouterLink } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import {
@@ -12,6 +13,8 @@ import {
   Globe,
   ArrowRight,
 } from "lucide-react";
+import { managementApi } from "../services/managementApi";
+import { formatBytes, formatCompactNumber, formatDateTime, formatNumber } from "../utils/format";
 
 // --- Components ---
 
@@ -82,11 +85,66 @@ const EmptyState = () => (
 );
 
 export const Dashboard = () => {
-  const { user } = useAuth();
+  const { user, apiGatewayApiClient } = useAuth();
   const location = useLocation();
   const pathnames = location.pathname.split("/").filter((x) => x);
   const isMainDashboard =
     pathnames.length === 1 && pathnames[0] === "dashboard";
+
+  const [systemHealth, setSystemHealth] = useState<any>(null);
+  const [gatewayStats, setGatewayStats] = useState<any>(null);
+  const [gatewayEndpoints, setGatewayEndpoints] = useState<any[]>([]);
+  const [collections, setCollections] = useState<{ name: string; dimension: number; count: number }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchOverviewData = async () => {
+    try {
+      const [health, gateway, collectionsResp] = await Promise.all([
+        managementApi.getSystemHealth(),
+        managementApi.getGatewayStats(),
+        apiGatewayApiClient.get("/v1/collections"),
+      ]);
+
+      setSystemHealth(health);
+      setGatewayStats(gateway.stats);
+      setGatewayEndpoints(gateway.endpoints || []);
+
+      const data = collectionsResp.data;
+      const mapped = (data.collections || []).map((c: any) => {
+        if (typeof c === "string") {
+          return { name: c, dimension: 0, count: 0 };
+        }
+        return {
+          name: c.name || "Unnamed Collection",
+          dimension: typeof c.dimension === "number" ? c.dimension : 0,
+          count: typeof c.count === "number" ? c.count : 0,
+        };
+      });
+      setCollections(mapped);
+    } catch (err) {
+      // Keep partial data if some calls succeed
+      console.error("Failed to load overview data:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchOverviewData();
+  }, []);
+
+  const requestVolumeBars = useMemo(() => {
+    if (!gatewayEndpoints || gatewayEndpoints.length === 0) return [];
+    const sorted = [...gatewayEndpoints]
+      .sort((a, b) => (b.count || 0) - (a.count || 0))
+      .slice(0, 12);
+    const max = Math.max(...sorted.map((e) => e.count || 0), 1);
+    return sorted.map((e) => ({
+      key: `${e.method || "GET"} ${e.path || "-"}`,
+      height: Math.max(5, Math.round(((e.count || 0) / max) * 100)),
+      count: e.count || 0,
+    }));
+  }, [gatewayEndpoints]);
 
   return (
     <div className="container mx-auto px-4 sm:px-6 py-8 min-h-screen bg-black text-white selection:bg-purple-500 selection:text-white">
@@ -147,24 +205,33 @@ export const Dashboard = () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <StatCard
               title="Total Vectors"
-              value="1,240,592"
-              subtext="Across 4 collections"
+              value={systemHealth ? formatNumber(systemHealth.metrics.total_vectors, "0") : "--"}
+              subtext={
+                collections.length > 0
+                  ? `Across ${collections.length} collections`
+                  : "Across 0 collections"
+              }
               icon={<Database className="w-5 h-5" />}
-              trend={12.5}
             />
             <StatCard
-              title="Requests (24h)"
-              value="84.3k"
-              subtext="Avg. 3.2k / hour"
+              title="Total Requests"
+              value={gatewayStats ? formatCompactNumber(gatewayStats.totalRequests, "0") : "--"}
+              subtext={
+                gatewayStats
+                  ? `${formatNumber(gatewayStats.requestsPerSecond, "0")} req/s`
+                  : "No traffic data"
+              }
               icon={<Activity className="w-5 h-5" />}
-              trend={-2.4}
             />
             <StatCard
               title="Avg. Latency"
-              value="14ms"
-              subtext="P99: 22ms"
+              value={gatewayStats ? `${formatNumber(gatewayStats.averageResponseTime, "0")}ms` : "--"}
+              subtext={
+                systemHealth
+                  ? `${formatBytes(systemHealth.metrics.memory_used)} memory used`
+                  : "No latency data"
+              }
               icon={<Zap className="w-5 h-5" />}
-              trend={5.1}
             />
           </div>
 
@@ -214,26 +281,29 @@ export const Dashboard = () => {
               <h3 className="text-lg font-medium text-white mb-6">
                 Request Volume
               </h3>
-              <div className="h-64 flex items-end gap-2 px-2 pb-2 border-b border-neutral-800/50">
-                {/* Simulated Bar Chart */}
-                {[40, 65, 45, 80, 55, 90, 70, 85, 60, 75, 50, 95].map(
-                  (h, i) => (
+              {requestVolumeBars.length === 0 ? (
+                <div className="h-64 flex items-center justify-center text-neutral-500 text-sm border border-dashed border-neutral-800 rounded-lg">
+                  No endpoint traffic data yet
+                </div>
+              ) : (
+                <div className="h-64 flex items-end gap-2 px-2 pb-2 border-b border-neutral-800/50">
+                  {requestVolumeBars.map((bar) => (
                     <div
-                      key={i}
+                      key={bar.key}
                       className="flex-1 bg-purple-500/20 hover:bg-purple-500/40 transition-colors rounded-t-sm relative group"
-                      style={{ height: `${h}%` }}
+                      style={{ height: `${bar.height}%` }}
                     >
                       <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-neutral-800 text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity">
-                        {h * 100}
+                        {formatNumber(bar.count)}
                       </div>
                     </div>
-                  ),
-                )}
-              </div>
+                  ))}
+                </div>
+              )}
               <div className="flex justify-between mt-4 text-xs text-neutral-500">
-                <span>00:00</span>
-                <span>12:00</span>
-                <span>23:59</span>
+                <span>Low</span>
+                <span>Medium</span>
+                <span>High</span>
               </div>
             </div>
 
@@ -242,36 +312,25 @@ export const Dashboard = () => {
               <h3 className="text-lg font-medium text-white mb-4">
                 Recent Activity
               </h3>
-              <div className="space-y-6">
-                {[
-                  {
-                    action: "Created collection 'users_v2'",
-                    time: "2m ago",
-                    user: "You",
-                  },
-                  { action: "API Key rotated", time: "1h ago", user: "System" },
-                  {
-                    action: "High latency alert resolved",
-                    time: "4h ago",
-                    user: "Monitor",
-                  },
-                  {
-                    action: "Backup completed",
-                    time: "1d ago",
-                    user: "System",
-                  },
-                ].map((item, i) => (
-                  <div key={i} className="flex gap-3 items-start">
-                    <div className="w-2 h-2 mt-2 rounded-full bg-neutral-700" />
-                    <div>
-                      <p className="text-sm text-neutral-300">{item.action}</p>
-                      <p className="text-xs text-neutral-500">
-                        {item.time} • {item.user}
-                      </p>
+              {systemHealth?.alerts?.length ? (
+                <div className="space-y-6">
+                  {systemHealth.alerts.slice(0, 4).map((alert: any) => (
+                    <div key={alert.id} className="flex gap-3 items-start">
+                      <div className="w-2 h-2 mt-2 rounded-full bg-neutral-700" />
+                      <div>
+                        <p className="text-sm text-neutral-300">{alert.title}</p>
+                        <p className="text-xs text-neutral-500">
+                          {formatDateTime(alert.timestamp)} • {alert.source}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-neutral-500">
+                  No recent alerts
+                </div>
+              )}
               <button className="w-full mt-6 py-2 text-sm text-neutral-400 hover:text-white border border-neutral-800 rounded-md hover:bg-neutral-800 transition-colors">
                 View Audit Log
               </button>
@@ -283,7 +342,28 @@ export const Dashboard = () => {
             <h3 className="text-lg font-medium text-white mb-4">
               Your Collections
             </h3>
-            <EmptyState />
+            {loading ? (
+              <div className="text-sm text-neutral-500">Loading collections...</div>
+            ) : collections.length === 0 ? (
+              <EmptyState />
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {collections.slice(0, 6).map((collection) => (
+                  <div
+                    key={collection.name}
+                    className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/30"
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <Database className="w-4 h-4 text-purple-400" />
+                      <h4 className="text-white font-medium">{collection.name}</h4>
+                    </div>
+                    <div className="text-xs text-neutral-500">
+                      {collection.dimension > 0 ? `${collection.dimension}D` : "--"} • {formatNumber(collection.count, "0")} vectors
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       ) : (

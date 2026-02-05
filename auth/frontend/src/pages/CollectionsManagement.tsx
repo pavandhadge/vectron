@@ -16,6 +16,13 @@ import {
 } from "lucide-react";
 import { Collection } from "../api-types";
 import { managementApi } from "../services/managementApi";
+import {
+  formatBytes,
+  formatDateTime,
+  formatNumber,
+  toLowerSafe,
+  toNumber,
+} from "../utils/format";
 
 
 
@@ -148,12 +155,7 @@ const CreateCollectionModal = ({ onClose, onCreated }: CreateCollectionModalProp
 };
 
 const CollectionDetailsModal = ({ collection, onClose }: CollectionDetailsModalProps) => {
-  const formatBytes = (bytes: number) => {
-    const sizes = ["B", "KB", "MB", "GB", "TB"];
-    if (bytes === 0) return "0 B";
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + " " + sizes[i];
-  };
+  const collectionName = collection.name || "Unnamed Collection";
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -187,7 +189,7 @@ const CollectionDetailsModal = ({ collection, onClose }: CollectionDetailsModalP
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-neutral-900 border border-neutral-800 rounded-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-6 border-b border-neutral-800">
-          <h2 className="text-xl font-semibold text-white">Collection Details: {collection.name}</h2>
+          <h2 className="text-xl font-semibold text-white">Collection Details: {collectionName}</h2>
           <button
             onClick={onClose}
             className="p-2 hover:bg-neutral-800 rounded-lg transition-colors"
@@ -204,7 +206,7 @@ const CollectionDetailsModal = ({ collection, onClose }: CollectionDetailsModalP
               <div className="space-y-3">
                 <div className="flex justify-between">
                   <span className="text-neutral-400">Name:</span>
-                  <span className="text-white font-semibold">{collection.name}</span>
+                  <span className="text-white font-semibold">{collectionName}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-neutral-400">Dimension:</span>
@@ -226,7 +228,7 @@ const CollectionDetailsModal = ({ collection, onClose }: CollectionDetailsModalP
                 <div className="flex justify-between">
                   <span className="text-neutral-400">Created:</span>
                   <span className="text-white">
-                    {new Date(collection.created_at).toLocaleString()}
+                    {formatDateTime(collection.created_at)}
                   </span>
                 </div>
               </div>
@@ -238,7 +240,7 @@ const CollectionDetailsModal = ({ collection, onClose }: CollectionDetailsModalP
                 <div className="flex justify-between">
                   <span className="text-neutral-400">Vector Count:</span>
                   <span className="text-white font-semibold">
-                    {collection.vector_count.toLocaleString()}
+                    {formatNumber(collection.vector_count)}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -256,8 +258,13 @@ const CollectionDetailsModal = ({ collection, onClose }: CollectionDetailsModalP
                 <div className="flex justify-between">
                   <span className="text-neutral-400">Avg Vectors/Shard:</span>
                   <span className="text-white font-semibold">
-                    {collection.shard_count > 0 
-                      ? Math.round(collection.vector_count / collection.shard_count).toLocaleString()
+                    {collection.shard_count > 0
+                      ? formatNumber(
+                          Math.round(
+                            toNumber(collection.vector_count) /
+                              Math.max(collection.shard_count, 1),
+                          ),
+                        )
                       : "0"}
                   </span>
                 </div>
@@ -300,7 +307,7 @@ const CollectionDetailsModal = ({ collection, onClose }: CollectionDetailsModalP
                           </div>
                         </td>
                         <td className="p-3 text-right text-white">
-                          {shard.vector_count.toLocaleString()}
+                          {formatNumber(shard.vector_count)}
                         </td>
                         <td className="p-3 text-right text-white">
                           {formatBytes(shard.size_bytes)}
@@ -315,7 +322,7 @@ const CollectionDetailsModal = ({ collection, onClose }: CollectionDetailsModalP
                           </span>
                         </td>
                         <td className="p-3 text-right text-white text-sm">
-                          {new Date(shard.last_updated).toLocaleString()}
+                          {formatDateTime(shard.last_updated)}
                         </td>
                       </tr>
                     ))}
@@ -469,13 +476,6 @@ const CollectionsManagement = () => {
     }
   };
 
-  const formatBytes = (bytes: number) => {
-    const sizes = ["B", "KB", "MB", "GB", "TB"];
-    if (bytes === 0) return "0 B";
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + " " + sizes[i];
-  };
-
   const getStatusIcon = (status: string) => {
     switch (status) {
       case "active":
@@ -491,12 +491,18 @@ const CollectionsManagement = () => {
 
 
   const filteredCollections = collections.filter(collection =>
-    collection.name.toLowerCase().includes(searchQuery.toLowerCase())
+    toLowerSafe(collection.name).includes(searchQuery.toLowerCase())
   );
 
   // Calculate summary statistics
-  const totalVectors = collections.reduce((sum, c) => sum + c.vector_count, 0);
-  const totalSize = collections.reduce((sum, c) => sum + c.size_bytes, 0);
+  const totalVectors = collections.reduce(
+    (sum, c) => sum + toNumber(c.vector_count),
+    0,
+  );
+  const totalSize = collections.reduce(
+    (sum, c) => sum + toNumber(c.size_bytes),
+    0,
+  );
   const activeCollections = collections.filter(c => c.status === "active").length;
 
   if (loading) {
@@ -581,7 +587,7 @@ const CollectionsManagement = () => {
             <h3 className="font-medium text-white">Total Vectors</h3>
           </div>
           <div className="text-2xl font-bold text-white">
-            {totalVectors.toLocaleString()}
+            {formatNumber(totalVectors, "0")}
           </div>
           <p className="text-sm text-neutral-400">Across All Collections</p>
         </div>
@@ -651,9 +657,9 @@ const CollectionsManagement = () => {
 
       {!error && filteredCollections.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredCollections.map((collection) => (
+          {filteredCollections.map((collection, index) => (
             <div
-              key={collection.name}
+              key={collection.name || `collection-${index}`}
               className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30 hover:bg-neutral-900/50 transition-all"
             >
               <div className="flex items-start justify-between mb-4">
@@ -666,7 +672,9 @@ const CollectionsManagement = () => {
                     {getStatusIcon(collection.status)}
                   </div>
                   <div>
-                    <h3 className="font-semibold text-white">{collection.name}</h3>
+                    <h3 className="font-semibold text-white">
+                      {collection.name || "Unnamed Collection"}
+                    </h3>
                     <p className="text-sm text-neutral-400">
                       {collection.dimension}D • {collection.distance}
                     </p>
@@ -686,7 +694,7 @@ const CollectionsManagement = () => {
                 <div className="flex justify-between text-sm">
                   <span className="text-neutral-400">Vectors</span>
                   <span className="text-white font-medium">
-                    {collection.vector_count.toLocaleString()}
+                    {formatNumber(collection.vector_count)}
                   </span>
                 </div>
                 
@@ -707,7 +715,7 @@ const CollectionsManagement = () => {
                 <div className="flex justify-between text-sm">
                   <span className="text-neutral-400">Created</span>
                   <span className="text-white font-medium">
-                    {new Date(collection.created_at).toLocaleDateString()}
+                    {formatDateTime(collection.created_at)}
                   </span>
                 </div>
               </div>

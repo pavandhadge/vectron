@@ -13,6 +13,13 @@ import {
 } from 'lucide-react';
 import type { SystemHealth } from '../api-types';
 import { managementApi } from '../services/managementApi';
+import {
+  formatBytes,
+  formatCompactNumber,
+  formatNumber,
+  formatTime,
+  toNumber,
+} from '../utils/format';
 
 interface StatCardProps {
   title: string;
@@ -85,11 +92,11 @@ const ServiceStatusCard = ({
         </div>
         <div className="flex justify-between">
           <span>Response:</span>
-          <span>{responseTime}ms</span>
+          <span>{formatNumber(responseTime, "0")}ms</span>
         </div>
         <div className="flex justify-between">
           <span>Last Check:</span>
-          <span>{new Date(lastCheck).toLocaleTimeString()}</span>
+          <span>{formatTime(lastCheck)}</span>
         </div>
       </div>
     </div>
@@ -125,18 +132,7 @@ export const ManagementDashboard = () => {
     };
   }, []);
 
-  const formatBytes = (bytes: number): string => {
-    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-    if (bytes === 0) return '0 Bytes';
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return `${Math.round(bytes / Math.pow(1024, i) * 100) / 100} ${sizes[i]}`;
-  };
-
-  const formatNumber = (num: number): string => {
-    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
-    if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
-    return num.toString();
-  };
+  const cpuUsage = Math.min(Math.max(toNumber(systemHealth?.metrics.cpu_usage, 0), 0), 100);
 
   if (loading) {
     return (
@@ -190,20 +186,20 @@ export const ManagementDashboard = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           title="Total Vectors"
-          value={formatNumber(metrics.total_vectors)}
+          value={formatCompactNumber(metrics.total_vectors)}
           icon={Database}
           trend="up"
           change="+2.5%"
         />
         <StatCard
           title="Collections"
-          value={metrics.total_collections}
+          value={formatNumber(metrics.total_collections, "0")}
           icon={Server}
           trend="neutral"
         />
         <StatCard
           title="Active Workers"
-          value={metrics.active_workers}
+          value={formatNumber(metrics.active_workers, "0")}
           icon={Activity}
           trend="neutral"
         />
@@ -226,14 +222,16 @@ export const ManagementDashboard = () => {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-neutral-400">Current</span>
-              <span className="text-white font-medium">{metrics.cpu_usage}%</span>
+              <span className="text-white font-medium">
+                {formatNumber(cpuUsage, "0")}%
+              </span>
             </div>
             <div className="w-full bg-neutral-800 rounded-full h-2">
               <div
                 className={`h-2 rounded-full ${
-                  metrics.cpu_usage > 80 ? 'bg-red-500' : metrics.cpu_usage > 60 ? 'bg-yellow-500' : 'bg-green-500'
+                  cpuUsage > 80 ? 'bg-red-500' : cpuUsage > 60 ? 'bg-yellow-500' : 'bg-green-500'
                 }`}
-                style={{ width: `${metrics.cpu_usage}%` }}
+                style={{ width: `${cpuUsage}%` }}
               />
             </div>
           </div>
@@ -247,7 +245,9 @@ export const ManagementDashboard = () => {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-neutral-400">Used</span>
-              <span className="text-white font-medium">{formatBytes(metrics.memory_used)}</span>
+              <span className="text-white font-medium">
+                {formatBytes(metrics.memory_used)}
+              </span>
             </div>
           </div>
         </div>
@@ -260,11 +260,15 @@ export const ManagementDashboard = () => {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-neutral-400">In</span>
-              <span className="text-white font-medium">{formatBytes(metrics.network_io.bytes_in)}</span>
+              <span className="text-white font-medium">
+                {formatBytes(metrics.network_io?.bytes_in)}
+              </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-neutral-400">Out</span>
-              <span className="text-white font-medium">{formatBytes(metrics.network_io.bytes_out)}</span>
+              <span className="text-white font-medium">
+                {formatBytes(metrics.network_io?.bytes_out)}
+              </span>
             </div>
           </div>
         </div>
@@ -314,7 +318,7 @@ export const ManagementDashboard = () => {
                     <div className="flex items-start justify-between mb-2">
                       <h4 className="font-medium">{alert.title}</h4>
                       <span className="text-xs opacity-70">
-                        {new Date(alert.timestamp).toLocaleTimeString()}
+                        {formatTime(alert.timestamp)}
                       </span>
                     </div>
                     <p className="text-sm opacity-90 mb-2">{alert.message}</p>

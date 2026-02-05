@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Plan } from "../api-types";
 import {
@@ -8,7 +9,6 @@ import {
   Download,
   ExternalLink,
   AlertCircle,
-  Loader2,
 } from "lucide-react";
 import { billingData } from "./billingPage.data";
 
@@ -54,7 +54,6 @@ const PlanCard = ({
   features,
   isCurrent,
   onAction,
-  isLoading,
   actionLabel,
 }: any) => (
   <div
@@ -92,7 +91,7 @@ const PlanCard = ({
 
     <button
       onClick={onAction}
-      disabled={isCurrent || isLoading}
+      disabled={isCurrent}
       className={`
                 w-full py-2.5 px-4 rounded-lg text-sm font-medium transition-all
                 ${
@@ -103,13 +102,7 @@ const PlanCard = ({
                 disabled:opacity-70 disabled:cursor-not-allowed
             `}
     >
-      {isLoading ? (
-        <span className="flex items-center justify-center gap-2">
-          <Loader2 className="w-4 h-4 animate-spin" /> Processing...
-        </span>
-      ) : (
-        actionLabel
-      )}
+      {actionLabel}
     </button>
   </div>
 );
@@ -117,34 +110,19 @@ const PlanCard = ({
 // --- Main Page ---
 
 const BillingPage: React.FC = () => {
-  const { user, updateUserAndToken, authApiClient } = useAuth();
-  const [isLoading, setIsLoading] = useState(false);
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
 
   const isPaid = user?.plan === Plan.PAID;
   const currentPlanData = isPaid
     ? billingData.plans.pro
     : billingData.plans.free;
+  const currentPlanLabel = isPaid ? "Pro" : "Free";
 
-  const handleSubscribe = async () => {
-    setIsLoading(true);
+  const handlePlanChange = (plan: Plan) => {
     setError(null);
-
-    try {
-      const response = await authApiClient.put("/v1/user/profile", {
-        plan: Plan.PAID,
-      });
-      const { user, jwtToken } = response.data;
-      updateUserAndToken(user, jwtToken);
-    } catch (err: any) {
-      const errorMessage =
-        err.response?.data?.message ||
-        err.message ||
-        "An unexpected error occurred";
-      setError(errorMessage);
-    } finally {
-      setIsLoading(false);
-    }
+    navigate("/dashboard/billing/change", { state: { targetPlan: plan } });
   };
 
   return (
@@ -222,6 +200,9 @@ const BillingPage: React.FC = () => {
       {/* Plans Section */}
       <div>
         <h2 className="text-xl font-bold text-white mb-6">Available Plans</h2>
+        <p className="text-sm text-neutral-500 mb-4">
+          Current plan: <span className="text-white font-medium">{currentPlanLabel}</span>
+        </p>
         {error && (
           <div className="mb-6 p-4 rounded-lg bg-red-900/10 border border-red-900/20 text-red-400 text-sm flex items-center gap-2">
             <AlertCircle className="w-4 h-4" /> {error}
@@ -232,14 +213,14 @@ const BillingPage: React.FC = () => {
           <PlanCard
             {...billingData.plans.free}
             isCurrent={!isPaid}
-            actionLabel="Current Plan"
+            actionLabel={isPaid ? "Downgrade to Free" : "Current Plan"}
+            onAction={() => handlePlanChange(Plan.FREE)}
           />
           <PlanCard
             {...billingData.plans.pro}
             isCurrent={isPaid}
-            isLoading={isLoading}
-            onAction={handleSubscribe}
-            actionLabel={billingData.subscribeButtonText}
+            onAction={() => handlePlanChange(Plan.PAID)}
+            actionLabel={isPaid ? "Current Plan" : billingData.subscribeButtonText}
           />
         </div>
       </div>

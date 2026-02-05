@@ -16,6 +16,11 @@ import {
 } from "lucide-react";
 import { SystemHealth } from "../api-types";
 import { managementApi } from "../services/managementApi";
+import {
+  formatBytes,
+  formatDateTime,
+  formatNumber,
+} from "../utils/format";
 
 interface SystemHealthPageProps {}
 
@@ -126,13 +131,6 @@ const SystemHealthPage: React.FC<SystemHealthPageProps> = () => {
     return true;
   }) || [];
 
-  const formatBytes = (bytes: number) => {
-    const sizes = ["B", "KB", "MB", "GB", "TB"];
-    if (bytes === 0) return "0 B";
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + " " + sizes[i];
-  };
-
   if (loading) {
     return (
       <div className="max-w-7xl mx-auto space-y-8 animate-fade-in">
@@ -231,7 +229,7 @@ const SystemHealthPage: React.FC<SystemHealthPageProps> = () => {
             <h3 className="font-medium text-white">Vectors</h3>
           </div>
           <div className="text-2xl font-bold text-white">
-            {systemHealth.metrics.total_vectors.toLocaleString()}
+            {formatNumber(systemHealth.metrics.total_vectors, "0")}
           </div>
           <p className="text-sm text-neutral-400">Total Vectors</p>
         </div>
@@ -242,7 +240,7 @@ const SystemHealthPage: React.FC<SystemHealthPageProps> = () => {
             <h3 className="font-medium text-white">Workers</h3>
           </div>
           <div className="text-2xl font-bold text-white">
-            {systemHealth.metrics.active_workers}
+            {formatNumber(systemHealth.metrics.active_workers, "0")}
           </div>
           <p className="text-sm text-neutral-400">Active Workers</p>
         </div>
@@ -281,7 +279,7 @@ const SystemHealthPage: React.FC<SystemHealthPageProps> = () => {
                   {service.status.toUpperCase()}
                 </div>
                 <div className="text-xs text-neutral-500">
-                  {service.response_time}ms response
+                  {formatNumber(service.response_time, "0")}ms response
                 </div>
               </div>
             </div>
@@ -332,7 +330,7 @@ const SystemHealthPage: React.FC<SystemHealthPageProps> = () => {
                       <h3 className="font-medium text-white mb-1">{alert.title}</h3>
                       <p className="text-sm text-neutral-400 mb-2">{alert.message}</p>
                       <div className="text-xs text-neutral-500">
-                        {new Date(alert.timestamp).toLocaleString()} • {alert.source}
+                        {formatDateTime(alert.timestamp)} • {alert.source}
                       </div>
                     </div>
                   </div>

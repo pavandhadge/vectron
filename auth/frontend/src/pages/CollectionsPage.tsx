@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Dialog } from "../components/Dialog";
 import { Toast } from "../components/Toast";
+import { formatNumber, toLowerSafe, toStringSafe } from "../utils/format";
 
 interface Collection {
   name: string;
@@ -48,11 +49,23 @@ const CollectionsPage: React.FC = () => {
       const response = await apiGatewayApiClient.get("/v1/collections");
       const data = response.data;
 
-      const mapped = (data.collections || []).map((c: any) => ({
-        ...c,
-        status: c.status || "ready",
-        count: c.count || 0,
-      }));
+      const mapped = (data.collections || []).map((c: any) => {
+        if (typeof c === "string") {
+          return {
+            name: c,
+            dimension: 0,
+            status: "ready",
+            count: 0,
+          };
+        }
+        return {
+          ...c,
+          name: c.name || "Unnamed Collection",
+          dimension: typeof c.dimension === "number" ? c.dimension : 0,
+          status: c.status || "ready",
+          count: typeof c.count === "number" ? c.count : 0,
+        };
+      });
       setCollections(mapped);
     } catch (err: any) {
       const msg = err.response?.data?.message || "Failed to load collections";
@@ -106,7 +119,7 @@ const CollectionsPage: React.FC = () => {
   };
 
   const filteredCollections = collections.filter((c) =>
-    c.name.toLowerCase().includes(searchQuery.toLowerCase()),
+    toLowerSafe(c.name).includes(searchQuery.toLowerCase()),
   );
 
   return (
@@ -190,9 +203,9 @@ const CollectionsPage: React.FC = () => {
                   </td>
                 </tr>
               ) : filteredCollections.length > 0 ? (
-                filteredCollections.map((col) => (
+                filteredCollections.map((col, index) => (
                   <tr
-                    key={col.name}
+                    key={col.name || `collection-${index}`}
                     className="group hover:bg-neutral-900/40 transition-colors"
                   >
                     <td className="px-6 py-4">
@@ -202,10 +215,10 @@ const CollectionsPage: React.FC = () => {
                         </div>
                         <div>
                           <div className="font-medium text-white text-sm">
-                            {col.name}
+                            {toStringSafe(col.name, "Unnamed Collection")}
                           </div>
                           <div className="text-xs text-neutral-500">
-                            {col.count?.toLocaleString()} vectors
+                            {formatNumber(col.count, "0")} vectors
                           </div>
                         </div>
                       </div>
@@ -220,7 +233,7 @@ const CollectionsPage: React.FC = () => {
                       <div className="flex items-center gap-2 text-sm text-neutral-300">
                         <Layers className="w-4 h-4 text-neutral-600" />
                         <span className="font-mono text-xs">
-                          {col.dimension}
+                          {col.dimension > 0 ? col.dimension : "--"}
                         </span>
                       </div>
                     </td>

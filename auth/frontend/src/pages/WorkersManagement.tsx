@@ -13,6 +13,13 @@ import {
 } from "lucide-react";
 import { WorkerNode } from "../api-types";
 import { managementApi } from "../services/managementApi";
+import {
+  formatBytes,
+  formatDateTime,
+  formatNumber,
+  formatUptime,
+  toNumber,
+} from "../utils/format";
 
 interface WorkersManagementProps {}
 
@@ -21,23 +28,24 @@ interface WorkerModalProps {
   onClose: () => void;
 }
 
-const WorkerModal: React.FC<WorkerModalProps> = ({ worker, onClose }) => {
-  const formatBytes = (bytes: number) => {
-    const sizes = ["B", "KB", "MB", "GB", "TB"];
-    if (bytes === 0) return "0 B";
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + " " + sizes[i];
-  };
+const getHealthState = (worker: WorkerNode) => {
+  const hasHeartbeat = toNumber(worker.last_heartbeat, 0) > 0;
+  if (!hasHeartbeat) return "starting";
+  return worker.healthy ? "healthy" : "unhealthy";
+};
 
-  const formatUptime = (seconds: number) => {
-    const days = Math.floor(seconds / 86400);
-    const hours = Math.floor((seconds % 86400) / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    
-    if (days > 0) return `${days}d ${hours}h ${minutes}m`;
-    if (hours > 0) return `${hours}h ${minutes}m`;
-    return `${minutes}m`;
-  };
+const WorkerModal: React.FC<WorkerModalProps> = ({ worker, onClose }) => {
+  const formatCpuUsage = (value: unknown) =>
+    formatNumber(toNumber(value, NaN), "--");
+  const workerCollections = worker.collections ?? [];
+  const workerMetadataEntries = worker.metadata ? Object.entries(worker.metadata) : [];
+  const healthState = getHealthState(worker);
+  const healthColor =
+    healthState === "healthy"
+      ? "text-green-400"
+      : healthState === "starting"
+      ? "text-yellow-400"
+      : "text-red-400";
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -73,20 +81,26 @@ const WorkerModal: React.FC<WorkerModalProps> = ({ worker, onClose }) => {
                 <div className="flex justify-between">
                   <span className="text-neutral-400">Status:</span>
                   <div className="flex items-center gap-2">
-                    {worker.healthy ? (
+                    {healthState === "healthy" ? (
                       <CheckCircle className="w-4 h-4 text-green-400" />
+                    ) : healthState === "starting" ? (
+                      <AlertCircle className="w-4 h-4 text-yellow-400" />
                     ) : (
                       <XCircle className="w-4 h-4 text-red-400" />
                     )}
-                    <span className={worker.healthy ? "text-green-400" : "text-red-400"}>
-                      {worker.healthy ? "Healthy" : "Unhealthy"}
+                    <span className={healthColor}>
+                      {healthState === "healthy"
+                        ? "Healthy"
+                        : healthState === "starting"
+                        ? "Starting"
+                        : "Unhealthy"}
                     </span>
                   </div>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-neutral-400">Last Heartbeat:</span>
                   <span className="text-white">
-                    {new Date(worker.last_heartbeat).toLocaleString()}
+                    {formatDateTime(worker.last_heartbeat)}
                   </span>
                 </div>
               </div>
@@ -99,7 +113,7 @@ const WorkerModal: React.FC<WorkerModalProps> = ({ worker, onClose }) => {
                   <div className="flex justify-between">
                     <span className="text-neutral-400">Vector Count:</span>
                     <span className="text-white font-semibold">
-                      {worker.stats.vector_count.toLocaleString()}
+                      {formatNumber(worker.stats.vector_count)}
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -114,7 +128,7 @@ const WorkerModal: React.FC<WorkerModalProps> = ({ worker, onClose }) => {
                       worker.stats.cpu_usage > 80 ? "text-red-400" :
                       worker.stats.cpu_usage > 60 ? "text-yellow-400" : "text-green-400"
                     }`}>
-                      {worker.stats.cpu_usage}%
+                      {formatCpuUsage(worker.stats.cpu_usage)}%
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -138,7 +152,7 @@ const WorkerModal: React.FC<WorkerModalProps> = ({ worker, onClose }) => {
           <div className="space-y-4">
             <h3 className="text-lg font-semibold text-white">Collections</h3>
             <div className="flex flex-wrap gap-2">
-              {worker.collections.map((collection) => (
+              {workerCollections.map((collection) => (
                 <span
                   key={collection}
                   className="px-3 py-1 bg-purple-500/10 border border-purple-500/20 text-purple-400 rounded-lg text-sm"
@@ -147,7 +161,7 @@ const WorkerModal: React.FC<WorkerModalProps> = ({ worker, onClose }) => {
                 </span>
               ))}
             </div>
-            {worker.collections.length === 0 && (
+            {workerCollections.length === 0 && (
               <p className="text-neutral-400">No collections assigned</p>
             )}
           </div>
@@ -156,14 +170,14 @@ const WorkerModal: React.FC<WorkerModalProps> = ({ worker, onClose }) => {
           <div className="space-y-4">
             <h3 className="text-lg font-semibold text-white">Metadata</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {Object.entries(worker.metadata).map(([key, value]) => (
+              {workerMetadataEntries.map(([key, value]) => (
                 <div key={key} className="flex justify-between p-3 bg-neutral-800/50 rounded-lg">
                   <span className="text-neutral-400 capitalize">{key}:</span>
                   <span className="text-white font-mono">{value}</span>
                 </div>
               ))}
             </div>
-            {Object.keys(worker.metadata).length === 0 && (
+            {workerMetadataEntries.length === 0 && (
               <p className="text-neutral-400">No metadata available</p>
             )}
           </div>
@@ -199,8 +213,8 @@ const WorkerModal: React.FC<WorkerModalProps> = ({ worker, onClose }) => {
                           )}
                         </td>
                         <td className="p-3 text-right text-white">
-                          {shard.vector_count.toLocaleString()}
-                        </td>
+                      {formatNumber(shard.vector_count)}
+                    </td>
                         <td className="p-3 text-right text-white">
                           {formatBytes(shard.size_bytes)}
                         </td>
@@ -232,6 +246,8 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
   const [error, setError] = useState<string | null>(null);
   const [selectedWorker, setSelectedWorker] = useState<WorkerNode | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const formatCpuUsage = (value: unknown) =>
+    formatNumber(toNumber(value, NaN), "--");
 
   const fetchWorkers = async () => {
     try {
@@ -259,22 +275,6 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
 
     return () => clearInterval(interval);
   }, [autoRefresh]);
-
-  const formatBytes = (bytes: number) => {
-    const sizes = ["B", "KB", "MB", "GB", "TB"];
-    if (bytes === 0) return "0 B";
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + " " + sizes[i];
-  };
-
-  const formatUptime = (seconds: number) => {
-    const days = Math.floor(seconds / 86400);
-    const hours = Math.floor((seconds % 86400) / 3600);
-    
-    if (days > 0) return `${days}d ${hours}h`;
-    if (hours > 0) return `${hours}h`;
-    return `${Math.floor(seconds / 60)}m`;
-  };
 
   const healthyWorkers = workers.filter(w => w.healthy).length;
   const totalVectors = workers.reduce((sum, w) => sum + (w.stats?.vector_count || 0), 0);
@@ -372,7 +372,7 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
             <h3 className="font-medium text-white">Total Vectors</h3>
           </div>
           <div className="text-2xl font-bold text-white">
-            {totalVectors.toLocaleString()}
+            {formatNumber(totalVectors, "0")}
           </div>
           <p className="text-sm text-neutral-400">Across All Workers</p>
         </div>
@@ -398,7 +398,12 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {workers.map((worker) => (
+          {workers.map((worker) => {
+            const healthState = getHealthState(worker);
+            const isHealthy = healthState === "healthy";
+            const isStarting = healthState === "starting";
+
+            return (
             <div
               key={worker.worker_id}
               className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30 hover:bg-neutral-900/50 transition-all cursor-pointer"
@@ -406,9 +411,13 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
             >
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-lg ${worker.healthy ? "bg-green-500/10" : "bg-red-500/10"}`}>
-                    {worker.healthy ? (
+                  <div className={`p-2 rounded-lg ${
+                    isHealthy ? "bg-green-500/10" : isStarting ? "bg-yellow-500/10" : "bg-red-500/10"
+                  }`}>
+                    {isHealthy ? (
                       <CheckCircle className="w-5 h-5 text-green-400" />
+                    ) : isStarting ? (
+                      <AlertCircle className="w-5 h-5 text-yellow-400" />
                     ) : (
                       <XCircle className="w-5 h-5 text-red-400" />
                     )}
@@ -420,11 +429,13 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
                 </div>
                 
                 <span className={`px-2 py-1 rounded text-xs font-medium ${
-                  worker.healthy 
-                    ? "bg-green-500/10 text-green-400" 
+                  isHealthy
+                    ? "bg-green-500/10 text-green-400"
+                    : isStarting
+                    ? "bg-yellow-500/10 text-yellow-400"
                     : "bg-red-500/10 text-red-400"
                 }`}>
-                  {worker.healthy ? "HEALTHY" : "UNHEALTHY"}
+                  {isHealthy ? "HEALTHY" : isStarting ? "STARTING" : "UNHEALTHY"}
                 </span>
               </div>
 
@@ -433,14 +444,14 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-neutral-400">Vectors</span>
                     <span className="text-white font-medium">
-                      {worker.stats.vector_count.toLocaleString()}
+                      {formatNumber(worker.stats.vector_count)}
                     </span>
                   </div>
                   
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-neutral-400">Collections</span>
                     <span className="text-white font-medium">
-                      {worker.collections.length}
+                      {(worker.collections ?? []).length}
                     </span>
                   </div>
                   
@@ -450,7 +461,7 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
                       worker.stats.cpu_usage > 80 ? "text-red-400" :
                       worker.stats.cpu_usage > 60 ? "text-yellow-400" : "text-green-400"
                     }`}>
-                      {worker.stats.cpu_usage}%
+                      {formatCpuUsage(worker.stats.cpu_usage)}%
                     </span>
                   </div>
                   
@@ -478,7 +489,7 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
               
               <div className="mt-4 pt-4 border-t border-neutral-800">
                 <div className="flex flex-wrap gap-1">
-                  {worker.collections.slice(0, 2).map((collection) => (
+                  {(worker.collections ?? []).slice(0, 2).map((collection) => (
                     <span
                       key={collection}
                       className="px-2 py-1 bg-purple-500/10 text-purple-400 rounded text-xs"
@@ -486,18 +497,19 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
                       {collection}
                     </span>
                   ))}
-                  {worker.collections.length > 2 && (
+                  {(worker.collections ?? []).length > 2 && (
                     <span className="px-2 py-1 bg-neutral-500/10 text-neutral-400 rounded text-xs">
-                      +{worker.collections.length - 2} more
+                      +{(worker.collections ?? []).length - 2} more
                     </span>
                   )}
-                  {worker.collections.length === 0 && (
+                  {(worker.collections ?? []).length === 0 && (
                     <span className="text-neutral-500 text-xs">No collections</span>
                   )}
                 </div>
               </div>
             </div>
-          ))}
+          );
+          })}
         </div>
       )}
 

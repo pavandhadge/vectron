@@ -12,7 +12,8 @@ import {
 } from '../api-types';
 
 class ManagementApiService {
-  private apiGatewayUrl = 'http://localhost:10012';
+  private apiGatewayUrl =
+    import.meta.env.VITE_APIGATEWAY_API_BASE_URL || 'http://localhost:10012';
 
   private getAuthHeaders() {
     const token = localStorage.getItem('jwtToken');

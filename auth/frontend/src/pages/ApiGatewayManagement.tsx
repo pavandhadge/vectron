@@ -14,6 +14,13 @@ import {
 } from "lucide-react";
 import { GatewayStats, GatewayEndpoint } from "../api-types";
 import { managementApi } from "../services/managementApi";
+import {
+  formatCompactNumber,
+  formatNumber,
+  formatPercent,
+  formatUptime,
+  toNumber,
+} from "../utils/format";
 
 interface ApiGatewayManagementProps {}
 
@@ -52,31 +59,17 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
     return () => clearInterval(interval);
   }, [autoRefresh]);
 
-  const formatUptime = (seconds: number) => {
-    const days = Math.floor(seconds / 86400);
-    const hours = Math.floor((seconds % 86400) / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    
-    if (days > 0) return `${days}d ${hours}h`;
-    if (hours > 0) return `${hours}h ${minutes}m`;
-    return `${minutes}m`;
-  };
-
-  const formatNumber = (num: number) => {
-    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
-    if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
-    return num.toString();
-  };
-
   const getErrorRateColor = (rate: number) => {
-    if (rate < 0.01) return "text-green-400";
-    if (rate < 0.05) return "text-yellow-400";
+    const safeRate = toNumber(rate, 0);
+    if (safeRate < 0.01) return "text-green-400";
+    if (safeRate < 0.05) return "text-yellow-400";
     return "text-red-400";
   };
 
   const getLatencyColor = (latency: number) => {
-    if (latency < 100) return "text-green-400";
-    if (latency < 500) return "text-yellow-400";
+    const safeLatency = toNumber(latency, 0);
+    if (safeLatency < 100) return "text-green-400";
+    if (safeLatency < 500) return "text-yellow-400";
     return "text-red-400";
   };
 
@@ -163,7 +156,7 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
             <h3 className="font-medium text-white">Total Requests</h3>
           </div>
           <div className="text-2xl font-bold text-white">
-            {formatNumber(gatewayStats.totalRequests)}
+            {formatCompactNumber(gatewayStats.totalRequests)}
           </div>
           <p className="text-sm text-neutral-400">Total Processed</p>
         </div>
@@ -174,7 +167,7 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
             <h3 className="font-medium text-white">Requests/sec</h3>
           </div>
           <div className="text-2xl font-bold text-white">
-            {gatewayStats.requestsPerSecond}
+            {formatNumber(gatewayStats.requestsPerSecond, "0")}
           </div>
           <p className="text-sm text-neutral-400">Current Rate</p>
         </div>
@@ -185,7 +178,7 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
             <h3 className="font-medium text-white">Error Rate</h3>
           </div>
           <div className={`text-2xl font-bold ${getErrorRateColor(gatewayStats.errorRate)}`}>
-            {(gatewayStats.errorRate * 100).toFixed(2)}%
+            {formatPercent(toNumber(gatewayStats.errorRate) * 100, 2)}
           </div>
           <p className="text-sm text-neutral-400">Current Error Rate</p>
         </div>
@@ -204,7 +197,7 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
                 <span className="text-white">Active Connections</span>
               </div>
               <div className="text-xl font-bold text-white">
-                {gatewayStats.activeConnections}
+                {formatNumber(gatewayStats.activeConnections, "0")}
               </div>
             </div>
 
@@ -214,7 +207,7 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
                 <span className="text-white">Average Response Time</span>
               </div>
               <div className={`text-xl font-bold ${getLatencyColor(gatewayStats.averageResponseTime)}`}>
-                {gatewayStats.averageResponseTime}ms
+                {formatNumber(gatewayStats.averageResponseTime, "0")}ms
               </div>
             </div>
           </div>
@@ -243,7 +236,7 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
                     <span className="text-white">Rate Limit</span>
                   </div>
                   <div className="text-xl font-bold text-white">
-                    {gatewayStats.rateLimit.rps} RPS
+                    {formatNumber(gatewayStats.rateLimit.rps, "0")} RPS
                   </div>
                 </div>
 
@@ -253,7 +246,7 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
                     <span className="text-white">Active Users</span>
                   </div>
                   <div className="text-xl font-bold text-white">
-                    {gatewayStats.rateLimit.activeUsers}
+                    {formatNumber(gatewayStats.rateLimit.activeUsers, "0")}
                   </div>
                 </div>
               </>
@@ -303,19 +296,19 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
                       </span>
                     </td>
                     <td className="p-4 text-right text-white font-medium">
-                      {formatNumber(endpoint.count)}
+                      {formatCompactNumber(endpoint.count)}
                     </td>
                     <td className="p-4 text-right">
                       <span className={`font-medium ${getLatencyColor(endpoint.avgLatency)}`}>
-                        {endpoint.avgLatency}ms
+                        {formatNumber(endpoint.avgLatency, "0")}ms
                       </span>
                     </td>
                     <td className="p-4 text-right text-white font-medium">
-                      {endpoint.errorCount}
+                      {formatNumber(endpoint.errorCount, "0")}
                     </td>
                     <td className="p-4 text-right">
                       <span className={`font-medium ${getErrorRateColor(errorRate)}`}>
-                        {(errorRate * 100).toFixed(2)}%
+                        {formatPercent(errorRate * 100, 2)}
                       </span>
                     </td>
                   </tr>
