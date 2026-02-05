@@ -6,6 +6,7 @@ package idxhnsw
 
 import (
 	"container/heap"
+	"runtime"
 	"sort"
 	"sync"
 )
@@ -281,22 +282,36 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 		}
 
 		// Explore the neighbors of the current candidate.
-		for _, nid := range c.node.Neighbors[layer] {
+		neighbors := c.node.Neighbors[layer]
+		if len(neighbors) == 0 {
+			continue
+		}
+
+		nodes := make([]*Node, 0, len(neighbors))
+		ids := make([]uint32, 0, len(neighbors))
+		for _, nid := range neighbors {
 			if _, ok := visited[nid]; ok {
 				continue
 			}
 			visited[nid] = struct{}{}
-
 			n := h.getNode(nid)
 			if n == nil {
 				continue
 			}
-			d := h.distanceToNode(vec, qvec, n)
+			nodes = append(nodes, n)
+			ids = append(ids, nid)
+		}
+		if len(nodes) == 0 {
+			continue
+		}
 
+		distances := h.computeDistances(vec, qvec, nodes)
+		for i, n := range nodes {
+			d := distances[i]
 			// If we have room in the results max-heap, or if this node is closer than the furthest one in it...
 			if results.Len() < ef || d < results[0].dist {
-				heap.Push(&candidates, candidate{id: nid, dist: d, node: n})
-				heap.Push(&results, candidate{id: nid, dist: d, node: n})
+				heap.Push(&candidates, candidate{id: ids[i], dist: d, node: n})
+				heap.Push(&results, candidate{id: ids[i], dist: d, node: n})
 				// If the results heap is too large, remove the furthest element.
 				if results.Len() > ef {
 					heap.Pop(&results)
@@ -311,6 +326,46 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 	candidateSlicePool.Put([]candidate(candidates)[:0])
 	resultSlicePool.Put([]candidate(results)[:0])
 	return finalResults
+}
+
+func (h *HNSW) computeDistances(vec []float32, qvec []int8, nodes []*Node) []float32 {
+	distances := make([]float32, len(nodes))
+	if len(nodes) == 1 {
+		distances[0] = h.distanceToNode(vec, qvec, nodes[0])
+		return distances
+	}
+
+	parallelism := h.config.SearchParallelism
+	if parallelism <= 0 {
+		parallelism = runtime.GOMAXPROCS(0)
+		if parallelism < 1 {
+			parallelism = 1
+		}
+	}
+	if parallelism <= 1 || len(nodes) < parallelism*8 {
+		for i, n := range nodes {
+			distances[i] = h.distanceToNode(vec, qvec, n)
+		}
+		return distances
+	}
+
+	chunk := (len(nodes) + parallelism - 1) / parallelism
+	var wg sync.WaitGroup
+	for start := 0; start < len(nodes); start += chunk {
+		end := start + chunk
+		if end > len(nodes) {
+			end = len(nodes)
+		}
+		wg.Add(1)
+		go func(s, e int) {
+			defer wg.Done()
+			for i := s; i < e; i++ {
+				distances[i] = h.distanceToNode(vec, qvec, nodes[i])
+			}
+		}(start, end)
+	}
+	wg.Wait()
+	return distances
 }
 
 // selectNeighbors is a helper function used during insertion, not search.

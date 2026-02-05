@@ -122,15 +122,33 @@ func (r *PebbleDB) Close() error {
 // loadHNSW loads the HNSW index from a snapshot in the database and replays the WAL.
 func (r *PebbleDB) loadHNSW(opts *Options) error {
 	r.hnsw = idxhnsw.NewHNSW(r, opts.HNSWConfig.Dim, idxhnsw.HNSWConfig{
-		M:                opts.HNSWConfig.M,
-		EfConstruction:   opts.HNSWConfig.EfConstruction,
-		EfSearch:         opts.HNSWConfig.EfSearch,
-		Distance:         opts.HNSWConfig.DistanceMetric,
-		PersistNodes:     opts.HNSWConfig.PersistNodes,
-		EnableNorms:      opts.HNSWConfig.EnableNorms,
-		NormalizeVectors: opts.HNSWConfig.NormalizeVectors,
-		QuantizeVectors:  opts.HNSWConfig.QuantizeVectors,
+		M:                 opts.HNSWConfig.M,
+		EfConstruction:    opts.HNSWConfig.EfConstruction,
+		EfSearch:          opts.HNSWConfig.EfSearch,
+		Distance:          opts.HNSWConfig.DistanceMetric,
+		PersistNodes:      opts.HNSWConfig.PersistNodes,
+		EnableNorms:       opts.HNSWConfig.EnableNorms,
+		NormalizeVectors:  opts.HNSWConfig.NormalizeVectors,
+		QuantizeVectors:   opts.HNSWConfig.QuantizeVectors,
+		SearchParallelism: opts.HNSWConfig.SearchParallelism,
 	})
+
+	if opts.HNSWConfig.HotIndexEnabled {
+		hotStore := idxhnsw.NewMemStore()
+		r.hnswHot = idxhnsw.NewHNSW(hotStore, opts.HNSWConfig.Dim, idxhnsw.HNSWConfig{
+			M:                 opts.HNSWConfig.M,
+			EfConstruction:    opts.HNSWConfig.EfConstruction,
+			EfSearch:          opts.HNSWConfig.EfSearch,
+			Distance:          opts.HNSWConfig.DistanceMetric,
+			PersistNodes:      false,
+			EnableNorms:       opts.HNSWConfig.EnableNorms,
+			NormalizeVectors:  opts.HNSWConfig.NormalizeVectors,
+			QuantizeVectors:   opts.HNSWConfig.QuantizeVectors,
+			SearchParallelism: opts.HNSWConfig.SearchParallelism,
+			HotIndex:          true,
+		})
+		r.hotSet = make(map[string]struct{})
+	}
 
 	data, closer, err := r.db.Get([]byte(hnswIndexKey))
 	if err != nil {
@@ -146,14 +164,15 @@ func (r *PebbleDB) loadHNSW(opts *Options) error {
 		log.Printf("Failed to load HNSW index from snapshot, creating a new one: %v", err)
 		// Reset to a new index if loading fails.
 		r.hnsw = idxhnsw.NewHNSW(r, opts.HNSWConfig.Dim, idxhnsw.HNSWConfig{
-			M:                opts.HNSWConfig.M,
-			EfConstruction:   opts.HNSWConfig.EfConstruction,
-			EfSearch:         opts.HNSWConfig.EfSearch,
-			Distance:         opts.HNSWConfig.DistanceMetric,
-			PersistNodes:     opts.HNSWConfig.PersistNodes,
-			EnableNorms:      opts.HNSWConfig.EnableNorms,
-			NormalizeVectors: opts.HNSWConfig.NormalizeVectors,
-			QuantizeVectors:  opts.HNSWConfig.QuantizeVectors,
+			M:                 opts.HNSWConfig.M,
+			EfConstruction:    opts.HNSWConfig.EfConstruction,
+			EfSearch:          opts.HNSWConfig.EfSearch,
+			Distance:          opts.HNSWConfig.DistanceMetric,
+			PersistNodes:      opts.HNSWConfig.PersistNodes,
+			EnableNorms:       opts.HNSWConfig.EnableNorms,
+			NormalizeVectors:  opts.HNSWConfig.NormalizeVectors,
+			QuantizeVectors:   opts.HNSWConfig.QuantizeVectors,
+			SearchParallelism: opts.HNSWConfig.SearchParallelism,
 		})
 		return nil
 	}

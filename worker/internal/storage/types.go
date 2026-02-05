@@ -30,6 +30,15 @@ type HNSWConfig struct {
 	MultiStageEnabled      bool          // If true, use multi-stage search for latency/recall balance.
 	Stage1Ef               int           // EfSearch for stage 1 (candidate generation).
 	Stage1CandidateFactor  int           // Candidate multiplier for stage 2 refinement.
+	AdaptiveEfEnabled      bool          // If true, adapt ef based on query k.
+	AdaptiveEfMin          int           // Minimum ef when adaptive is enabled.
+	AdaptiveEfMax          int           // Maximum ef when adaptive is enabled.
+	AdaptiveEfMultiplier   int           // ef = k * multiplier when adaptive is enabled.
+	SearchParallelism      int           // Parallelism for HNSW search distance computations.
+	HotIndexEnabled        bool          // If true, maintain a hot in-memory index for recent vectors.
+	HotIndexMaxSize        int           // Max vectors to keep in the hot index.
+	HotIndexColdEfScale    float64       // Scale factor for cold ef when hot index is enabled.
+	HotIndexEf             int           // EfSearch override for hot index (0 = use ef).
 	SnapshotInterval       time.Duration // Base interval for HNSW snapshotting.
 	SnapshotMaxInterval    time.Duration // Max interval between forced snapshots.
 	SnapshotWriteThreshold uint64        // Writes since last snapshot before deferring.

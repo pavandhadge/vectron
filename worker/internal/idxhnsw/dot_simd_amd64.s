@@ -29,6 +29,7 @@ vector_loop:
 
 vector_done:
 	// horizontal sum ymm0 into xmm0
+	VEXTRACTF128 $0, Y0, X0
 	VEXTRACTF128 $1, Y0, X1
 	VADDPS X1, X0, X0
 	VHADDPS X0, X0, X0

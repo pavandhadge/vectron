@@ -9,6 +9,7 @@ import (
 	"container/heap"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -85,6 +86,10 @@ type PebbleDB struct {
 	hnswSnapshotLoaded         bool
 	hnswRebuildMu              sync.Mutex
 	hnswRebuildInProgress      bool
+	hnswHot                    *idxhnsw.HNSW
+	hotMu                      sync.Mutex
+	hotQueue                   []string
+	hotSet                     map[string]struct{}
 }
 
 // NewPebbleDB creates a new, uninitialized instance of PebbleDB.
@@ -117,6 +122,66 @@ func (r *PebbleDB) Search(query []float32, k int) ([]string, []float32, error) {
 			ef = adaptive
 		}
 	}
+	if r.opts != nil && r.opts.HNSWConfig.AdaptiveEfEnabled {
+		mult := r.opts.HNSWConfig.AdaptiveEfMultiplier
+		if mult <= 0 {
+			mult = 2
+		}
+		adaptive := k * mult
+		minEf := r.opts.HNSWConfig.AdaptiveEfMin
+		if minEf <= 0 {
+			minEf = k
+		}
+		maxEf := r.opts.HNSWConfig.AdaptiveEfMax
+		if maxEf <= 0 {
+			maxEf = r.opts.HNSWConfig.EfSearch
+		}
+		if adaptive < minEf {
+			adaptive = minEf
+		}
+		if adaptive > maxEf {
+			adaptive = maxEf
+		}
+		if adaptive > ef {
+			ef = adaptive
+		}
+	}
+	if r.hnswHot != nil && r.opts != nil && r.opts.HNSWConfig.HotIndexEnabled {
+		hotEf := r.opts.HNSWConfig.HotIndexEf
+		if hotEf <= 0 {
+			hotEf = ef
+		}
+		hotIDs, hotScores := r.hnswHot.SearchWithEf(searchVec, k, hotEf)
+
+		coldEf := ef
+		scale := r.opts.HNSWConfig.HotIndexColdEfScale
+		if scale > 0 && scale < 1 {
+			coldEf = int(float64(ef) * scale)
+			if coldEf < k {
+				coldEf = k
+			}
+		}
+
+		var coldIDs []string
+		var coldScores []float32
+		if r.opts.HNSWConfig.MultiStageEnabled {
+			stage1Ef := r.opts.HNSWConfig.Stage1Ef
+			if stage1Ef <= 0 {
+				stage1Ef = coldEf / 2
+			}
+			candidateFactor := r.opts.HNSWConfig.Stage1CandidateFactor
+			if candidateFactor <= 0 {
+				candidateFactor = 4
+			}
+			coldIDs, coldScores = r.hnsw.SearchTwoStage(searchVec, k, stage1Ef, candidateFactor)
+		} else {
+			coldIDs, coldScores = r.hnsw.SearchWithEf(searchVec, k, coldEf)
+		}
+
+		ids, scores := mergeSearchResults(hotIDs, hotScores, coldIDs, coldScores, k)
+		return ids, scores, nil
+	}
+
 	if r.opts != nil && r.opts.HNSWConfig.MultiStageEnabled {
 		stage1Ef := r.opts.HNSWConfig.Stage1Ef
 		if stage1Ef <= 0 {
@@ -131,6 +196,45 @@ func (r *PebbleDB) Search(query []float32, k int) ([]string, []float32, error) {
 	}
 	ids, scores := r.hnsw.SearchWithEf(searchVec, k, ef)
 	return ids, scores, nil
+}
+
+func mergeSearchResults(idsA []string, scoresA []float32, idsB []string, scoresB []float32, k int) ([]string, []float32) {
+	type pair struct {
+		id    string
+		score float32
+	}
+	merged := make(map[string]float32, len(idsA)+len(idsB))
+	for i, id := range idsA {
+		if i >= len(scoresA) {
+			break
+		}
+		merged[id] = scoresA[i]
+	}
+	for i, id := range idsB {
+		if i >= len(scoresB) {
+			break
+		}
+		if prev, ok := merged[id]; !ok || scoresB[i] < prev {
+			merged[id] = scoresB[i]
+		}
+	}
+	out := make([]pair, 0, len(merged))
+	for id, score := range merged {
+		out = append(out, pair{id: id, score: score})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].score < out[j].score
+	})
+	if k > 0 && len(out) > k {
+		out = out[:k]
+	}
+	ids := make([]string, len(out))
+	scores := make([]float32, len(out))
+	for i, p := range out {
+		ids[i] = p.id
+		scores[i] = p.score
+	}
+	return ids, scores
 }
 
 // result represents a single search result.

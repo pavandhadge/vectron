@@ -61,7 +61,7 @@ func (h *HNSW) distanceToNode(query []float32, qvec []int8, node *Node) float32 
 		if qvec == nil {
 			qvec = quantizeVector(query)
 		}
-		dot := dotProductInt8(qvec, node.QVec)
+		dot := dotProductInt8SIMD(qvec, node.QVec)
 		return 1 - float32(dot)/(127*127)
 	}
 	return h.distanceWithNode(query, node.Vec, node.Norm)

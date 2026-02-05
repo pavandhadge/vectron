@@ -83,6 +83,7 @@ func (r *PebbleDB) StoreVector(id string, vector []float32, metadata []byte) err
 	if err := r.hnsw.Add(id, indexVector); err != nil {
 		return fmt.Errorf("failed to add vector to HNSW index: %w", err)
 	}
+	r.hotAdd(id, indexVector)
 
 	// 2. If HNSW add is successful, commit the vector and WAL entry to PebbleDB.
 	val, err := encodeVectorWithMeta(vector, metadata)
@@ -155,6 +156,7 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 			}
 			return fmt.Errorf("failed to add vector to HNSW index: %w", err)
 		}
+		r.hotAdd(v.ID, indexVector)
 		added = append(added, v.ID)
 
 		val, err := encodeVectorWithMeta(v.Vector, v.Metadata)
@@ -205,6 +207,7 @@ func (r *PebbleDB) DeleteVector(id string) error {
 	if err := r.hnsw.Delete(id); err != nil {
 		return fmt.Errorf("failed to delete vector from HNSW index: %w", err)
 	}
+	r.hotDelete(id)
 
 	// 2. If HNSW delete is successful, hard-delete from PebbleDB and write to WAL.
 	batch := r.db.NewBatch()
@@ -231,6 +234,48 @@ func (r *PebbleDB) DeleteVector(id string) error {
 
 	r.recordHNSWWrite(1)
 	return nil
+}
+
+func (r *PebbleDB) hotAdd(id string, vector []float32) {
+	if r.hnswHot == nil {
+		return
+	}
+	r.hotMu.Lock()
+	defer r.hotMu.Unlock()
+
+	if _, exists := r.hotSet[id]; exists {
+		return
+	}
+
+	if err := r.hnswHot.Add(id, vector); err != nil {
+		return
+	}
+	r.hotSet[id] = struct{}{}
+	r.hotQueue = append(r.hotQueue, id)
+
+	maxSize := r.opts.HNSWConfig.HotIndexMaxSize
+	if maxSize <= 0 {
+		maxSize = 100000
+	}
+	for len(r.hotQueue) > maxSize {
+		oldest := r.hotQueue[0]
+		r.hotQueue = r.hotQueue[1:]
+		delete(r.hotSet, oldest)
+		_ = r.hnswHot.Delete(oldest)
+	}
+}
+
+func (r *PebbleDB) hotDelete(id string) {
+	if r.hnswHot == nil {
+		return
+	}
+	r.hotMu.Lock()
+	defer r.hotMu.Unlock()
+	if _, exists := r.hotSet[id]; !exists {
+		return
+	}
+	delete(r.hotSet, id)
+	_ = r.hnswHot.Delete(id)
 }
 
 func (r *PebbleDB) shouldBulkLoad(batchSize int) bool {

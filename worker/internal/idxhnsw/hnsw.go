@@ -26,15 +26,17 @@ type NodeStore interface {
 
 // HNSWConfig holds the configuration parameters for the HNSW index.
 type HNSWConfig struct {
-	M                int    // Max number of connections per node per layer.
-	EfConstruction   int    // Size of the dynamic candidate list during construction.
-	EfSearch         int    // Size of the dynamic candidate list during search.
-	MaxLevel         int    // The maximum level to which a node can be promoted.
-	Distance         string // The distance metric to use ("euclidean" or "cosine").
-	PersistNodes     bool   // Whether to persist each node update to the store.
-	EnableNorms      bool   // Whether to store vector norms for cosine distance.
-	NormalizeVectors bool   // Whether to normalize vectors for cosine distance.
-	QuantizeVectors  bool   // Whether to store vectors in int8 form (cosine+normalized only).
+	M                 int    // Max number of connections per node per layer.
+	EfConstruction    int    // Size of the dynamic candidate list during construction.
+	EfSearch          int    // Size of the dynamic candidate list during search.
+	MaxLevel          int    // The maximum level to which a node can be promoted.
+	Distance          string // The distance metric to use ("euclidean" or "cosine").
+	PersistNodes      bool   // Whether to persist each node update to the store.
+	EnableNorms       bool   // Whether to store vector norms for cosine distance.
+	NormalizeVectors  bool   // Whether to normalize vectors for cosine distance.
+	QuantizeVectors   bool   // Whether to store vectors in int8 form (cosine+normalized only).
+	SearchParallelism int    // Parallelism for search distance computations.
+	HotIndex          bool   // If true, this index is a hot in-memory tier.
 }
 
 // HNSW represents the HNSW index.
