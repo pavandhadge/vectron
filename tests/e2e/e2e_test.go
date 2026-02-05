@@ -21,7 +21,7 @@ import (
 	vectron "github.com/pavandhadge/vectron/clientlibs/go"
 )
 
-const jwtTestSecret = "CHANGE_ME_IN_PRODUCTION"
+const jwtTestSecret = "CHANGE_ME_IN_PRODUCTION_FOR_TESTS_ONLY_32CHARS_MIN"
 
 func generateTestJWT(userID, plan, apiKeyID string) (string, error) {
 	claims := struct {

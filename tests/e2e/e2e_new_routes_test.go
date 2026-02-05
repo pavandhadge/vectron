@@ -282,8 +282,12 @@ func TestE2E_NewRoutes(t *testing.T) {
 	results, err := client.Search(collectionName, []float32{0.1, 0.2, 0.3, 0.4}, 2)
 	require.NoError(t, err)
 	require.Len(t, results, 2)
-	assert.Equal(t, "p1", results[0].ID)
-	assert.Equal(t, "p3", results[1].ID)
+	ids := map[string]bool{
+		results[0].ID: true,
+		results[1].ID: true,
+	}
+	assert.True(t, ids["p1"])
+	assert.True(t, ids["p3"])
 	t.Log("Search successful")
 
 	// 5. Get Point

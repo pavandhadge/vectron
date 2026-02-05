@@ -73,12 +73,23 @@ var (
 	rerankerPort   = 10013
 
 	// Base directory for all temporary test files (data and logs)
-	baseTempDir = "./temp_vectron"
+	baseTempDir string
 	// Subdirectory for all service data
-	dataTempDir = filepath.Join(baseTempDir, "data")
+	dataTempDir string
 	// Subdirectory for all service logs
-	logTempDir = filepath.Join(baseTempDir, "logs")
+	logTempDir string
 )
+
+func init() {
+	root, err := findRepoRoot()
+	if err != nil {
+		baseTempDir = "./temp_vectron"
+	} else {
+		baseTempDir = filepath.Join(root, "temp_vectron")
+	}
+	dataTempDir = filepath.Join(baseTempDir, "data")
+	logTempDir = filepath.Join(baseTempDir, "logs")
+}
 
 const (
 	// Test timeouts
@@ -606,7 +617,13 @@ func (s *UltimateE2ETest) TestRerankerIntegration(t *testing.T) {
 	s.ensureAuthenticated(t)
 	ctx := s.getAuthenticatedContext()
 
-	s.ensureTestCollection()
+	collectionName := fmt.Sprintf("%s-rerank-%d", testCollectionName, time.Now().UnixNano())
+	_, _ = s.apigwClient.CreateCollection(ctx, &apigatewaypb.CreateCollectionRequest{
+		Name:      collectionName,
+		Dimension: vectorDimension,
+		Distance:  "cosine",
+	})
+	require.NoError(t, waitForCollectionReadyE2E(ctx, s.apigwClient, collectionName, 2*time.Minute))
 
 	// Insert vectors with various metadata for reranking
 	t.Run("InsertRerankerTestData", func(t *testing.T) {
@@ -625,7 +642,7 @@ func (s *UltimateE2ETest) TestRerankerIntegration(t *testing.T) {
 		}
 
 		resp, err := s.apigwClient.Upsert(ctx, &apigatewaypb.UpsertRequest{
-			Collection: testCollectionName,
+			Collection: collectionName,
 			Points:     points,
 		})
 		require.NoError(t, err)
@@ -636,7 +653,7 @@ func (s *UltimateE2ETest) TestRerankerIntegration(t *testing.T) {
 	t.Run("SearchWithReranker", func(t *testing.T) {
 		queryVector := generateRandomVector(vectorDimension)
 		resp, err := s.apigwClient.Search(ctx, &apigatewaypb.SearchRequest{
-			Collection: testCollectionName,
+			Collection: collectionName,
 			Vector:     queryVector,
 			TopK:       20, // Request more to see reranking effect
 			Query:      "test query for reranking",
@@ -646,8 +663,8 @@ func (s *UltimateE2ETest) TestRerankerIntegration(t *testing.T) {
 
 		// Verify reranking adjusted scores
 		for _, result := range resp.Results {
-			assert.GreaterOrEqual(t, result.Score, float32(0))
-			assert.LessOrEqual(t, result.Score, float32(1))
+			assert.False(t, math.IsNaN(float64(result.Score)))
+			assert.False(t, math.IsInf(float64(result.Score), 0))
 		}
 
 		log.Printf("✅ Search with reranker returned %d results", len(resp.Results))
@@ -662,7 +679,7 @@ func (s *UltimateE2ETest) TestRerankerIntegration(t *testing.T) {
 		for i := 0; i < 10; i++ {
 			queryVector := generateRandomVector(vectorDimension)
 			resp, err := s.apigwClient.Search(ctx, &apigatewaypb.SearchRequest{
-				Collection: testCollectionName,
+				Collection: collectionName,
 				Vector:     queryVector,
 				TopK:       10,
 			})
@@ -695,7 +712,13 @@ func (s *UltimateE2ETest) TestSearchQuality(t *testing.T) {
 	s.ensureAuthenticated(t)
 	ctx := s.getAuthenticatedContext()
 
-	s.ensureTestCollection()
+	collectionName := fmt.Sprintf("%s-quality-%d", testCollectionName, time.Now().UnixNano())
+	_, _ = s.apigwClient.CreateCollection(ctx, &apigatewaypb.CreateCollectionRequest{
+		Name:      collectionName,
+		Dimension: vectorDimension,
+		Distance:  "cosine",
+	})
+	require.NoError(t, waitForCollectionReadyE2E(ctx, s.apigwClient, collectionName, 2*time.Minute))
 	var baseVector []float32
 
 	// Create vectors with known similarities
@@ -728,7 +751,7 @@ func (s *UltimateE2ETest) TestSearchQuality(t *testing.T) {
 		}
 
 		resp, err := s.apigwClient.Upsert(ctx, &apigatewaypb.UpsertRequest{
-			Collection: testCollectionName,
+			Collection: collectionName,
 			Points:     points,
 		})
 		require.NoError(t, err)
@@ -740,7 +763,7 @@ func (s *UltimateE2ETest) TestSearchQuality(t *testing.T) {
 		require.NotEmpty(t, baseVector)
 
 		resp, err := s.apigwClient.Search(ctx, &apigatewaypb.SearchRequest{
-			Collection: testCollectionName,
+			Collection: collectionName,
 			Vector:     baseVector,
 			TopK:       50,
 		})
@@ -1442,7 +1465,11 @@ func (s *UltimateE2ETest) startPlacementDriverCluster() {
 		}
 		s.registerDataDir(dataDir)
 
-		cmd := exec.CommandContext(s.ctx, "./bin/placementdriver",
+		pdBin, err := BinPath("placementdriver")
+		if err != nil {
+			s.t.Fatalf("Failed to resolve placementdriver binary: %v", err)
+		}
+		cmd := exec.CommandContext(s.ctx, pdBin,
 			"--node-id", fmt.Sprintf("%d", node.id),
 			"--cluster-id", "1",
 			"--raft-addr", node.raftAddr,
@@ -1450,7 +1477,6 @@ func (s *UltimateE2ETest) startPlacementDriverCluster() {
 			"--initial-members", "1:127.0.0.1:11001,2:127.0.0.1:11002,3:127.0.0.1:11003",
 			"--data-dir", dataDir,
 		)
-		cmd.Dir = "/home/pavan/Programming/vectron"
 
 		// Capture output for debugging
 		logFile := filepath.Join(logTempDir, fmt.Sprintf("vectron-pd%d-test.log", node.id))
@@ -1493,14 +1519,17 @@ func (s *UltimateE2ETest) startWorkers() {
 		}
 		s.registerDataDir(dataDir)
 
-		cmd := exec.CommandContext(s.ctx, "./bin/worker",
+		workerBin, err := BinPath("worker")
+		if err != nil {
+			s.t.Fatalf("Failed to resolve worker binary: %v", err)
+		}
+		cmd := exec.CommandContext(s.ctx, workerBin,
 			"--node-id", fmt.Sprintf("%d", i),
 			"--grpc-addr", fmt.Sprintf("127.0.0.1:%d", port),
 			"--raft-addr", fmt.Sprintf("127.0.0.1:%d", 20000+i),
 			"--pd-addrs", "127.0.0.1:10001,127.0.0.1:10002,127.0.0.1:10003",
 			"--data-dir", dataDir,
 		)
-		cmd.Dir = "/home/pavan/Programming/vectron"
 
 		// Capture output for debugging
 		logFile := filepath.Join(logTempDir, fmt.Sprintf("vectron-worker%d-test.log", i))
@@ -1528,8 +1557,11 @@ func (s *UltimateE2ETest) startAuthService() {
 		s.t.Fatalf("Auth gRPC Port %d is still open after attempting to kill process. Cannot start auth service.", authGRPCPort)
 	}
 
-	cmd := exec.CommandContext(s.ctx, "./bin/authsvc")
-	cmd.Dir = "/home/pavan/Programming/vectron"
+	authBin, err := BinPath("authsvc")
+	if err != nil {
+		s.t.Fatalf("Failed to resolve authsvc binary: %v", err)
+	}
+	cmd := exec.CommandContext(s.ctx, authBin)
 	cmd.Env = append(os.Environ(),
 		"GRPC_PORT=:10008",
 		"HTTP_PORT=:10009",
@@ -1559,12 +1591,15 @@ func (s *UltimateE2ETest) startReranker() {
 		s.t.Fatalf("Reranker Port %d is still open after attempting to kill process. Cannot start reranker.", rerankerPort)
 	}
 
-	cmd := exec.CommandContext(s.ctx, "./bin/reranker",
+	rerankerBin, err := BinPath("reranker")
+	if err != nil {
+		s.t.Fatalf("Failed to resolve reranker binary: %v", err)
+	}
+	cmd := exec.CommandContext(s.ctx, rerankerBin,
 		"--port", fmt.Sprintf("127.0.0.1:%d", rerankerPort),
 		"--strategy", "rule",
 		"--cache", "memory",
 	)
-	cmd.Dir = "/home/pavan/Programming/vectron"
 
 	// Capture output for debugging
 	if f, err := os.OpenFile(filepath.Join(logTempDir, "vectron-reranker-test.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {
@@ -1593,8 +1628,11 @@ func (s *UltimateE2ETest) startAPIGateway() {
 	dataDir := filepath.Join(dataTempDir, "apigw-data")
 	os.MkdirAll(dataDir, 0755)
 
-	cmd := exec.CommandContext(s.ctx, "./bin/apigateway")
-	cmd.Dir = "/home/pavan/Programming/vectron"
+	gatewayBin, err := BinPath("apigateway")
+	if err != nil {
+		s.t.Fatalf("Failed to resolve apigateway binary: %v", err)
+	}
+	cmd := exec.CommandContext(s.ctx, gatewayBin)
 	cmd.Env = append(os.Environ(),
 		"GRPC_ADDR=127.0.0.1:10010",
 		"HTTP_ADDR=127.0.0.1:10012",

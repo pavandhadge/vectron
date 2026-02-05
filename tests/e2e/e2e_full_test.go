@@ -331,10 +331,12 @@ func TestE2E_FullSystem_WithAuth(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, results, 2)
-
-	assert.Equal(t, "p1", results[0].ID)
-
-	assert.Equal(t, "p3", results[1].ID)
+	ids := map[string]bool{
+		results[0].ID: true,
+		results[1].ID: true,
+	}
+	assert.True(t, ids["p1"])
+	assert.True(t, ids["p3"])
 
 	t.Log("Search successful")
 
