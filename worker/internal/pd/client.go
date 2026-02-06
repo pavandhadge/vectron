@@ -31,6 +31,8 @@ type ShardManager interface {
 	GetShardLeaderInfo() []*pd.ShardLeaderInfo
 	GetShards() []uint64
 	GetShardMembershipInfo() []*pd.ShardMembershipInfo
+	GetShardProgressInfo() []*pd.ShardProgressInfo
+	GetLeaderTransferAcks() []*pd.ShardLeaderTransferAck
 }
 
 // LeaderInfo holds the information about the current leader.
@@ -303,9 +305,13 @@ func (c *Client) sendHeartbeat(ctx context.Context, shardUpdateChan chan<- []*Sh
 
 	runningShards := []uint64(nil)
 	var membershipInfo []*pd.ShardMembershipInfo
+	var progressInfo []*pd.ShardProgressInfo
+	var leaderTransferAcks []*pd.ShardLeaderTransferAck
 	if c.shardManager != nil {
 		runningShards = c.shardManager.GetShards()
 		membershipInfo = c.shardManager.GetShardMembershipInfo()
+		progressInfo = c.shardManager.GetShardProgressInfo()
+		leaderTransferAcks = c.shardManager.GetLeaderTransferAcks()
 	}
 
 	leaderInfo := []*pd.ShardLeaderInfo(nil)
@@ -324,6 +330,8 @@ func (c *Client) sendHeartbeat(ctx context.Context, shardUpdateChan chan<- []*Sh
 		ActiveShards:       activeShards,
 		RunningShards:      runningShards,
 		ShardMembership:    membershipInfo,
+		ShardProgress:      progressInfo,
+		LeaderTransferAcks: leaderTransferAcks,
 	}
 
 	leader, err := c.getLeader()

@@ -148,6 +148,8 @@ type WorkerListCache struct {
 type WorkerResolveCacheEntry struct {
 	Addr      string
 	ShardID   uint64
+	ShardEpoch uint64
+	LeaseExpiryUnixMs int64
 	Timestamp time.Time
 }
 
@@ -156,6 +158,12 @@ type WorkerResolveCache struct {
 	entries map[string]*WorkerResolveCacheEntry
 	ttl     time.Duration
 	maxSize int
+}
+
+type shardBatch struct {
+	points            []*pb.Point
+	shardEpoch        uint64
+	leaseExpiryUnixMs int64
 }
 
 func NewWorkerResolveCache(ttl time.Duration, maxSize int) *WorkerResolveCache {
@@ -297,21 +305,24 @@ func (c *TinyLFUCache) Len() int {
 	return len(c.data)
 }
 
-func (c *WorkerResolveCache) Get(collection, vectorID string) (string, uint64, bool) {
+func (c *WorkerResolveCache) Get(collection, vectorID string) (string, uint64, uint64, int64, bool) {
 	key := collection + "|" + vectorID
 	c.mu.RLock()
 	entry, ok := c.entries[key]
 	c.mu.RUnlock()
 	if !ok {
-		return "", 0, false
+		return "", 0, 0, 0, false
 	}
 	if time.Since(entry.Timestamp) > c.ttl {
-		return "", 0, false
+		return "", 0, 0, 0, false
 	}
-	return entry.Addr, entry.ShardID, true
+	if entry.LeaseExpiryUnixMs > 0 && time.Now().UnixMilli() > entry.LeaseExpiryUnixMs {
+		return "", 0, 0, 0, false
+	}
+	return entry.Addr, entry.ShardID, entry.ShardEpoch, entry.LeaseExpiryUnixMs, true
 }
 
-func (c *WorkerResolveCache) Set(collection, vectorID string, addr string, shardID uint64) {
+func (c *WorkerResolveCache) Set(collection, vectorID string, addr string, shardID uint64, shardEpoch uint64, leaseExpiryUnixMs int64) {
 	key := collection + "|" + vectorID
 	c.mu.Lock()
 	if c.maxSize > 0 && len(c.entries) >= c.maxSize {
@@ -323,6 +334,8 @@ func (c *WorkerResolveCache) Set(collection, vectorID string, addr string, shard
 	c.entries[key] = &WorkerResolveCacheEntry{
 		Addr:      addr,
 		ShardID:   shardID,
+		ShardEpoch: shardEpoch,
+		LeaseExpiryUnixMs: leaseExpiryUnixMs,
 		Timestamp: time.Now(),
 	}
 	c.mu.Unlock()
@@ -1231,16 +1244,16 @@ func hashVector(vec []float32) uint64 {
 	return h
 }
 
-func (s *gatewayServer) resolveWorker(ctx context.Context, collection string, vectorID string) (string, uint64, error) {
-	if vectorID != "" {
-		if addr, shardID, ok := s.resolveCache.Get(collection, vectorID); ok {
-			return addr, shardID, nil
+func (s *gatewayServer) resolveWorker(ctx context.Context, collection string, vectorID string, forceRefresh bool) (string, uint64, uint64, int64, error) {
+	if vectorID != "" && !forceRefresh {
+		if addr, shardID, shardEpoch, leaseExpiry, ok := s.resolveCache.Get(collection, vectorID); ok {
+			return addr, shardID, shardEpoch, leaseExpiry, nil
 		}
 	}
 
 	placementClient, err := s.getPlacementClient()
 	if err != nil {
-		return "", 0, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
+		return "", 0, 0, 0, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
 	}
 
 	resp, err := placementClient.GetWorker(ctx, &placementpb.GetWorkerRequest{
@@ -1251,28 +1264,40 @@ func (s *gatewayServer) resolveWorker(ctx context.Context, collection string, ve
 		if st, ok := status.FromError(err); ok && (st.Code() == codes.Unavailable || st.Code() == codes.Internal) {
 			placementClient, err = s.updateLeader()
 			if err != nil {
-				return "", 0, status.Errorf(codes.Internal, "could not update placement driver leader: %v", err)
+				return "", 0, 0, 0, status.Errorf(codes.Internal, "could not update placement driver leader: %v", err)
 			}
 			resp, err = placementClient.GetWorker(ctx, &placementpb.GetWorkerRequest{
 				Collection: collection,
 				VectorId:   vectorID,
 			})
 			if err != nil {
-				return "", 0, status.Errorf(codes.Internal, "could not get worker for collection %q after leader update: %v", collection, err)
+				return "", 0, 0, 0, status.Errorf(codes.Internal, "could not get worker for collection %q after leader update: %v", collection, err)
 			}
 		} else {
-			return "", 0, status.Errorf(codes.Internal, "could not get worker for collection %q: %v", collection, err)
+			return "", 0, 0, 0, status.Errorf(codes.Internal, "could not get worker for collection %q: %v", collection, err)
 		}
 	}
 	if resp.GetGrpcAddress() == "" {
-		return "", 0, status.Errorf(codes.NotFound, "collection %q not found", collection)
+		return "", 0, 0, 0, status.Errorf(codes.NotFound, "collection %q not found", collection)
 	}
 	addr := resp.GetGrpcAddress()
 	shardID := uint64(resp.GetShardId())
+	shardEpoch := resp.GetShardEpoch()
+	leaseExpiry := resp.GetLeaseExpiryUnixMs()
 	if vectorID != "" {
-		s.resolveCache.Set(collection, vectorID, addr, shardID)
+		s.resolveCache.Set(collection, vectorID, addr, shardID, shardEpoch, leaseExpiry)
 	}
-	return addr, shardID, nil
+	return addr, shardID, shardEpoch, leaseExpiry, nil
+}
+
+func isStaleShardError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if st, ok := status.FromError(err); ok {
+		return st.Code() == codes.FailedPrecondition
+	}
+	return false
 }
 
 func (s *gatewayServer) UpdateUserProfile(ctx context.Context, req *pb.UpdateUserProfileRequest) (*pb.UpdateUserProfileResponse, error) {
@@ -1380,7 +1405,7 @@ func (s *gatewayServer) updateLeader() (placementpb.PlacementServiceClient, erro
 	return nil, status.Error(codes.Unavailable, "no placement driver leader found")
 }
 
-func (s *gatewayServer) forwardToWorker(ctx context.Context, collection string, vectorID string, call func(workerpb.WorkerServiceClient, uint64) (interface{}, error)) (interface{}, error) {
+func (s *gatewayServer) forwardToWorker(ctx context.Context, collection string, vectorID string, call func(workerpb.WorkerServiceClient, uint64, uint64, int64) (interface{}, error)) (interface{}, error) {
 	// Ensure we always have a deadline for raft proposals on workers.
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
@@ -1388,43 +1413,31 @@ func (s *gatewayServer) forwardToWorker(ctx context.Context, collection string, 
 		defer cancel()
 	}
 
-	placementClient, err := s.getPlacementClient()
+	addr, shardID, shardEpoch, leaseExpiry, err := s.resolveWorker(ctx, collection, vectorID, false)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
-	}
-
-	resp, err := placementClient.GetWorker(ctx, &placementpb.GetWorkerRequest{
-		Collection: collection,
-		VectorId:   vectorID,
-	})
-	if err != nil {
-		if st, ok := status.FromError(err); ok && (st.Code() == codes.Unavailable || st.Code() == codes.Internal) {
-			placementClient, err = s.updateLeader()
-			if err != nil {
-				return nil, status.Errorf(codes.Internal, "could not update placement driver leader: %v", err)
-			}
-			resp, err = placementClient.GetWorker(ctx, &placementpb.GetWorkerRequest{
-				Collection: collection,
-				VectorId:   vectorID,
-			})
-			if err != nil {
-				return nil, status.Errorf(codes.Internal, "could not get worker for collection %q after leader update: %v", collection, err)
-			}
-		} else {
-			return nil, status.Errorf(codes.Internal, "could not get worker for collection %q: %v", collection, err)
-		}
-	}
-	if resp.GetGrpcAddress() == "" {
-		return nil, status.Errorf(codes.NotFound, "collection %q not found", collection)
+		return nil, err
 	}
 
 	// Use connection pool instead of creating new connection each time
-	client, err := s.workerPool.GetClient(resp.GetGrpcAddress())
+	client, err := s.workerPool.GetClient(addr)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "worker for collection %q at %s is unreachable: %v", collection, resp.GetGrpcAddress(), err)
+		return nil, status.Errorf(codes.Internal, "worker for collection %q at %s is unreachable: %v", collection, addr, err)
 	}
 
-	return call(client, uint64(resp.ShardId))
+	result, err := call(client, shardID, shardEpoch, leaseExpiry)
+	if err == nil || !isStaleShardError(err) {
+		return result, err
+	}
+
+	addr, shardID, shardEpoch, leaseExpiry, err = s.resolveWorker(ctx, collection, vectorID, true)
+	if err != nil {
+		return nil, err
+	}
+	client, err = s.workerPool.GetClient(addr)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "worker for collection %q at %s is unreachable: %v", collection, addr, err)
+	}
+	return call(client, shardID, shardEpoch, leaseExpiry)
 }
 
 func (s *gatewayServer) CreateCollection(ctx context.Context, req *pb.CreateCollectionRequest) (*pb.CreateCollectionResponse, error) {
@@ -1520,7 +1533,7 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 		assignErr   error
 		assignWg    sync.WaitGroup
 		semaphore   = make(chan struct{}, adaptiveConcurrency(4, 64))
-		assignments = make(map[string]map[uint64][]*pb.Point)
+		assignments = make(map[string]map[uint64]*shardBatch)
 	)
 
 	for _, point := range req.Points {
@@ -1531,7 +1544,7 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
 
-			addr, shardID, err := s.resolveWorker(ctx, req.Collection, p.Id)
+			addr, shardID, shardEpoch, leaseExpiry, err := s.resolveWorker(ctx, req.Collection, p.Id, false)
 			if err != nil {
 				assignMu.Lock()
 				if assignErr == nil {
@@ -1544,10 +1557,25 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 			assignMu.Lock()
 			shards, ok := assignments[addr]
 			if !ok {
-				shards = make(map[uint64][]*pb.Point)
+				shards = make(map[uint64]*shardBatch)
 				assignments[addr] = shards
 			}
-			shards[shardID] = append(shards[shardID], p)
+			batch := shards[shardID]
+			if batch == nil {
+				batch = &shardBatch{
+					points:            make([]*pb.Point, 0, 8),
+					shardEpoch:        shardEpoch,
+					leaseExpiryUnixMs: leaseExpiry,
+				}
+				shards[shardID] = batch
+			}
+			batch.points = append(batch.points, p)
+			if shardEpoch > batch.shardEpoch {
+				batch.shardEpoch = shardEpoch
+			}
+			if leaseExpiry > batch.leaseExpiryUnixMs {
+				batch.leaseExpiryUnixMs = leaseExpiry
+			}
 			assignMu.Unlock()
 		}(point)
 	}
@@ -1565,9 +1593,9 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 	)
 
 	for addr, shards := range assignments {
-		for shardID, points := range shards {
+		for shardID, batch := range shards {
 			sendWg.Add(1)
-			go func(workerAddr string, sid uint64, pts []*pb.Point) {
+			go func(workerAddr string, sid uint64, batch *shardBatch) {
 				defer sendWg.Done()
 
 				sendSem <- struct{}{}
@@ -1583,7 +1611,7 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 					return
 				}
 
-				if len(pts) >= streamUpsertThreshold {
+				if len(batch.points) >= streamUpsertThreshold {
 					stream, err := client.StreamBatchStoreVector(ctx)
 					if err != nil {
 						sendMu.Lock()
@@ -1593,13 +1621,20 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 						sendMu.Unlock()
 						return
 					}
-					for i := 0; i < len(pts); i += streamUpsertChunkSize {
+					for i := 0; i < len(batch.points); i += streamUpsertChunkSize {
 						end := i + streamUpsertChunkSize
-						if end > len(pts) {
-							end = len(pts)
+						if end > len(batch.points) {
+							end = len(batch.points)
 						}
-						workerReq := translator.ToWorkerBatchStoreVectorRequestFromPoints(pts[i:end], sid)
+						workerReq := translator.ToWorkerBatchStoreVectorRequestFromPoints(batch.points[i:end], sid, batch.shardEpoch, batch.leaseExpiryUnixMs)
 						if err := stream.Send(workerReq); err != nil {
+							if isStaleShardError(err) {
+								if retryErr := s.retryUpsertWithFreshRouting(ctx, req.Collection, batch.points); retryErr == nil {
+									return
+								} else {
+									err = retryErr
+								}
+							}
 							sendMu.Lock()
 							if sendErr == nil {
 								sendErr = status.Errorf(codes.Internal, "failed to stream upsert batch for shard %d: %v", sid, err)
@@ -1609,6 +1644,13 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 						}
 					}
 					if _, err := stream.CloseAndRecv(); err != nil {
+						if isStaleShardError(err) {
+							if retryErr := s.retryUpsertWithFreshRouting(ctx, req.Collection, batch.points); retryErr == nil {
+								return
+							} else {
+								err = retryErr
+							}
+						}
 						sendMu.Lock()
 						if sendErr == nil {
 							sendErr = status.Errorf(codes.Internal, "failed to finalize stream upsert for shard %d: %v", sid, err)
@@ -1619,7 +1661,7 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 					return
 				}
 
-				workerReq := translator.ToWorkerBatchStoreVectorRequestFromPoints(pts, sid)
+				workerReq := translator.ToWorkerBatchStoreVectorRequestFromPoints(batch.points, sid, batch.shardEpoch, batch.leaseExpiryUnixMs)
 				var batchErr error
 				for attempt := 0; attempt < 10; attempt++ {
 					_, batchErr = client.BatchStoreVector(ctx, workerReq)
@@ -1632,6 +1674,13 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 					}
 					break
 				}
+				if batchErr != nil && isStaleShardError(batchErr) {
+					if err := s.retryUpsertWithFreshRouting(ctx, req.Collection, batch.points); err == nil {
+						return
+					} else {
+						batchErr = err
+					}
+				}
 				if batchErr != nil {
 					sendMu.Lock()
 					if sendErr == nil {
@@ -1640,7 +1689,7 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 					sendMu.Unlock()
 					return
 				}
-			}(addr, shardID, points)
+			}(addr, shardID, batch)
 		}
 	}
 
@@ -1650,6 +1699,63 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 	}
 
 	return &pb.UpsertResponse{Upserted: int32(len(req.Points))}, nil
+}
+
+func (s *gatewayServer) retryUpsertWithFreshRouting(ctx context.Context, collection string, points []*pb.Point) error {
+	if len(points) == 0 {
+		return nil
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+	}
+
+	assignments := make(map[string]map[uint64]*shardBatch)
+	for _, point := range points {
+		if point == nil {
+			continue
+		}
+		addr, shardID, shardEpoch, leaseExpiry, err := s.resolveWorker(ctx, collection, point.Id, true)
+		if err != nil {
+			return err
+		}
+		shards, ok := assignments[addr]
+		if !ok {
+			shards = make(map[uint64]*shardBatch)
+			assignments[addr] = shards
+		}
+		batch := shards[shardID]
+		if batch == nil {
+			batch = &shardBatch{
+				points:            make([]*pb.Point, 0, 8),
+				shardEpoch:        shardEpoch,
+				leaseExpiryUnixMs: leaseExpiry,
+			}
+			shards[shardID] = batch
+		}
+		batch.points = append(batch.points, point)
+		if shardEpoch > batch.shardEpoch {
+			batch.shardEpoch = shardEpoch
+		}
+		if leaseExpiry > batch.leaseExpiryUnixMs {
+			batch.leaseExpiryUnixMs = leaseExpiry
+		}
+	}
+
+	for addr, shards := range assignments {
+		client, err := s.workerPool.GetClient(addr)
+		if err != nil {
+			return status.Errorf(codes.Internal, "worker %s unreachable: %v", addr, err)
+		}
+		for shardID, batch := range shards {
+			workerReq := translator.ToWorkerBatchStoreVectorRequestFromPoints(batch.points, shardID, batch.shardEpoch, batch.leaseExpiryUnixMs)
+			if _, err := client.BatchStoreVector(ctx, workerReq); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.SearchResponse, error) {
@@ -1880,7 +1986,7 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 			if v, ok := cfg.SearchConsistencyOverrides[req.Collection]; ok {
 				linearizable = v
 			}
-			workerReq := translator.ToWorkerSearchRequest(req, 0, linearizable)
+			workerReq := translator.ToWorkerSearchRequest(req, 0, 0, 0, linearizable)
 			workerReq.K = int32(workerTopK)
 
 			var res *workerpb.SearchResponse
@@ -2075,7 +2181,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 			if v, ok := cfg.SearchConsistencyOverrides[req.Collection]; ok {
 				linearizable = v
 			}
-			workerReq := translator.ToWorkerSearchRequest(req, 0, linearizable) // ShardID 0 for broadcast search
+			workerReq := translator.ToWorkerSearchRequest(req, 0, 0, 0, linearizable) // ShardID 0 for broadcast search
 			workerReq.K = int32(workerTopK)
 
 			var res *workerpb.SearchResponse
@@ -2290,8 +2396,8 @@ func (s *gatewayServer) finishInFlight(key uint64, resp *pb.SearchResponse, err 
 }
 
 func (s *gatewayServer) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetResponse, error) {
-	result, err := s.forwardToWorker(ctx, req.Collection, req.Id, func(c workerpb.WorkerServiceClient, shardID uint64) (interface{}, error) {
-		workerReq := translator.ToWorkerGetVectorRequest(req, shardID)
+	result, err := s.forwardToWorker(ctx, req.Collection, req.Id, func(c workerpb.WorkerServiceClient, shardID uint64, shardEpoch uint64, leaseExpiryUnixMs int64) (interface{}, error) {
+		workerReq := translator.ToWorkerGetVectorRequest(req, shardID, shardEpoch, leaseExpiryUnixMs)
 		res, err := c.GetVector(ctx, workerReq)
 		if err != nil {
 			return nil, err
@@ -2305,8 +2411,8 @@ func (s *gatewayServer) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetRes
 }
 
 func (s *gatewayServer) Delete(ctx context.Context, req *pb.DeleteRequest) (*pb.DeleteResponse, error) {
-	result, err := s.forwardToWorker(ctx, req.Collection, req.Id, func(c workerpb.WorkerServiceClient, shardID uint64) (interface{}, error) {
-		workerReq := translator.ToWorkerDeleteVectorRequest(req, shardID)
+	result, err := s.forwardToWorker(ctx, req.Collection, req.Id, func(c workerpb.WorkerServiceClient, shardID uint64, shardEpoch uint64, leaseExpiryUnixMs int64) (interface{}, error) {
+		workerReq := translator.ToWorkerDeleteVectorRequest(req, shardID, shardEpoch, leaseExpiryUnixMs)
 		res, err := c.DeleteVector(ctx, workerReq)
 		if err != nil {
 			return nil, err

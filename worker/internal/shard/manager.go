@@ -31,6 +31,8 @@ type Manager struct {
 	runningReplicas  map[uint64]bool // A set of shard IDs for replicas currently running on this node.
 	shardCollections map[uint64]string
 	membershipReportedAt map[uint64]time.Time
+	shardEpochs      map[uint64]uint64
+	pendingLeaderTransfers map[uint64]uint64
 }
 
 // NewManager creates a new instance of the ShardManager.
@@ -42,6 +44,8 @@ func NewManager(nh *dragonboat.NodeHost, workerDataDir string, nodeID uint64) *M
 		runningReplicas:  make(map[uint64]bool),
 		shardCollections: make(map[uint64]string),
 		membershipReportedAt: make(map[uint64]time.Time),
+		shardEpochs:      make(map[uint64]uint64),
+		pendingLeaderTransfers: make(map[uint64]uint64),
 	}
 }
 
@@ -62,6 +66,8 @@ func (m *Manager) SyncShards(assignments []*pd.ShardAssignment) {
 	for _, assignment := range assignments {
 		desiredShards[assignment.ShardInfo.ShardID] = assignment
 	}
+
+	m.updateShardEpochs(desiredShards)
 
 	m.mu.RLock()
 	runningSnapshot := make(map[uint64]bool, len(m.runningReplicas))
@@ -192,8 +198,36 @@ func (m *Manager) isShardRunning(shardID uint64) bool {
 	return m.runningReplicas[shardID]
 }
 
+func (m *Manager) updateShardEpochs(assignments map[uint64]*pd.ShardAssignment) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for shardID, assignment := range assignments {
+		if assignment == nil || assignment.ShardInfo == nil {
+			continue
+		}
+		if assignment.ShardInfo.Epoch > m.shardEpochs[shardID] {
+			m.shardEpochs[shardID] = assignment.ShardInfo.Epoch
+		}
+	}
+}
+
+func (m *Manager) getShardEpoch(shardID uint64) uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.shardEpochs[shardID]
+}
+
+// GetShardEpoch returns the current epoch for a shard.
+func (m *Manager) GetShardEpoch(shardID uint64) uint64 {
+	return m.getShardEpoch(shardID)
+}
+
 func (m *Manager) reconcileMembership(assignment *pd.ShardAssignment) {
 	shardID := assignment.ShardInfo.ShardID
+	if assignment.ShardInfo.Epoch < m.getShardEpoch(shardID) {
+		return
+	}
 	leaderID, valid, err := m.nodeHost.GetLeaderID(shardID)
 	if err != nil || !valid {
 		return
@@ -221,6 +255,8 @@ func (m *Manager) reconcileMembership(assignment *pd.ShardAssignment) {
 		if target != 0 {
 			if err := m.nodeHost.RequestLeaderTransfer(shardID, target); err != nil {
 				log.Printf("ShardManager: Leader transfer request failed for shard %d: %v", shardID, err)
+			} else {
+				m.recordLeaderTransfer(shardID, assignment.ShardInfo.Epoch)
 			}
 		}
 		return
@@ -407,4 +443,56 @@ func (m *Manager) shouldReportMembership(shardID uint64, now time.Time) bool {
 	}
 	m.membershipReportedAt[shardID] = now
 	return true
+}
+
+// GetShardProgressInfo returns applied index info for running shards.
+func (m *Manager) GetShardProgressInfo() []*placementdriver.ShardProgressInfo {
+	shardIDs := m.GetShards()
+	infos := make([]*placementdriver.ShardProgressInfo, 0, len(shardIDs))
+	for _, shardID := range shardIDs {
+		infos = append(infos, &placementdriver.ShardProgressInfo{
+			ShardId:      shardID,
+			AppliedIndex: GetAppliedIndex(shardID),
+			ShardEpoch:   m.getShardEpoch(shardID),
+		})
+	}
+	return infos
+}
+
+// GetLeaderTransferAcks returns acknowledgements for completed leader transfers.
+func (m *Manager) GetLeaderTransferAcks() []*placementdriver.ShardLeaderTransferAck {
+	now := time.Now().UnixMilli()
+	acks := make([]*placementdriver.ShardLeaderTransferAck, 0)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for shardID, epoch := range m.pendingLeaderTransfers {
+		leaderID, valid, err := m.nodeHost.GetLeaderID(shardID)
+		if err != nil || !valid {
+			continue
+		}
+		if leaderID == m.nodeID {
+			continue
+		}
+		acks = append(acks, &placementdriver.ShardLeaderTransferAck{
+			ShardId:          shardID,
+			FromNodeId:       m.nodeID,
+			ToNodeId:         leaderID,
+			ShardEpoch:       epoch,
+			TimestampUnixMs:  now,
+		})
+		delete(m.pendingLeaderTransfers, shardID)
+	}
+
+	return acks
+}
+
+func (m *Manager) recordLeaderTransfer(shardID uint64, epoch uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if prev, ok := m.pendingLeaderTransfers[shardID]; ok && prev >= epoch {
+		return
+	}
+	m.pendingLeaderTransfers[shardID] = epoch
 }

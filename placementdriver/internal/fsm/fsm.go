@@ -150,6 +150,7 @@ type ShardInfo struct {
 	KeyRangeEnd   uint64   `json:"key_range_end"`
 	Replicas      []uint64 `json:"replicas"`  // Slice of worker node IDs that host this shard.
 	LeaderID      uint64   `json:"leader_id"` // The current leader of the shard's Raft group.
+	Epoch         uint64   `json:"epoch"`     // Monotonic shard config epoch.
 	Dimension     int32    `json:"dimension"`
 	Distance      string   `json:"distance"`
 	Bootstrapped  bool     `json:"bootstrapped"` // Whether the raft group has been bootstrapped.
@@ -505,6 +506,7 @@ func (f *FSM) applyCreateCollection(payload CreateCollectionPayload) error {
 			KeyRangeStart: startKey,
 			KeyRangeEnd:   endKey,
 			Replicas:      replicas,
+			Epoch:         1,
 			BootstrapMembers: append([]uint64(nil), replicas...),
 			Dimension:     payload.Dimension,
 			Distance:      payload.Distance,
@@ -864,6 +866,7 @@ func (f *FSM) applyAddShardReplica(payload AddShardReplicaPayload) error {
 	}
 
 	targetShard.Replicas = append(targetShard.Replicas, payload.ReplicaID)
+	targetShard.Epoch++
 	f.bumpAssignmentsEpochLocked()
 	return nil
 }
@@ -905,6 +908,7 @@ func (f *FSM) applyRemoveShardReplica(payload RemoveShardReplicaPayload) error {
 	}
 
 	targetShard.Replicas = append(targetShard.Replicas[:index], targetShard.Replicas[index+1:]...)
+	targetShard.Epoch++
 	f.bumpAssignmentsEpochLocked()
 	return nil
 }
@@ -953,6 +957,7 @@ func (f *FSM) applyMoveShard(payload MoveShardPayload) error {
 		}
 	}
 
+	targetShard.Epoch++
 	f.bumpAssignmentsEpochLocked()
 	fmt.Printf("FSM: Moved shard %d from worker %d to worker %d (collection: %s)\n",
 		payload.ShardID, payload.SourceWorkerID, payload.TargetWorkerID, targetCollection)
@@ -1074,6 +1079,24 @@ func (f *FSM) GetAssignmentsEpoch() uint64 {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.AssignmentsEpoch
+}
+
+// IsWorkerAssignedToShard checks if a worker is a replica for the shard.
+func (f *FSM) IsWorkerAssignedToShard(workerID uint64, shardID uint64) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	for _, collection := range f.Collections {
+		if shard, ok := collection.Shards[shardID]; ok {
+			for _, replicaID := range shard.Replicas {
+				if replicaID == workerID {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	return false
 }
 
 // GetWorkers returns a slice of all registered workers.

@@ -12,6 +12,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
+	"sync/atomic"
 	"time"
 
 	sm "github.com/lni/dragonboat/v3/statemachine"
@@ -263,12 +265,33 @@ type GetVectorQueryResult struct {
 	Metadata []byte
 }
 
+type snapshotContext struct {
+	LastApplied uint64
+}
+
+const lastAppliedSnapshotFile = "_raft_last_applied"
+
 // StateMachine is the per-shard state machine that manages a PebbleDB instance
 // and an HNSW index.
 type StateMachine struct {
 	*storage.PebbleDB
 	ClusterID uint64
 	NodeID    uint64
+	lastApplied uint64
+}
+
+func writeLastApplied(dir string, index uint64) error {
+	path := filepath.Join(dir, lastAppliedSnapshotFile)
+	return os.WriteFile(path, []byte(strconv.FormatUint(index, 10)), 0644)
+}
+
+func readLastApplied(dir string) (uint64, error) {
+	path := filepath.Join(dir, lastAppliedSnapshotFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.ParseUint(string(bytes.TrimSpace(data)), 10, 64)
 }
 
 // NewStateMachine creates a new shard StateMachine.
@@ -314,7 +337,11 @@ func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dime
 
 // Open is a no-op.
 func (s *StateMachine) Open(stopc <-chan struct{}) (uint64, error) {
-	return 0, nil
+	last := atomic.LoadUint64(&s.lastApplied)
+	if last > 0 {
+		setAppliedIndex(s.ClusterID, last)
+	}
+	return last, nil
 }
 
 // Update applies commands from the Raft log to the state machine.
@@ -348,6 +375,11 @@ func (s *StateMachine) Update(entries []sm.Entry) ([]sm.Entry, error) {
 			}
 		}
 		entries[i].Result = sm.Result{}
+	}
+	if len(entries) > 0 {
+		last := entries[len(entries)-1].Index
+		atomic.StoreUint64(&s.lastApplied, last)
+		setAppliedIndex(s.ClusterID, last)
 	}
 	return entries, nil
 }
@@ -390,7 +422,7 @@ func (s *StateMachine) Sync() error {
 
 // PrepareSnapshot is a no-op.
 func (s *StateMachine) PrepareSnapshot() (interface{}, error) {
-	return nil, nil
+	return snapshotContext{LastApplied: atomic.LoadUint64(&s.lastApplied)}, nil
 }
 
 // SaveSnapshot saves a snapshot of the state machine.
@@ -403,6 +435,12 @@ func (s *StateMachine) SaveSnapshot(ctx interface{}, w io.Writer, done <-chan st
 
 	if err := s.PebbleDB.Backup(tmpDir); err != nil {
 		return err
+	}
+
+	if snapCtx, ok := ctx.(snapshotContext); ok && snapCtx.LastApplied > 0 {
+		if err := writeLastApplied(tmpDir, snapCtx.LastApplied); err != nil {
+			return err
+		}
 	}
 
 	zw := zip.NewWriter(w)
@@ -489,7 +527,15 @@ func (s *StateMachine) RecoverFromSnapshot(r io.Reader, done <-chan struct{}) er
 	}
 
 	// Restore the database from the extracted files
-	return s.PebbleDB.Restore(tmpDir)
+	if err := s.PebbleDB.Restore(tmpDir); err != nil {
+		return err
+	}
+
+	if lastApplied, err := readLastApplied(tmpDir); err == nil && lastApplied > 0 {
+		atomic.StoreUint64(&s.lastApplied, lastApplied)
+		setAppliedIndex(s.ClusterID, lastApplied)
+	}
+	return nil
 }
 
 // Close closes the state machine.

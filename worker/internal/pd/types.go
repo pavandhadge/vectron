@@ -21,6 +21,7 @@ type ShardInfo struct {
 	KeyRangeEnd   uint64   `json:"key_range_end"`   // The end of the hash range for this shard.
 	Replicas      []uint64 `json:"replicas"`        // A slice of worker node IDs that host this shard's replicas.
 	LeaderID      uint64   `json:"leader_id"`       // The ID of the current leader of the shard's Raft group.
+	Epoch         uint64   `json:"epoch"`           // Monotonic shard config epoch.
 	Dimension     int32    `json:"dimension"`       // The dimension of the vectors in this shard.
 	Distance      string   `json:"distance"`        // The distance metric used for this shard.
 	Bootstrapped  bool     `json:"bootstrapped"`    // Whether the raft group has been bootstrapped.

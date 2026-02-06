@@ -33,6 +33,8 @@ export interface Vector {
 export interface StoreVectorRequest {
   shardId: string;
   vector: Vector | undefined;
+  shardEpoch: string;
+  leaseExpiryUnixMs: string;
 }
 
 export interface StoreVectorResponse {
@@ -41,6 +43,8 @@ export interface StoreVectorResponse {
 export interface BatchStoreVectorRequest {
   shardId: string;
   vectors: Vector[];
+  shardEpoch: string;
+  leaseExpiryUnixMs: string;
 }
 
 export interface BatchStoreVectorResponse {
@@ -50,6 +54,8 @@ export interface BatchStoreVectorResponse {
 export interface GetVectorRequest {
   shardId: string;
   id: string;
+  shardEpoch: string;
+  leaseExpiryUnixMs: string;
 }
 
 export interface GetVectorResponse {
@@ -59,6 +65,8 @@ export interface GetVectorResponse {
 export interface DeleteVectorRequest {
   shardId: string;
   id: string;
+  shardEpoch: string;
+  leaseExpiryUnixMs: string;
 }
 
 export interface DeleteVectorResponse {
@@ -71,6 +79,8 @@ export interface SearchRequest {
   bruteForce: boolean;
   linearizable: boolean;
   collection: string;
+  shardEpoch: string;
+  leaseExpiryUnixMs: string;
 }
 
 export interface SearchResponse {
@@ -95,6 +105,8 @@ export interface KeyValuePair {
 export interface PutRequest {
   shardId: string;
   kv: KeyValuePair | undefined;
+  shardEpoch: string;
+  leaseExpiryUnixMs: string;
 }
 
 export interface PutResponse {
@@ -103,6 +115,8 @@ export interface PutResponse {
 export interface GetRequest {
   shardId: string;
   key: Buffer;
+  shardEpoch: string;
+  leaseExpiryUnixMs: string;
 }
 
 export interface GetResponse {
@@ -112,6 +126,8 @@ export interface GetResponse {
 export interface DeleteRequest {
   shardId: string;
   key: Buffer;
+  shardEpoch: string;
+  leaseExpiryUnixMs: string;
 }
 
 export interface DeleteResponse {
@@ -120,6 +136,8 @@ export interface DeleteResponse {
 /** Control/Admin messages */
 export interface StatusRequest {
   shardId: string;
+  shardEpoch: string;
+  leaseExpiryUnixMs: string;
 }
 
 export interface StatusResponse {
@@ -128,6 +146,8 @@ export interface StatusResponse {
 
 export interface FlushRequest {
   shardId: string;
+  shardEpoch: string;
+  leaseExpiryUnixMs: string;
 }
 
 export interface FlushResponse {
@@ -238,7 +258,7 @@ export const Vector: MessageFns<Vector> = {
 };
 
 function createBaseStoreVectorRequest(): StoreVectorRequest {
-  return { shardId: "0", vector: undefined };
+  return { shardId: "0", vector: undefined, shardEpoch: "0", leaseExpiryUnixMs: "0" };
 }
 
 export const StoreVectorRequest: MessageFns<StoreVectorRequest> = {
@@ -248,6 +268,12 @@ export const StoreVectorRequest: MessageFns<StoreVectorRequest> = {
     }
     if (message.vector !== undefined) {
       Vector.encode(message.vector, writer.uint32(18).fork()).join();
+    }
+    if (message.shardEpoch !== "0") {
+      writer.uint32(24).uint64(message.shardEpoch);
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      writer.uint32(32).int64(message.leaseExpiryUnixMs);
     }
     return writer;
   },
@@ -275,6 +301,22 @@ export const StoreVectorRequest: MessageFns<StoreVectorRequest> = {
           message.vector = Vector.decode(reader, reader.uint32());
           continue;
         }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.shardEpoch = reader.uint64().toString();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.leaseExpiryUnixMs = reader.int64().toString();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -288,6 +330,8 @@ export const StoreVectorRequest: MessageFns<StoreVectorRequest> = {
     return {
       shardId: isSet(object.shardId) ? globalThis.String(object.shardId) : "0",
       vector: isSet(object.vector) ? Vector.fromJSON(object.vector) : undefined,
+      shardEpoch: isSet(object.shardEpoch) ? globalThis.String(object.shardEpoch) : "0",
+      leaseExpiryUnixMs: isSet(object.leaseExpiryUnixMs) ? globalThis.String(object.leaseExpiryUnixMs) : "0",
     };
   },
 
@@ -298,6 +342,12 @@ export const StoreVectorRequest: MessageFns<StoreVectorRequest> = {
     }
     if (message.vector !== undefined) {
       obj.vector = Vector.toJSON(message.vector);
+    }
+    if (message.shardEpoch !== "0") {
+      obj.shardEpoch = message.shardEpoch;
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      obj.leaseExpiryUnixMs = message.leaseExpiryUnixMs;
     }
     return obj;
   },
@@ -311,6 +361,8 @@ export const StoreVectorRequest: MessageFns<StoreVectorRequest> = {
     message.vector = (object.vector !== undefined && object.vector !== null)
       ? Vector.fromPartial(object.vector)
       : undefined;
+    message.shardEpoch = object.shardEpoch ?? "0";
+    message.leaseExpiryUnixMs = object.leaseExpiryUnixMs ?? "0";
     return message;
   },
 };
@@ -359,7 +411,7 @@ export const StoreVectorResponse: MessageFns<StoreVectorResponse> = {
 };
 
 function createBaseBatchStoreVectorRequest(): BatchStoreVectorRequest {
-  return { shardId: "0", vectors: [] };
+  return { shardId: "0", vectors: [], shardEpoch: "0", leaseExpiryUnixMs: "0" };
 }
 
 export const BatchStoreVectorRequest: MessageFns<BatchStoreVectorRequest> = {
@@ -369,6 +421,12 @@ export const BatchStoreVectorRequest: MessageFns<BatchStoreVectorRequest> = {
     }
     for (const v of message.vectors) {
       Vector.encode(v!, writer.uint32(18).fork()).join();
+    }
+    if (message.shardEpoch !== "0") {
+      writer.uint32(24).uint64(message.shardEpoch);
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      writer.uint32(32).int64(message.leaseExpiryUnixMs);
     }
     return writer;
   },
@@ -396,6 +454,22 @@ export const BatchStoreVectorRequest: MessageFns<BatchStoreVectorRequest> = {
           message.vectors.push(Vector.decode(reader, reader.uint32()));
           continue;
         }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.shardEpoch = reader.uint64().toString();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.leaseExpiryUnixMs = reader.int64().toString();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -409,6 +483,8 @@ export const BatchStoreVectorRequest: MessageFns<BatchStoreVectorRequest> = {
     return {
       shardId: isSet(object.shardId) ? globalThis.String(object.shardId) : "0",
       vectors: globalThis.Array.isArray(object?.vectors) ? object.vectors.map((e: any) => Vector.fromJSON(e)) : [],
+      shardEpoch: isSet(object.shardEpoch) ? globalThis.String(object.shardEpoch) : "0",
+      leaseExpiryUnixMs: isSet(object.leaseExpiryUnixMs) ? globalThis.String(object.leaseExpiryUnixMs) : "0",
     };
   },
 
@@ -420,6 +496,12 @@ export const BatchStoreVectorRequest: MessageFns<BatchStoreVectorRequest> = {
     if (message.vectors?.length) {
       obj.vectors = message.vectors.map((e) => Vector.toJSON(e));
     }
+    if (message.shardEpoch !== "0") {
+      obj.shardEpoch = message.shardEpoch;
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      obj.leaseExpiryUnixMs = message.leaseExpiryUnixMs;
+    }
     return obj;
   },
 
@@ -430,6 +512,8 @@ export const BatchStoreVectorRequest: MessageFns<BatchStoreVectorRequest> = {
     const message = createBaseBatchStoreVectorRequest();
     message.shardId = object.shardId ?? "0";
     message.vectors = object.vectors?.map((e) => Vector.fromPartial(e)) || [];
+    message.shardEpoch = object.shardEpoch ?? "0";
+    message.leaseExpiryUnixMs = object.leaseExpiryUnixMs ?? "0";
     return message;
   },
 };
@@ -493,7 +577,7 @@ export const BatchStoreVectorResponse: MessageFns<BatchStoreVectorResponse> = {
 };
 
 function createBaseGetVectorRequest(): GetVectorRequest {
-  return { shardId: "0", id: "" };
+  return { shardId: "0", id: "", shardEpoch: "0", leaseExpiryUnixMs: "0" };
 }
 
 export const GetVectorRequest: MessageFns<GetVectorRequest> = {
@@ -503,6 +587,12 @@ export const GetVectorRequest: MessageFns<GetVectorRequest> = {
     }
     if (message.id !== "") {
       writer.uint32(18).string(message.id);
+    }
+    if (message.shardEpoch !== "0") {
+      writer.uint32(24).uint64(message.shardEpoch);
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      writer.uint32(32).int64(message.leaseExpiryUnixMs);
     }
     return writer;
   },
@@ -530,6 +620,22 @@ export const GetVectorRequest: MessageFns<GetVectorRequest> = {
           message.id = reader.string();
           continue;
         }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.shardEpoch = reader.uint64().toString();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.leaseExpiryUnixMs = reader.int64().toString();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -543,6 +649,8 @@ export const GetVectorRequest: MessageFns<GetVectorRequest> = {
     return {
       shardId: isSet(object.shardId) ? globalThis.String(object.shardId) : "0",
       id: isSet(object.id) ? globalThis.String(object.id) : "",
+      shardEpoch: isSet(object.shardEpoch) ? globalThis.String(object.shardEpoch) : "0",
+      leaseExpiryUnixMs: isSet(object.leaseExpiryUnixMs) ? globalThis.String(object.leaseExpiryUnixMs) : "0",
     };
   },
 
@@ -554,6 +662,12 @@ export const GetVectorRequest: MessageFns<GetVectorRequest> = {
     if (message.id !== "") {
       obj.id = message.id;
     }
+    if (message.shardEpoch !== "0") {
+      obj.shardEpoch = message.shardEpoch;
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      obj.leaseExpiryUnixMs = message.leaseExpiryUnixMs;
+    }
     return obj;
   },
 
@@ -564,6 +678,8 @@ export const GetVectorRequest: MessageFns<GetVectorRequest> = {
     const message = createBaseGetVectorRequest();
     message.shardId = object.shardId ?? "0";
     message.id = object.id ?? "";
+    message.shardEpoch = object.shardEpoch ?? "0";
+    message.leaseExpiryUnixMs = object.leaseExpiryUnixMs ?? "0";
     return message;
   },
 };
@@ -629,7 +745,7 @@ export const GetVectorResponse: MessageFns<GetVectorResponse> = {
 };
 
 function createBaseDeleteVectorRequest(): DeleteVectorRequest {
-  return { shardId: "0", id: "" };
+  return { shardId: "0", id: "", shardEpoch: "0", leaseExpiryUnixMs: "0" };
 }
 
 export const DeleteVectorRequest: MessageFns<DeleteVectorRequest> = {
@@ -639,6 +755,12 @@ export const DeleteVectorRequest: MessageFns<DeleteVectorRequest> = {
     }
     if (message.id !== "") {
       writer.uint32(18).string(message.id);
+    }
+    if (message.shardEpoch !== "0") {
+      writer.uint32(24).uint64(message.shardEpoch);
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      writer.uint32(32).int64(message.leaseExpiryUnixMs);
     }
     return writer;
   },
@@ -666,6 +788,22 @@ export const DeleteVectorRequest: MessageFns<DeleteVectorRequest> = {
           message.id = reader.string();
           continue;
         }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.shardEpoch = reader.uint64().toString();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.leaseExpiryUnixMs = reader.int64().toString();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -679,6 +817,8 @@ export const DeleteVectorRequest: MessageFns<DeleteVectorRequest> = {
     return {
       shardId: isSet(object.shardId) ? globalThis.String(object.shardId) : "0",
       id: isSet(object.id) ? globalThis.String(object.id) : "",
+      shardEpoch: isSet(object.shardEpoch) ? globalThis.String(object.shardEpoch) : "0",
+      leaseExpiryUnixMs: isSet(object.leaseExpiryUnixMs) ? globalThis.String(object.leaseExpiryUnixMs) : "0",
     };
   },
 
@@ -690,6 +830,12 @@ export const DeleteVectorRequest: MessageFns<DeleteVectorRequest> = {
     if (message.id !== "") {
       obj.id = message.id;
     }
+    if (message.shardEpoch !== "0") {
+      obj.shardEpoch = message.shardEpoch;
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      obj.leaseExpiryUnixMs = message.leaseExpiryUnixMs;
+    }
     return obj;
   },
 
@@ -700,6 +846,8 @@ export const DeleteVectorRequest: MessageFns<DeleteVectorRequest> = {
     const message = createBaseDeleteVectorRequest();
     message.shardId = object.shardId ?? "0";
     message.id = object.id ?? "";
+    message.shardEpoch = object.shardEpoch ?? "0";
+    message.leaseExpiryUnixMs = object.leaseExpiryUnixMs ?? "0";
     return message;
   },
 };
@@ -748,7 +896,16 @@ export const DeleteVectorResponse: MessageFns<DeleteVectorResponse> = {
 };
 
 function createBaseSearchRequest(): SearchRequest {
-  return { shardId: "0", vector: [], k: 0, bruteForce: false, linearizable: false, collection: "" };
+  return {
+    shardId: "0",
+    vector: [],
+    k: 0,
+    bruteForce: false,
+    linearizable: false,
+    collection: "",
+    shardEpoch: "0",
+    leaseExpiryUnixMs: "0",
+  };
 }
 
 export const SearchRequest: MessageFns<SearchRequest> = {
@@ -772,6 +929,12 @@ export const SearchRequest: MessageFns<SearchRequest> = {
     }
     if (message.collection !== "") {
       writer.uint32(50).string(message.collection);
+    }
+    if (message.shardEpoch !== "0") {
+      writer.uint32(56).uint64(message.shardEpoch);
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      writer.uint32(64).int64(message.leaseExpiryUnixMs);
     }
     return writer;
   },
@@ -841,6 +1004,22 @@ export const SearchRequest: MessageFns<SearchRequest> = {
           message.collection = reader.string();
           continue;
         }
+        case 7: {
+          if (tag !== 56) {
+            break;
+          }
+
+          message.shardEpoch = reader.uint64().toString();
+          continue;
+        }
+        case 8: {
+          if (tag !== 64) {
+            break;
+          }
+
+          message.leaseExpiryUnixMs = reader.int64().toString();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -858,6 +1037,8 @@ export const SearchRequest: MessageFns<SearchRequest> = {
       bruteForce: isSet(object.bruteForce) ? globalThis.Boolean(object.bruteForce) : false,
       linearizable: isSet(object.linearizable) ? globalThis.Boolean(object.linearizable) : false,
       collection: isSet(object.collection) ? globalThis.String(object.collection) : "",
+      shardEpoch: isSet(object.shardEpoch) ? globalThis.String(object.shardEpoch) : "0",
+      leaseExpiryUnixMs: isSet(object.leaseExpiryUnixMs) ? globalThis.String(object.leaseExpiryUnixMs) : "0",
     };
   },
 
@@ -881,6 +1062,12 @@ export const SearchRequest: MessageFns<SearchRequest> = {
     if (message.collection !== "") {
       obj.collection = message.collection;
     }
+    if (message.shardEpoch !== "0") {
+      obj.shardEpoch = message.shardEpoch;
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      obj.leaseExpiryUnixMs = message.leaseExpiryUnixMs;
+    }
     return obj;
   },
 
@@ -895,6 +1082,8 @@ export const SearchRequest: MessageFns<SearchRequest> = {
     message.bruteForce = object.bruteForce ?? false;
     message.linearizable = object.linearizable ?? false;
     message.collection = object.collection ?? "";
+    message.shardEpoch = object.shardEpoch ?? "0";
+    message.leaseExpiryUnixMs = object.leaseExpiryUnixMs ?? "0";
     return message;
   },
 };
@@ -1188,7 +1377,7 @@ export const KeyValuePair: MessageFns<KeyValuePair> = {
 };
 
 function createBasePutRequest(): PutRequest {
-  return { shardId: "0", kv: undefined };
+  return { shardId: "0", kv: undefined, shardEpoch: "0", leaseExpiryUnixMs: "0" };
 }
 
 export const PutRequest: MessageFns<PutRequest> = {
@@ -1198,6 +1387,12 @@ export const PutRequest: MessageFns<PutRequest> = {
     }
     if (message.kv !== undefined) {
       KeyValuePair.encode(message.kv, writer.uint32(18).fork()).join();
+    }
+    if (message.shardEpoch !== "0") {
+      writer.uint32(24).uint64(message.shardEpoch);
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      writer.uint32(32).int64(message.leaseExpiryUnixMs);
     }
     return writer;
   },
@@ -1225,6 +1420,22 @@ export const PutRequest: MessageFns<PutRequest> = {
           message.kv = KeyValuePair.decode(reader, reader.uint32());
           continue;
         }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.shardEpoch = reader.uint64().toString();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.leaseExpiryUnixMs = reader.int64().toString();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1238,6 +1449,8 @@ export const PutRequest: MessageFns<PutRequest> = {
     return {
       shardId: isSet(object.shardId) ? globalThis.String(object.shardId) : "0",
       kv: isSet(object.kv) ? KeyValuePair.fromJSON(object.kv) : undefined,
+      shardEpoch: isSet(object.shardEpoch) ? globalThis.String(object.shardEpoch) : "0",
+      leaseExpiryUnixMs: isSet(object.leaseExpiryUnixMs) ? globalThis.String(object.leaseExpiryUnixMs) : "0",
     };
   },
 
@@ -1249,6 +1462,12 @@ export const PutRequest: MessageFns<PutRequest> = {
     if (message.kv !== undefined) {
       obj.kv = KeyValuePair.toJSON(message.kv);
     }
+    if (message.shardEpoch !== "0") {
+      obj.shardEpoch = message.shardEpoch;
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      obj.leaseExpiryUnixMs = message.leaseExpiryUnixMs;
+    }
     return obj;
   },
 
@@ -1259,6 +1478,8 @@ export const PutRequest: MessageFns<PutRequest> = {
     const message = createBasePutRequest();
     message.shardId = object.shardId ?? "0";
     message.kv = (object.kv !== undefined && object.kv !== null) ? KeyValuePair.fromPartial(object.kv) : undefined;
+    message.shardEpoch = object.shardEpoch ?? "0";
+    message.leaseExpiryUnixMs = object.leaseExpiryUnixMs ?? "0";
     return message;
   },
 };
@@ -1307,7 +1528,7 @@ export const PutResponse: MessageFns<PutResponse> = {
 };
 
 function createBaseGetRequest(): GetRequest {
-  return { shardId: "0", key: Buffer.alloc(0) };
+  return { shardId: "0", key: Buffer.alloc(0), shardEpoch: "0", leaseExpiryUnixMs: "0" };
 }
 
 export const GetRequest: MessageFns<GetRequest> = {
@@ -1317,6 +1538,12 @@ export const GetRequest: MessageFns<GetRequest> = {
     }
     if (message.key.length !== 0) {
       writer.uint32(18).bytes(message.key);
+    }
+    if (message.shardEpoch !== "0") {
+      writer.uint32(24).uint64(message.shardEpoch);
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      writer.uint32(32).int64(message.leaseExpiryUnixMs);
     }
     return writer;
   },
@@ -1344,6 +1571,22 @@ export const GetRequest: MessageFns<GetRequest> = {
           message.key = Buffer.from(reader.bytes());
           continue;
         }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.shardEpoch = reader.uint64().toString();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.leaseExpiryUnixMs = reader.int64().toString();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1357,6 +1600,8 @@ export const GetRequest: MessageFns<GetRequest> = {
     return {
       shardId: isSet(object.shardId) ? globalThis.String(object.shardId) : "0",
       key: isSet(object.key) ? Buffer.from(bytesFromBase64(object.key)) : Buffer.alloc(0),
+      shardEpoch: isSet(object.shardEpoch) ? globalThis.String(object.shardEpoch) : "0",
+      leaseExpiryUnixMs: isSet(object.leaseExpiryUnixMs) ? globalThis.String(object.leaseExpiryUnixMs) : "0",
     };
   },
 
@@ -1368,6 +1613,12 @@ export const GetRequest: MessageFns<GetRequest> = {
     if (message.key.length !== 0) {
       obj.key = base64FromBytes(message.key);
     }
+    if (message.shardEpoch !== "0") {
+      obj.shardEpoch = message.shardEpoch;
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      obj.leaseExpiryUnixMs = message.leaseExpiryUnixMs;
+    }
     return obj;
   },
 
@@ -1378,6 +1629,8 @@ export const GetRequest: MessageFns<GetRequest> = {
     const message = createBaseGetRequest();
     message.shardId = object.shardId ?? "0";
     message.key = object.key ?? Buffer.alloc(0);
+    message.shardEpoch = object.shardEpoch ?? "0";
+    message.leaseExpiryUnixMs = object.leaseExpiryUnixMs ?? "0";
     return message;
   },
 };
@@ -1441,7 +1694,7 @@ export const GetResponse: MessageFns<GetResponse> = {
 };
 
 function createBaseDeleteRequest(): DeleteRequest {
-  return { shardId: "0", key: Buffer.alloc(0) };
+  return { shardId: "0", key: Buffer.alloc(0), shardEpoch: "0", leaseExpiryUnixMs: "0" };
 }
 
 export const DeleteRequest: MessageFns<DeleteRequest> = {
@@ -1451,6 +1704,12 @@ export const DeleteRequest: MessageFns<DeleteRequest> = {
     }
     if (message.key.length !== 0) {
       writer.uint32(18).bytes(message.key);
+    }
+    if (message.shardEpoch !== "0") {
+      writer.uint32(24).uint64(message.shardEpoch);
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      writer.uint32(32).int64(message.leaseExpiryUnixMs);
     }
     return writer;
   },
@@ -1478,6 +1737,22 @@ export const DeleteRequest: MessageFns<DeleteRequest> = {
           message.key = Buffer.from(reader.bytes());
           continue;
         }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.shardEpoch = reader.uint64().toString();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.leaseExpiryUnixMs = reader.int64().toString();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1491,6 +1766,8 @@ export const DeleteRequest: MessageFns<DeleteRequest> = {
     return {
       shardId: isSet(object.shardId) ? globalThis.String(object.shardId) : "0",
       key: isSet(object.key) ? Buffer.from(bytesFromBase64(object.key)) : Buffer.alloc(0),
+      shardEpoch: isSet(object.shardEpoch) ? globalThis.String(object.shardEpoch) : "0",
+      leaseExpiryUnixMs: isSet(object.leaseExpiryUnixMs) ? globalThis.String(object.leaseExpiryUnixMs) : "0",
     };
   },
 
@@ -1502,6 +1779,12 @@ export const DeleteRequest: MessageFns<DeleteRequest> = {
     if (message.key.length !== 0) {
       obj.key = base64FromBytes(message.key);
     }
+    if (message.shardEpoch !== "0") {
+      obj.shardEpoch = message.shardEpoch;
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      obj.leaseExpiryUnixMs = message.leaseExpiryUnixMs;
+    }
     return obj;
   },
 
@@ -1512,6 +1795,8 @@ export const DeleteRequest: MessageFns<DeleteRequest> = {
     const message = createBaseDeleteRequest();
     message.shardId = object.shardId ?? "0";
     message.key = object.key ?? Buffer.alloc(0);
+    message.shardEpoch = object.shardEpoch ?? "0";
+    message.leaseExpiryUnixMs = object.leaseExpiryUnixMs ?? "0";
     return message;
   },
 };
@@ -1560,13 +1845,19 @@ export const DeleteResponse: MessageFns<DeleteResponse> = {
 };
 
 function createBaseStatusRequest(): StatusRequest {
-  return { shardId: "0" };
+  return { shardId: "0", shardEpoch: "0", leaseExpiryUnixMs: "0" };
 }
 
 export const StatusRequest: MessageFns<StatusRequest> = {
   encode(message: StatusRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.shardId !== "0") {
       writer.uint32(8).uint64(message.shardId);
+    }
+    if (message.shardEpoch !== "0") {
+      writer.uint32(16).uint64(message.shardEpoch);
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      writer.uint32(24).int64(message.leaseExpiryUnixMs);
     }
     return writer;
   },
@@ -1586,6 +1877,22 @@ export const StatusRequest: MessageFns<StatusRequest> = {
           message.shardId = reader.uint64().toString();
           continue;
         }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.shardEpoch = reader.uint64().toString();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.leaseExpiryUnixMs = reader.int64().toString();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1596,13 +1903,23 @@ export const StatusRequest: MessageFns<StatusRequest> = {
   },
 
   fromJSON(object: any): StatusRequest {
-    return { shardId: isSet(object.shardId) ? globalThis.String(object.shardId) : "0" };
+    return {
+      shardId: isSet(object.shardId) ? globalThis.String(object.shardId) : "0",
+      shardEpoch: isSet(object.shardEpoch) ? globalThis.String(object.shardEpoch) : "0",
+      leaseExpiryUnixMs: isSet(object.leaseExpiryUnixMs) ? globalThis.String(object.leaseExpiryUnixMs) : "0",
+    };
   },
 
   toJSON(message: StatusRequest): unknown {
     const obj: any = {};
     if (message.shardId !== "0") {
       obj.shardId = message.shardId;
+    }
+    if (message.shardEpoch !== "0") {
+      obj.shardEpoch = message.shardEpoch;
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      obj.leaseExpiryUnixMs = message.leaseExpiryUnixMs;
     }
     return obj;
   },
@@ -1613,6 +1930,8 @@ export const StatusRequest: MessageFns<StatusRequest> = {
   fromPartial<I extends Exact<DeepPartial<StatusRequest>, I>>(object: I): StatusRequest {
     const message = createBaseStatusRequest();
     message.shardId = object.shardId ?? "0";
+    message.shardEpoch = object.shardEpoch ?? "0";
+    message.leaseExpiryUnixMs = object.leaseExpiryUnixMs ?? "0";
     return message;
   },
 };
@@ -1676,13 +1995,19 @@ export const StatusResponse: MessageFns<StatusResponse> = {
 };
 
 function createBaseFlushRequest(): FlushRequest {
-  return { shardId: "0" };
+  return { shardId: "0", shardEpoch: "0", leaseExpiryUnixMs: "0" };
 }
 
 export const FlushRequest: MessageFns<FlushRequest> = {
   encode(message: FlushRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.shardId !== "0") {
       writer.uint32(8).uint64(message.shardId);
+    }
+    if (message.shardEpoch !== "0") {
+      writer.uint32(16).uint64(message.shardEpoch);
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      writer.uint32(24).int64(message.leaseExpiryUnixMs);
     }
     return writer;
   },
@@ -1702,6 +2027,22 @@ export const FlushRequest: MessageFns<FlushRequest> = {
           message.shardId = reader.uint64().toString();
           continue;
         }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.shardEpoch = reader.uint64().toString();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.leaseExpiryUnixMs = reader.int64().toString();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1712,13 +2053,23 @@ export const FlushRequest: MessageFns<FlushRequest> = {
   },
 
   fromJSON(object: any): FlushRequest {
-    return { shardId: isSet(object.shardId) ? globalThis.String(object.shardId) : "0" };
+    return {
+      shardId: isSet(object.shardId) ? globalThis.String(object.shardId) : "0",
+      shardEpoch: isSet(object.shardEpoch) ? globalThis.String(object.shardEpoch) : "0",
+      leaseExpiryUnixMs: isSet(object.leaseExpiryUnixMs) ? globalThis.String(object.leaseExpiryUnixMs) : "0",
+    };
   },
 
   toJSON(message: FlushRequest): unknown {
     const obj: any = {};
     if (message.shardId !== "0") {
       obj.shardId = message.shardId;
+    }
+    if (message.shardEpoch !== "0") {
+      obj.shardEpoch = message.shardEpoch;
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      obj.leaseExpiryUnixMs = message.leaseExpiryUnixMs;
     }
     return obj;
   },
@@ -1729,6 +2080,8 @@ export const FlushRequest: MessageFns<FlushRequest> = {
   fromPartial<I extends Exact<DeepPartial<FlushRequest>, I>>(object: I): FlushRequest {
     const message = createBaseFlushRequest();
     message.shardId = object.shardId ?? "0";
+    message.shardEpoch = object.shardEpoch ?? "0";
+    message.leaseExpiryUnixMs = object.leaseExpiryUnixMs ?? "0";
     return message;
   },
 };

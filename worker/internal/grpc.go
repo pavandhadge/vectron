@@ -123,6 +123,23 @@ func NewGrpcServer(nh *dragonboat.NodeHost, sm *shard.Manager) *GrpcServer {
 	}
 }
 
+func (s *GrpcServer) validateShardLease(shardID uint64, shardEpoch uint64, leaseExpiryUnixMs int64) error {
+	if shardID == 0 {
+		return nil
+	}
+	if shardEpoch == 0 {
+		return status.Error(codes.FailedPrecondition, "missing shard epoch")
+	}
+	current := s.shardManager.GetShardEpoch(shardID)
+	if current == 0 || shardEpoch != current {
+		return status.Errorf(codes.FailedPrecondition, "stale shard epoch (have %d, want %d)", shardEpoch, current)
+	}
+	if leaseExpiryUnixMs > 0 && time.Now().UnixMilli() > leaseExpiryUnixMs {
+		return status.Error(codes.FailedPrecondition, "shard lease expired")
+	}
+	return nil
+}
+
 // StoreVector handles the request to store a vector.
 // It marshals the request into a command and proposes it to the target shard's Raft group.
 func (s *GrpcServer) StoreVector(ctx context.Context, req *worker.StoreVectorRequest) (*worker.StoreVectorResponse, error) {
@@ -131,6 +148,9 @@ func (s *GrpcServer) StoreVector(ctx context.Context, req *worker.StoreVectorReq
 	}
 	if req.GetVector() == nil {
 		return nil, status.Error(codes.InvalidArgument, "vector is nil")
+	}
+	if err := s.validateShardLease(req.GetShardId(), req.GetShardEpoch(), req.GetLeaseExpiryUnixMs()); err != nil {
+		return nil, err
 	}
 
 	// Before proposing, check if the shard is ready on this node.
@@ -164,6 +184,9 @@ func (s *GrpcServer) StoreVector(ctx context.Context, req *worker.StoreVectorReq
 func (s *GrpcServer) BatchStoreVector(ctx context.Context, req *worker.BatchStoreVectorRequest) (*worker.BatchStoreVectorResponse, error) {
 	if req == nil || len(req.GetVectors()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "vectors are empty")
+	}
+	if err := s.validateShardLease(req.GetShardId(), req.GetShardEpoch(), req.GetLeaseExpiryUnixMs()); err != nil {
+		return nil, err
 	}
 
 	if !s.shardManager.IsShardReady(req.GetShardId()) {
@@ -214,6 +237,9 @@ func (s *GrpcServer) StreamBatchStoreVector(stream worker.WorkerService_StreamBa
 		if req == nil || len(req.GetVectors()) == 0 {
 			continue
 		}
+		if err := s.validateShardLease(req.GetShardId(), req.GetShardEpoch(), req.GetLeaseExpiryUnixMs()); err != nil {
+			return err
+		}
 		if !s.shardManager.IsShardReady(req.GetShardId()) {
 			return status.Errorf(codes.Unavailable, "shard %d not ready", req.GetShardId())
 		}
@@ -256,6 +282,9 @@ func (s *GrpcServer) BatchSearch(ctx context.Context, req *worker.BatchSearchReq
 		if r == nil || len(r.GetVector()) == 0 {
 			return nil, status.Error(codes.InvalidArgument, "search vector is empty")
 		}
+		if err := s.validateShardLease(r.GetShardId(), r.GetShardEpoch(), r.GetLeaseExpiryUnixMs()); err != nil {
+			return nil, err
+		}
 		resp, err := s.searchCore(ctx, r)
 		if err != nil {
 			return nil, err
@@ -273,6 +302,9 @@ func (s *GrpcServer) Search(ctx context.Context, req *worker.SearchRequest) (*wo
 	}
 	if len(req.GetVector()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "search vector is empty")
+	}
+	if err := s.validateShardLease(req.GetShardId(), req.GetShardEpoch(), req.GetLeaseExpiryUnixMs()); err != nil {
+		return nil, err
 	}
 
 	key := computeSearchKey(req)
@@ -450,6 +482,9 @@ func (s *GrpcServer) GetVector(ctx context.Context, req *worker.GetVectorRequest
 	if shouldLogHotPath() {
 		log.Printf("Received GetVector request for ID: %s on shard %d", req.GetId(), req.GetShardId())
 	}
+	if err := s.validateShardLease(req.GetShardId(), req.GetShardEpoch(), req.GetLeaseExpiryUnixMs()); err != nil {
+		return nil, err
+	}
 
 	if !s.shardManager.IsShardReady(req.GetShardId()) {
 		return nil, status.Errorf(codes.Unavailable, "shard %d not ready", req.GetShardId())
@@ -483,6 +518,12 @@ func (s *GrpcServer) GetVector(ctx context.Context, req *worker.GetVectorRequest
 func (s *GrpcServer) DeleteVector(ctx context.Context, req *worker.DeleteVectorRequest) (*worker.DeleteVectorResponse, error) {
 	if shouldLogHotPath() {
 		log.Printf("Received DeleteVector request for ID: %s on shard %d", req.GetId(), req.GetShardId())
+	}
+	if err := s.validateShardLease(req.GetShardId(), req.GetShardEpoch(), req.GetLeaseExpiryUnixMs()); err != nil {
+		return nil, err
+	}
+	if !s.shardManager.IsShardReady(req.GetShardId()) {
+		return nil, status.Errorf(codes.Unavailable, "shard %d not ready", req.GetShardId())
 	}
 
 	cmd := shard.Command{

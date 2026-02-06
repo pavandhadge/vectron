@@ -37,6 +37,8 @@ message Vector {
 message StoreVectorRequest {
   uint64 shard_id = 1;
   Vector vector = 2;
+  uint64 shard_epoch = 3;
+  int64 lease_expiry_unix_ms = 4;
 }
 
 message StoreVectorResponse {}
@@ -44,6 +46,8 @@ message StoreVectorResponse {}
 message BatchStoreVectorRequest {
   uint64 shard_id = 1;
   repeated Vector vectors = 2;
+  uint64 shard_epoch = 3;
+  int64 lease_expiry_unix_ms = 4;
 }
 
 message BatchStoreVectorResponse {
@@ -53,6 +57,8 @@ message BatchStoreVectorResponse {
 message GetVectorRequest {
   uint64 shard_id = 1;
   string id = 2;
+  uint64 shard_epoch = 3;
+  int64 lease_expiry_unix_ms = 4;
 }
 
 message GetVectorResponse {
@@ -62,6 +68,8 @@ message GetVectorResponse {
 message DeleteVectorRequest {
   uint64 shard_id = 1;
   string id = 2;
+  uint64 shard_epoch = 3;
+  int64 lease_expiry_unix_ms = 4;
 }
 
 message DeleteVectorResponse {}
@@ -73,6 +81,8 @@ message SearchRequest {
   bool brute_force = 4;
   bool linearizable = 5;
   string collection = 6;
+  uint64 shard_epoch = 7;
+  int64 lease_expiry_unix_ms = 8;
 }
 
 message SearchResponse {
@@ -97,6 +107,8 @@ message KeyValuePair {
 message PutRequest {
   uint64 shard_id = 1;
   KeyValuePair kv = 2;
+  uint64 shard_epoch = 3;
+  int64 lease_expiry_unix_ms = 4;
 }
 
 message PutResponse {}
@@ -104,6 +116,8 @@ message PutResponse {}
 message GetRequest {
   uint64 shard_id = 1;
   bytes key = 2;
+  uint64 shard_epoch = 3;
+  int64 lease_expiry_unix_ms = 4;
 }
 
 message GetResponse {
@@ -113,6 +127,8 @@ message GetResponse {
 message DeleteRequest {
   uint64 shard_id = 1;
   bytes key = 2;
+  uint64 shard_epoch = 3;
+  int64 lease_expiry_unix_ms = 4;
 }
 
 message DeleteResponse {}
@@ -120,6 +136,8 @@ message DeleteResponse {}
 // Control/Admin messages
 message StatusRequest {
   uint64 shard_id = 1;
+  uint64 shard_epoch = 2;
+  int64 lease_expiry_unix_ms = 3;
 }
 
 message StatusResponse {
@@ -128,6 +146,8 @@ message StatusResponse {
 
 message FlushRequest {
   uint64 shard_id = 1;
+  uint64 shard_epoch = 2;
+  int64 lease_expiry_unix_ms = 3;
 }
 
 message FlushResponse {}

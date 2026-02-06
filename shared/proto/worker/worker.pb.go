@@ -83,11 +83,13 @@ func (x *Vector) GetMetadata() []byte {
 }
 
 type StoreVectorRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ShardId       uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
-	Vector        *Vector                `protobuf:"bytes,2,opt,name=vector,proto3" json:"vector,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	ShardId           uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	Vector            *Vector                `protobuf:"bytes,2,opt,name=vector,proto3" json:"vector,omitempty"`
+	ShardEpoch        uint64                 `protobuf:"varint,3,opt,name=shard_epoch,json=shardEpoch,proto3" json:"shard_epoch,omitempty"`
+	LeaseExpiryUnixMs int64                  `protobuf:"varint,4,opt,name=lease_expiry_unix_ms,json=leaseExpiryUnixMs,proto3" json:"lease_expiry_unix_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *StoreVectorRequest) Reset() {
@@ -134,6 +136,20 @@ func (x *StoreVectorRequest) GetVector() *Vector {
 	return nil
 }
 
+func (x *StoreVectorRequest) GetShardEpoch() uint64 {
+	if x != nil {
+		return x.ShardEpoch
+	}
+	return 0
+}
+
+func (x *StoreVectorRequest) GetLeaseExpiryUnixMs() int64 {
+	if x != nil {
+		return x.LeaseExpiryUnixMs
+	}
+	return 0
+}
+
 type StoreVectorResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -171,11 +187,13 @@ func (*StoreVectorResponse) Descriptor() ([]byte, []int) {
 }
 
 type BatchStoreVectorRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ShardId       uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
-	Vectors       []*Vector              `protobuf:"bytes,2,rep,name=vectors,proto3" json:"vectors,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	ShardId           uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	Vectors           []*Vector              `protobuf:"bytes,2,rep,name=vectors,proto3" json:"vectors,omitempty"`
+	ShardEpoch        uint64                 `protobuf:"varint,3,opt,name=shard_epoch,json=shardEpoch,proto3" json:"shard_epoch,omitempty"`
+	LeaseExpiryUnixMs int64                  `protobuf:"varint,4,opt,name=lease_expiry_unix_ms,json=leaseExpiryUnixMs,proto3" json:"lease_expiry_unix_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *BatchStoreVectorRequest) Reset() {
@@ -220,6 +238,20 @@ func (x *BatchStoreVectorRequest) GetVectors() []*Vector {
 		return x.Vectors
 	}
 	return nil
+}
+
+func (x *BatchStoreVectorRequest) GetShardEpoch() uint64 {
+	if x != nil {
+		return x.ShardEpoch
+	}
+	return 0
+}
+
+func (x *BatchStoreVectorRequest) GetLeaseExpiryUnixMs() int64 {
+	if x != nil {
+		return x.LeaseExpiryUnixMs
+	}
+	return 0
 }
 
 type BatchStoreVectorResponse struct {
@@ -267,11 +299,13 @@ func (x *BatchStoreVectorResponse) GetStored() int32 {
 }
 
 type GetVectorRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ShardId       uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
-	Id            string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	ShardId           uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	Id                string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	ShardEpoch        uint64                 `protobuf:"varint,3,opt,name=shard_epoch,json=shardEpoch,proto3" json:"shard_epoch,omitempty"`
+	LeaseExpiryUnixMs int64                  `protobuf:"varint,4,opt,name=lease_expiry_unix_ms,json=leaseExpiryUnixMs,proto3" json:"lease_expiry_unix_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *GetVectorRequest) Reset() {
@@ -316,6 +350,20 @@ func (x *GetVectorRequest) GetId() string {
 		return x.Id
 	}
 	return ""
+}
+
+func (x *GetVectorRequest) GetShardEpoch() uint64 {
+	if x != nil {
+		return x.ShardEpoch
+	}
+	return 0
+}
+
+func (x *GetVectorRequest) GetLeaseExpiryUnixMs() int64 {
+	if x != nil {
+		return x.LeaseExpiryUnixMs
+	}
+	return 0
 }
 
 type GetVectorResponse struct {
@@ -363,11 +411,13 @@ func (x *GetVectorResponse) GetVector() *Vector {
 }
 
 type DeleteVectorRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ShardId       uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
-	Id            string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	ShardId           uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	Id                string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	ShardEpoch        uint64                 `protobuf:"varint,3,opt,name=shard_epoch,json=shardEpoch,proto3" json:"shard_epoch,omitempty"`
+	LeaseExpiryUnixMs int64                  `protobuf:"varint,4,opt,name=lease_expiry_unix_ms,json=leaseExpiryUnixMs,proto3" json:"lease_expiry_unix_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *DeleteVectorRequest) Reset() {
@@ -414,6 +464,20 @@ func (x *DeleteVectorRequest) GetId() string {
 	return ""
 }
 
+func (x *DeleteVectorRequest) GetShardEpoch() uint64 {
+	if x != nil {
+		return x.ShardEpoch
+	}
+	return 0
+}
+
+func (x *DeleteVectorRequest) GetLeaseExpiryUnixMs() int64 {
+	if x != nil {
+		return x.LeaseExpiryUnixMs
+	}
+	return 0
+}
+
 type DeleteVectorResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -451,15 +515,17 @@ func (*DeleteVectorResponse) Descriptor() ([]byte, []int) {
 }
 
 type SearchRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ShardId       uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
-	Vector        []float32              `protobuf:"fixed32,2,rep,packed,name=vector,proto3" json:"vector,omitempty"`
-	K             int32                  `protobuf:"varint,3,opt,name=k,proto3" json:"k,omitempty"`
-	BruteForce    bool                   `protobuf:"varint,4,opt,name=brute_force,json=bruteForce,proto3" json:"brute_force,omitempty"`
-	Linearizable  bool                   `protobuf:"varint,5,opt,name=linearizable,proto3" json:"linearizable,omitempty"`
-	Collection    string                 `protobuf:"bytes,6,opt,name=collection,proto3" json:"collection,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	ShardId           uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	Vector            []float32              `protobuf:"fixed32,2,rep,packed,name=vector,proto3" json:"vector,omitempty"`
+	K                 int32                  `protobuf:"varint,3,opt,name=k,proto3" json:"k,omitempty"`
+	BruteForce        bool                   `protobuf:"varint,4,opt,name=brute_force,json=bruteForce,proto3" json:"brute_force,omitempty"`
+	Linearizable      bool                   `protobuf:"varint,5,opt,name=linearizable,proto3" json:"linearizable,omitempty"`
+	Collection        string                 `protobuf:"bytes,6,opt,name=collection,proto3" json:"collection,omitempty"`
+	ShardEpoch        uint64                 `protobuf:"varint,7,opt,name=shard_epoch,json=shardEpoch,proto3" json:"shard_epoch,omitempty"`
+	LeaseExpiryUnixMs int64                  `protobuf:"varint,8,opt,name=lease_expiry_unix_ms,json=leaseExpiryUnixMs,proto3" json:"lease_expiry_unix_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *SearchRequest) Reset() {
@@ -532,6 +598,20 @@ func (x *SearchRequest) GetCollection() string {
 		return x.Collection
 	}
 	return ""
+}
+
+func (x *SearchRequest) GetShardEpoch() uint64 {
+	if x != nil {
+		return x.ShardEpoch
+	}
+	return 0
+}
+
+func (x *SearchRequest) GetLeaseExpiryUnixMs() int64 {
+	if x != nil {
+		return x.LeaseExpiryUnixMs
+	}
+	return 0
 }
 
 type SearchResponse struct {
@@ -728,11 +808,13 @@ func (x *KeyValuePair) GetValue() []byte {
 }
 
 type PutRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ShardId       uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
-	Kv            *KeyValuePair          `protobuf:"bytes,2,opt,name=kv,proto3" json:"kv,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	ShardId           uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	Kv                *KeyValuePair          `protobuf:"bytes,2,opt,name=kv,proto3" json:"kv,omitempty"`
+	ShardEpoch        uint64                 `protobuf:"varint,3,opt,name=shard_epoch,json=shardEpoch,proto3" json:"shard_epoch,omitempty"`
+	LeaseExpiryUnixMs int64                  `protobuf:"varint,4,opt,name=lease_expiry_unix_ms,json=leaseExpiryUnixMs,proto3" json:"lease_expiry_unix_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *PutRequest) Reset() {
@@ -779,6 +861,20 @@ func (x *PutRequest) GetKv() *KeyValuePair {
 	return nil
 }
 
+func (x *PutRequest) GetShardEpoch() uint64 {
+	if x != nil {
+		return x.ShardEpoch
+	}
+	return 0
+}
+
+func (x *PutRequest) GetLeaseExpiryUnixMs() int64 {
+	if x != nil {
+		return x.LeaseExpiryUnixMs
+	}
+	return 0
+}
+
 type PutResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -816,11 +912,13 @@ func (*PutResponse) Descriptor() ([]byte, []int) {
 }
 
 type GetRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ShardId       uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
-	Key           []byte                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	ShardId           uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	Key               []byte                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
+	ShardEpoch        uint64                 `protobuf:"varint,3,opt,name=shard_epoch,json=shardEpoch,proto3" json:"shard_epoch,omitempty"`
+	LeaseExpiryUnixMs int64                  `protobuf:"varint,4,opt,name=lease_expiry_unix_ms,json=leaseExpiryUnixMs,proto3" json:"lease_expiry_unix_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *GetRequest) Reset() {
@@ -865,6 +963,20 @@ func (x *GetRequest) GetKey() []byte {
 		return x.Key
 	}
 	return nil
+}
+
+func (x *GetRequest) GetShardEpoch() uint64 {
+	if x != nil {
+		return x.ShardEpoch
+	}
+	return 0
+}
+
+func (x *GetRequest) GetLeaseExpiryUnixMs() int64 {
+	if x != nil {
+		return x.LeaseExpiryUnixMs
+	}
+	return 0
 }
 
 type GetResponse struct {
@@ -912,11 +1024,13 @@ func (x *GetResponse) GetKv() *KeyValuePair {
 }
 
 type DeleteRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ShardId       uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
-	Key           []byte                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	ShardId           uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	Key               []byte                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
+	ShardEpoch        uint64                 `protobuf:"varint,3,opt,name=shard_epoch,json=shardEpoch,proto3" json:"shard_epoch,omitempty"`
+	LeaseExpiryUnixMs int64                  `protobuf:"varint,4,opt,name=lease_expiry_unix_ms,json=leaseExpiryUnixMs,proto3" json:"lease_expiry_unix_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *DeleteRequest) Reset() {
@@ -963,6 +1077,20 @@ func (x *DeleteRequest) GetKey() []byte {
 	return nil
 }
 
+func (x *DeleteRequest) GetShardEpoch() uint64 {
+	if x != nil {
+		return x.ShardEpoch
+	}
+	return 0
+}
+
+func (x *DeleteRequest) GetLeaseExpiryUnixMs() int64 {
+	if x != nil {
+		return x.LeaseExpiryUnixMs
+	}
+	return 0
+}
+
 type DeleteResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1001,10 +1129,12 @@ func (*DeleteResponse) Descriptor() ([]byte, []int) {
 
 // Control/Admin messages
 type StatusRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ShardId       uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	ShardId           uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	ShardEpoch        uint64                 `protobuf:"varint,2,opt,name=shard_epoch,json=shardEpoch,proto3" json:"shard_epoch,omitempty"`
+	LeaseExpiryUnixMs int64                  `protobuf:"varint,3,opt,name=lease_expiry_unix_ms,json=leaseExpiryUnixMs,proto3" json:"lease_expiry_unix_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *StatusRequest) Reset() {
@@ -1040,6 +1170,20 @@ func (*StatusRequest) Descriptor() ([]byte, []int) {
 func (x *StatusRequest) GetShardId() uint64 {
 	if x != nil {
 		return x.ShardId
+	}
+	return 0
+}
+
+func (x *StatusRequest) GetShardEpoch() uint64 {
+	if x != nil {
+		return x.ShardEpoch
+	}
+	return 0
+}
+
+func (x *StatusRequest) GetLeaseExpiryUnixMs() int64 {
+	if x != nil {
+		return x.LeaseExpiryUnixMs
 	}
 	return 0
 }
@@ -1089,10 +1233,12 @@ func (x *StatusResponse) GetStatus() string {
 }
 
 type FlushRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ShardId       uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	ShardId           uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	ShardEpoch        uint64                 `protobuf:"varint,2,opt,name=shard_epoch,json=shardEpoch,proto3" json:"shard_epoch,omitempty"`
+	LeaseExpiryUnixMs int64                  `protobuf:"varint,3,opt,name=lease_expiry_unix_ms,json=leaseExpiryUnixMs,proto3" json:"lease_expiry_unix_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *FlushRequest) Reset() {
@@ -1128,6 +1274,20 @@ func (*FlushRequest) Descriptor() ([]byte, []int) {
 func (x *FlushRequest) GetShardId() uint64 {
 	if x != nil {
 		return x.ShardId
+	}
+	return 0
+}
+
+func (x *FlushRequest) GetShardEpoch() uint64 {
+	if x != nil {
+		return x.ShardEpoch
+	}
+	return 0
+}
+
+func (x *FlushRequest) GetLeaseExpiryUnixMs() int64 {
+	if x != nil {
+		return x.LeaseExpiryUnixMs
 	}
 	return 0
 }
@@ -1176,25 +1336,37 @@ const file_worker_worker_proto_rawDesc = "" +
 	"\x06Vector\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06vector\x18\x02 \x03(\x02R\x06vector\x12\x1a\n" +
-	"\bmetadata\x18\x03 \x01(\fR\bmetadata\"b\n" +
+	"\bmetadata\x18\x03 \x01(\fR\bmetadata\"\xb4\x01\n" +
 	"\x12StoreVectorRequest\x12\x19\n" +
 	"\bshard_id\x18\x01 \x01(\x04R\ashardId\x121\n" +
-	"\x06vector\x18\x02 \x01(\v2\x19.vectron.worker.v1.VectorR\x06vector\"\x15\n" +
-	"\x13StoreVectorResponse\"i\n" +
+	"\x06vector\x18\x02 \x01(\v2\x19.vectron.worker.v1.VectorR\x06vector\x12\x1f\n" +
+	"\vshard_epoch\x18\x03 \x01(\x04R\n" +
+	"shardEpoch\x12/\n" +
+	"\x14lease_expiry_unix_ms\x18\x04 \x01(\x03R\x11leaseExpiryUnixMs\"\x15\n" +
+	"\x13StoreVectorResponse\"\xbb\x01\n" +
 	"\x17BatchStoreVectorRequest\x12\x19\n" +
 	"\bshard_id\x18\x01 \x01(\x04R\ashardId\x123\n" +
-	"\avectors\x18\x02 \x03(\v2\x19.vectron.worker.v1.VectorR\avectors\"2\n" +
+	"\avectors\x18\x02 \x03(\v2\x19.vectron.worker.v1.VectorR\avectors\x12\x1f\n" +
+	"\vshard_epoch\x18\x03 \x01(\x04R\n" +
+	"shardEpoch\x12/\n" +
+	"\x14lease_expiry_unix_ms\x18\x04 \x01(\x03R\x11leaseExpiryUnixMs\"2\n" +
 	"\x18BatchStoreVectorResponse\x12\x16\n" +
-	"\x06stored\x18\x01 \x01(\x05R\x06stored\"=\n" +
+	"\x06stored\x18\x01 \x01(\x05R\x06stored\"\x8f\x01\n" +
 	"\x10GetVectorRequest\x12\x19\n" +
 	"\bshard_id\x18\x01 \x01(\x04R\ashardId\x12\x0e\n" +
-	"\x02id\x18\x02 \x01(\tR\x02id\"F\n" +
+	"\x02id\x18\x02 \x01(\tR\x02id\x12\x1f\n" +
+	"\vshard_epoch\x18\x03 \x01(\x04R\n" +
+	"shardEpoch\x12/\n" +
+	"\x14lease_expiry_unix_ms\x18\x04 \x01(\x03R\x11leaseExpiryUnixMs\"F\n" +
 	"\x11GetVectorResponse\x121\n" +
-	"\x06vector\x18\x01 \x01(\v2\x19.vectron.worker.v1.VectorR\x06vector\"@\n" +
+	"\x06vector\x18\x01 \x01(\v2\x19.vectron.worker.v1.VectorR\x06vector\"\x92\x01\n" +
 	"\x13DeleteVectorRequest\x12\x19\n" +
 	"\bshard_id\x18\x01 \x01(\x04R\ashardId\x12\x0e\n" +
-	"\x02id\x18\x02 \x01(\tR\x02id\"\x16\n" +
-	"\x14DeleteVectorResponse\"\xb5\x01\n" +
+	"\x02id\x18\x02 \x01(\tR\x02id\x12\x1f\n" +
+	"\vshard_epoch\x18\x03 \x01(\x04R\n" +
+	"shardEpoch\x12/\n" +
+	"\x14lease_expiry_unix_ms\x18\x04 \x01(\x03R\x11leaseExpiryUnixMs\"\x16\n" +
+	"\x14DeleteVectorResponse\"\x87\x02\n" +
 	"\rSearchRequest\x12\x19\n" +
 	"\bshard_id\x18\x01 \x01(\x04R\ashardId\x12\x16\n" +
 	"\x06vector\x18\x02 \x03(\x02R\x06vector\x12\f\n" +
@@ -1204,7 +1376,10 @@ const file_worker_worker_proto_rawDesc = "" +
 	"\flinearizable\x18\x05 \x01(\bR\flinearizable\x12\x1e\n" +
 	"\n" +
 	"collection\x18\x06 \x01(\tR\n" +
-	"collection\":\n" +
+	"collection\x12\x1f\n" +
+	"\vshard_epoch\x18\a \x01(\x04R\n" +
+	"shardEpoch\x12/\n" +
+	"\x14lease_expiry_unix_ms\x18\b \x01(\x03R\x11leaseExpiryUnixMs\":\n" +
 	"\x0eSearchResponse\x12\x10\n" +
 	"\x03ids\x18\x01 \x03(\tR\x03ids\x12\x16\n" +
 	"\x06scores\x18\x02 \x03(\x02R\x06scores\"R\n" +
@@ -1214,28 +1389,43 @@ const file_worker_worker_proto_rawDesc = "" +
 	"\tresponses\x18\x01 \x03(\v2!.vectron.worker.v1.SearchResponseR\tresponses\"6\n" +
 	"\fKeyValuePair\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\fR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\fR\x05value\"X\n" +
+	"\x05value\x18\x02 \x01(\fR\x05value\"\xaa\x01\n" +
 	"\n" +
 	"PutRequest\x12\x19\n" +
 	"\bshard_id\x18\x01 \x01(\x04R\ashardId\x12/\n" +
-	"\x02kv\x18\x02 \x01(\v2\x1f.vectron.worker.v1.KeyValuePairR\x02kv\"\r\n" +
-	"\vPutResponse\"9\n" +
+	"\x02kv\x18\x02 \x01(\v2\x1f.vectron.worker.v1.KeyValuePairR\x02kv\x12\x1f\n" +
+	"\vshard_epoch\x18\x03 \x01(\x04R\n" +
+	"shardEpoch\x12/\n" +
+	"\x14lease_expiry_unix_ms\x18\x04 \x01(\x03R\x11leaseExpiryUnixMs\"\r\n" +
+	"\vPutResponse\"\x8b\x01\n" +
 	"\n" +
 	"GetRequest\x12\x19\n" +
 	"\bshard_id\x18\x01 \x01(\x04R\ashardId\x12\x10\n" +
-	"\x03key\x18\x02 \x01(\fR\x03key\">\n" +
+	"\x03key\x18\x02 \x01(\fR\x03key\x12\x1f\n" +
+	"\vshard_epoch\x18\x03 \x01(\x04R\n" +
+	"shardEpoch\x12/\n" +
+	"\x14lease_expiry_unix_ms\x18\x04 \x01(\x03R\x11leaseExpiryUnixMs\">\n" +
 	"\vGetResponse\x12/\n" +
-	"\x02kv\x18\x01 \x01(\v2\x1f.vectron.worker.v1.KeyValuePairR\x02kv\"<\n" +
+	"\x02kv\x18\x01 \x01(\v2\x1f.vectron.worker.v1.KeyValuePairR\x02kv\"\x8e\x01\n" +
 	"\rDeleteRequest\x12\x19\n" +
 	"\bshard_id\x18\x01 \x01(\x04R\ashardId\x12\x10\n" +
-	"\x03key\x18\x02 \x01(\fR\x03key\"\x10\n" +
-	"\x0eDeleteResponse\"*\n" +
+	"\x03key\x18\x02 \x01(\fR\x03key\x12\x1f\n" +
+	"\vshard_epoch\x18\x03 \x01(\x04R\n" +
+	"shardEpoch\x12/\n" +
+	"\x14lease_expiry_unix_ms\x18\x04 \x01(\x03R\x11leaseExpiryUnixMs\"\x10\n" +
+	"\x0eDeleteResponse\"|\n" +
 	"\rStatusRequest\x12\x19\n" +
-	"\bshard_id\x18\x01 \x01(\x04R\ashardId\"(\n" +
+	"\bshard_id\x18\x01 \x01(\x04R\ashardId\x12\x1f\n" +
+	"\vshard_epoch\x18\x02 \x01(\x04R\n" +
+	"shardEpoch\x12/\n" +
+	"\x14lease_expiry_unix_ms\x18\x03 \x01(\x03R\x11leaseExpiryUnixMs\"(\n" +
 	"\x0eStatusResponse\x12\x16\n" +
-	"\x06status\x18\x01 \x01(\tR\x06status\")\n" +
+	"\x06status\x18\x01 \x01(\tR\x06status\"{\n" +
 	"\fFlushRequest\x12\x19\n" +
-	"\bshard_id\x18\x01 \x01(\x04R\ashardId\"\x0f\n" +
+	"\bshard_id\x18\x01 \x01(\x04R\ashardId\x12\x1f\n" +
+	"\vshard_epoch\x18\x02 \x01(\x04R\n" +
+	"shardEpoch\x12/\n" +
+	"\x14lease_expiry_unix_ms\x18\x03 \x01(\x03R\x11leaseExpiryUnixMs\"\x0f\n" +
 	"\rFlushResponse2\xc3\b\n" +
 	"\rWorkerService\x12^\n" +
 	"\vStoreVector\x12%.vectron.worker.v1.StoreVectorRequest\x1a&.vectron.worker.v1.StoreVectorResponse\"\x00\x12m\n" +

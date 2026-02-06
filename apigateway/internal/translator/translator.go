@@ -10,11 +10,13 @@ import (
 )
 
 // ToWorkerStoreVectorRequestFromPoint translates a public API Point to a worker's StoreVectorRequest.
-func ToWorkerStoreVectorRequestFromPoint(point *apigatewaypb.Point, shardID uint64) *workerpb.StoreVectorRequest {
+func ToWorkerStoreVectorRequestFromPoint(point *apigatewaypb.Point, shardID uint64, shardEpoch uint64, leaseExpiryUnixMs int64) *workerpb.StoreVectorRequest {
 	// TODO: Handle the translation of the payload map[string]string to a byte slice.
 	// This could be done by serializing the map to JSON.
 	return &workerpb.StoreVectorRequest{
 		ShardId: shardID,
+		ShardEpoch: shardEpoch,
+		LeaseExpiryUnixMs: leaseExpiryUnixMs,
 		Vector: &workerpb.Vector{
 			Id:       point.Id,
 			Vector:   point.Vector,
@@ -33,7 +35,7 @@ func ToWorkerVectorFromPoint(point *apigatewaypb.Point) *workerpb.Vector {
 }
 
 // ToWorkerBatchStoreVectorRequestFromPoints translates points to a batch store request.
-func ToWorkerBatchStoreVectorRequestFromPoints(points []*apigatewaypb.Point, shardID uint64) *workerpb.BatchStoreVectorRequest {
+func ToWorkerBatchStoreVectorRequestFromPoints(points []*apigatewaypb.Point, shardID uint64, shardEpoch uint64, leaseExpiryUnixMs int64) *workerpb.BatchStoreVectorRequest {
 	vectors := make([]*workerpb.Vector, 0, len(points))
 	for _, point := range points {
 		if point == nil {
@@ -43,14 +45,18 @@ func ToWorkerBatchStoreVectorRequestFromPoints(points []*apigatewaypb.Point, sha
 	}
 	return &workerpb.BatchStoreVectorRequest{
 		ShardId: shardID,
+		ShardEpoch: shardEpoch,
+		LeaseExpiryUnixMs: leaseExpiryUnixMs,
 		Vectors: vectors,
 	}
 }
 
 // ToWorkerSearchRequest translates a public SearchRequest to a worker's SearchRequest.
-func ToWorkerSearchRequest(req *apigatewaypb.SearchRequest, shardID uint64, linearizable bool) *workerpb.SearchRequest {
+func ToWorkerSearchRequest(req *apigatewaypb.SearchRequest, shardID uint64, shardEpoch uint64, leaseExpiryUnixMs int64, linearizable bool) *workerpb.SearchRequest {
 	return &workerpb.SearchRequest{
 		ShardId:      shardID,
+		ShardEpoch:   shardEpoch,
+		LeaseExpiryUnixMs: leaseExpiryUnixMs,
 		Vector:       req.Vector,
 		K:            int32(req.TopK),
 		Linearizable: linearizable,
@@ -76,9 +82,11 @@ func FromWorkerSearchResponse(res *workerpb.SearchResponse) *apigatewaypb.Search
 }
 
 // ToWorkerGetVectorRequest translates a public GetRequest to a worker's GetVectorRequest.
-func ToWorkerGetVectorRequest(req *apigatewaypb.GetRequest, shardID uint64) *workerpb.GetVectorRequest {
+func ToWorkerGetVectorRequest(req *apigatewaypb.GetRequest, shardID uint64, shardEpoch uint64, leaseExpiryUnixMs int64) *workerpb.GetVectorRequest {
 	return &workerpb.GetVectorRequest{
 		ShardId: shardID,
+		ShardEpoch: shardEpoch,
+		LeaseExpiryUnixMs: leaseExpiryUnixMs,
 		Id:      req.Id,
 	}
 }
@@ -101,9 +109,11 @@ func FromWorkerGetVectorResponse(res *workerpb.GetVectorResponse) *apigatewaypb.
 }
 
 // ToWorkerDeleteVectorRequest translates a public DeleteRequest to a worker's DeleteVectorRequest.
-func ToWorkerDeleteVectorRequest(req *apigatewaypb.DeleteRequest, shardID uint64) *workerpb.DeleteVectorRequest {
+func ToWorkerDeleteVectorRequest(req *apigatewaypb.DeleteRequest, shardID uint64, shardEpoch uint64, leaseExpiryUnixMs int64) *workerpb.DeleteVectorRequest {
 	return &workerpb.DeleteVectorRequest{
 		ShardId: shardID,
+		ShardEpoch: shardEpoch,
+		LeaseExpiryUnixMs: leaseExpiryUnixMs,
 		Id:      req.Id,
 	}
 }

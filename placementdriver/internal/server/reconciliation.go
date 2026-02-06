@@ -512,6 +512,12 @@ type inflightMove struct {
 	attempts  int
 	addedByMove bool
 	phase     movePhase
+	addConfigChangeID    uint64
+	removeConfigChangeID uint64
+	requiredAppliedIndex uint64
+	requiredEpoch       uint64
+	waitLeaderTransferAck bool
+	requiredLeaderAckEpoch uint64
 }
 
 type movePhase int
@@ -916,6 +922,10 @@ func (rm *RebalanceManager) executeMove(move RebalanceMove) error {
 
 	phase := movePhaseWaitTarget
 	now := time.Now()
+	var addConfigChangeID uint64
+	if snap, ok := rm.server.getShardMembershipSnapshot(move.ShardID); ok {
+		addConfigChangeID = snap.configChangeID
+	}
 	rm.inflightMoves[move.ShardID] = &inflightMove{
 		move:         move,
 		startedAt:    now,
@@ -923,6 +933,8 @@ func (rm *RebalanceManager) executeMove(move RebalanceMove) error {
 		nextAttempt:  now,
 		addedByMove:  addedByMove,
 		phase:        phase,
+		addConfigChangeID: addConfigChangeID,
+		requiredEpoch: shard.Epoch,
 	}
 	return nil
 }
@@ -973,7 +985,43 @@ func (rm *RebalanceManager) advanceMovesLocked() {
 				}
 				continue
 			}
-			if member, ok := rm.server.isShardMember(shardID, inflight.move.TargetWorkerID); !ok || !member {
+			snap, ok := rm.server.getShardMembershipSnapshot(shardID)
+			if !ok {
+				rm.scheduleRetry(inflight, now)
+				continue
+			}
+			if _, member := snap.nodeIDs[inflight.move.TargetWorkerID]; !member {
+				rm.scheduleRetry(inflight, now)
+				continue
+			}
+			if inflight.addedByMove && inflight.addConfigChangeID > 0 && snap.configChangeID <= inflight.addConfigChangeID {
+				rm.scheduleRetry(inflight, now)
+				continue
+			}
+			if inflight.requiredEpoch == 0 || inflight.requiredEpoch < shard.Epoch {
+				inflight.requiredEpoch = shard.Epoch
+				inflight.requiredAppliedIndex = 0
+			}
+			leaderID := shard.LeaderID
+			if leaderID == 0 {
+				rm.scheduleRetry(inflight, now)
+				continue
+			}
+			leaderProgress, ok := rm.server.getShardProgress(shardID, leaderID)
+			if !ok || leaderProgress.shardEpoch < inflight.requiredEpoch {
+				rm.scheduleRetry(inflight, now)
+				continue
+			}
+			if inflight.requiredAppliedIndex == 0 {
+				inflight.requiredAppliedIndex = leaderProgress.appliedIndex
+				inflight.lastProgress = now
+			}
+			targetProgress, ok := rm.server.getShardProgress(shardID, inflight.move.TargetWorkerID)
+			if !ok || targetProgress.shardEpoch < inflight.requiredEpoch {
+				rm.scheduleRetry(inflight, now)
+				continue
+			}
+			if targetProgress.appliedIndex < inflight.requiredAppliedIndex {
 				rm.scheduleRetry(inflight, now)
 				continue
 			}
@@ -983,6 +1031,15 @@ func (rm *RebalanceManager) advanceMovesLocked() {
 				rm.advanceMovePhase(inflight, movePhaseWaitRemoval, now)
 				continue
 			}
+			if inflight.requiredLeaderAckEpoch == 0 && shard.LeaderID == inflight.move.SourceWorkerID {
+				inflight.waitLeaderTransferAck = true
+				inflight.requiredLeaderAckEpoch = shard.Epoch + 1
+			}
+			if inflight.removeConfigChangeID == 0 {
+				if snap, ok := rm.server.getShardMembershipSnapshot(shardID); ok {
+					inflight.removeConfigChangeID = snap.configChangeID
+				}
+			}
 			if err := rm.removeShardReplica(shardID, inflight.move.SourceWorkerID); err != nil {
 				fmt.Printf("❌ Failed to remove replica %d from shard %d: %v\n",
 					inflight.move.SourceWorkerID, shardID, err)
@@ -991,9 +1048,25 @@ func (rm *RebalanceManager) advanceMovesLocked() {
 			}
 			rm.advanceMovePhase(inflight, movePhaseWaitRemoval, now)
 		case movePhaseWaitRemoval:
-			if member, ok := rm.server.isShardMember(shardID, inflight.move.SourceWorkerID); !ok || member {
+			snap, ok := rm.server.getShardMembershipSnapshot(shardID)
+			if !ok {
 				rm.scheduleRetry(inflight, now)
 				continue
+			}
+			if _, member := snap.nodeIDs[inflight.move.SourceWorkerID]; member {
+				rm.scheduleRetry(inflight, now)
+				continue
+			}
+			if inflight.removeConfigChangeID > 0 && snap.configChangeID <= inflight.removeConfigChangeID {
+				rm.scheduleRetry(inflight, now)
+				continue
+			}
+			if inflight.waitLeaderTransferAck {
+				ack, ok := rm.server.getLeaderTransferAck(shardID, inflight.move.SourceWorkerID)
+				if !ok || ack.shardEpoch < inflight.requiredLeaderAckEpoch {
+					rm.scheduleRetry(inflight, now)
+					continue
+				}
 			}
 			if shard.LeaderID == inflight.move.SourceWorkerID {
 				rm.scheduleRetry(inflight, now)

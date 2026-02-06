@@ -27,6 +27,8 @@ const (
 	raftTimeout = 5 * time.Second
 	// defaultInitialShards is the number of shards created for a new collection by default.
 	defaultInitialShards = 8
+	// shardLeaseTTL is the routing lease duration returned to gateways.
+	shardLeaseTTL = 20 * time.Second
 )
 
 // Server implements the gRPC PlacementService.
@@ -37,6 +39,12 @@ type Server struct {
 
 	membershipMu   sync.RWMutex
 	shardMembership map[uint64]shardMembershipSnapshot
+
+	progressMu     sync.RWMutex
+	shardProgress  map[uint64]map[uint64]shardProgressSnapshot
+
+	leaderAckMu    sync.RWMutex
+	leaderTransferAcks map[uint64]map[uint64]leaderTransferAck
 }
 
 // NewServer creates a new instance of the placement driver gRPC server.
@@ -45,6 +53,8 @@ func NewServer(r *raft.Node, f *fsm.FSM) *Server {
 		raft: r,
 		fsm:  f,
 		shardMembership: make(map[uint64]shardMembershipSnapshot),
+		shardProgress: make(map[uint64]map[uint64]shardProgressSnapshot),
+		leaderTransferAcks: make(map[uint64]map[uint64]leaderTransferAck),
 	}
 }
 
@@ -115,6 +125,22 @@ type shardMembershipSnapshot struct {
 
 const membershipStaleAfter = 30 * time.Second
 
+type shardProgressSnapshot struct {
+	appliedIndex uint64
+	shardEpoch   uint64
+	updatedAt    time.Time
+}
+
+const progressStaleAfter = 30 * time.Second
+
+type leaderTransferAck struct {
+	toNodeID  uint64
+	shardEpoch uint64
+	updatedAt time.Time
+}
+
+const leaderAckStaleAfter = 5 * time.Minute
+
 // Heartbeat is called periodically by workers to signal they are alive.
 // It also serves as the mechanism for the placement driver to send shard assignments to workers.
 func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.HeartbeatResponse, error) {
@@ -180,6 +206,9 @@ func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.H
 
 	// Propose commands to update shard leader information.
 	for _, leaderInfo := range req.ShardLeaderInfo {
+		if !s.fsm.IsWorkerAssignedToShard(workerID, leaderInfo.ShardId) {
+			continue
+		}
 		leaderMap[leaderInfo.ShardId] = leaderInfo.LeaderId
 		leaderPayload := fsm.UpdateShardLeaderPayload{
 			ShardID:  leaderInfo.ShardId,
@@ -203,6 +232,8 @@ func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.H
 
 	// Update shard membership info (leader-reported).
 	s.updateShardMembership(workerID, req.GetShardMembership(), leaderMap)
+	s.updateShardProgress(workerID, req.GetShardProgress())
+	s.updateLeaderTransferAcks(workerID, req.GetLeaderTransferAcks())
 
 	// Read the current state from the FSM to find all shards assigned to this worker.
 	assignments := make([]*ShardAssignment, 0)
@@ -339,6 +370,8 @@ func (s *Server) GetWorker(ctx context.Context, req *pb.GetWorkerRequest) (*pb.G
 	return &pb.GetWorkerResponse{
 		GrpcAddress: targetWorker.GrpcAddress,
 		ShardId:     uint32(targetShard.ShardID),
+		ShardEpoch:  targetShard.Epoch,
+		LeaseExpiryUnixMs: time.Now().Add(shardLeaseTTL).UnixMilli(),
 	}, nil
 }
 
@@ -566,6 +599,9 @@ func (s *Server) updateShardMembership(workerID uint64, infos []*pb.ShardMembers
 		if !ok || leaderID != workerID {
 			continue
 		}
+		if !s.fsm.IsWorkerAssignedToShard(workerID, info.ShardId) {
+			continue
+		}
 		nodeIDs := make(map[uint64]struct{}, len(info.NodeIds))
 		for _, nodeID := range info.NodeIds {
 			nodeIDs[nodeID] = struct{}{}
@@ -592,4 +628,121 @@ func (s *Server) isShardMember(shardID uint64, nodeID uint64) (bool, bool) {
 	}
 	_, exists := snap.nodeIDs[nodeID]
 	return exists, true
+}
+
+func (s *Server) getShardMembershipSnapshot(shardID uint64) (shardMembershipSnapshot, bool) {
+	s.membershipMu.RLock()
+	defer s.membershipMu.RUnlock()
+
+	snap, ok := s.shardMembership[shardID]
+	if !ok {
+		return shardMembershipSnapshot{}, false
+	}
+	if time.Since(snap.updatedAt) > membershipStaleAfter {
+		return shardMembershipSnapshot{}, false
+	}
+	nodeCopy := make(map[uint64]struct{}, len(snap.nodeIDs))
+	for id := range snap.nodeIDs {
+		nodeCopy[id] = struct{}{}
+	}
+	return shardMembershipSnapshot{
+		nodeIDs:        nodeCopy,
+		configChangeID: snap.configChangeID,
+		leaderWorkerID: snap.leaderWorkerID,
+		updatedAt:      snap.updatedAt,
+	}, true
+}
+
+func (s *Server) updateShardProgress(workerID uint64, infos []*pb.ShardProgressInfo) {
+	if len(infos) == 0 {
+		return
+	}
+
+	s.progressMu.Lock()
+	defer s.progressMu.Unlock()
+
+	now := time.Now()
+	for _, info := range infos {
+		if info == nil {
+			continue
+		}
+		if !s.fsm.IsWorkerAssignedToShard(workerID, info.ShardId) {
+			continue
+		}
+		shardMap := s.shardProgress[info.ShardId]
+		if shardMap == nil {
+			shardMap = make(map[uint64]shardProgressSnapshot)
+			s.shardProgress[info.ShardId] = shardMap
+		}
+		shardMap[workerID] = shardProgressSnapshot{
+			appliedIndex: info.AppliedIndex,
+			shardEpoch:   info.ShardEpoch,
+			updatedAt:    now,
+		}
+	}
+}
+
+func (s *Server) getShardProgress(shardID uint64, nodeID uint64) (shardProgressSnapshot, bool) {
+	s.progressMu.RLock()
+	defer s.progressMu.RUnlock()
+
+	nodes, ok := s.shardProgress[shardID]
+	if !ok {
+		return shardProgressSnapshot{}, false
+	}
+	snap, ok := nodes[nodeID]
+	if !ok {
+		return shardProgressSnapshot{}, false
+	}
+	if time.Since(snap.updatedAt) > progressStaleAfter {
+		return shardProgressSnapshot{}, false
+	}
+	return snap, true
+}
+
+func (s *Server) updateLeaderTransferAcks(workerID uint64, infos []*pb.ShardLeaderTransferAck) {
+	if len(infos) == 0 {
+		return
+	}
+
+	s.leaderAckMu.Lock()
+	defer s.leaderAckMu.Unlock()
+
+	now := time.Now()
+	for _, ack := range infos {
+		if ack == nil {
+			continue
+		}
+		if ack.FromNodeId != workerID {
+			continue
+		}
+		shardMap := s.leaderTransferAcks[ack.ShardId]
+		if shardMap == nil {
+			shardMap = make(map[uint64]leaderTransferAck)
+			s.leaderTransferAcks[ack.ShardId] = shardMap
+		}
+		shardMap[ack.FromNodeId] = leaderTransferAck{
+			toNodeID:  ack.ToNodeId,
+			shardEpoch: ack.ShardEpoch,
+			updatedAt: now,
+		}
+	}
+}
+
+func (s *Server) getLeaderTransferAck(shardID uint64, fromNodeID uint64) (leaderTransferAck, bool) {
+	s.leaderAckMu.RLock()
+	defer s.leaderAckMu.RUnlock()
+
+	nodes, ok := s.leaderTransferAcks[shardID]
+	if !ok {
+		return leaderTransferAck{}, false
+	}
+	ack, ok := nodes[fromNodeID]
+	if !ok {
+		return leaderTransferAck{}, false
+	}
+	if time.Since(ack.updatedAt) > leaderAckStaleAfter {
+		return leaderTransferAck{}, false
+	}
+	return ack, true
 }

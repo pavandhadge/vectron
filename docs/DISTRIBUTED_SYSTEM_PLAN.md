@@ -117,8 +117,10 @@ Alerts:
 ---
 
 ## Remaining Items (Advanced / Optional)
-- Snapshot progress or match-index barrier before removing a source replica (stronger safety than "running + membership").
-- Explicit fencing token per shard/worker beyond the assignments epoch (lease-style or epoch per shard).
-- Direct leader-transfer completion acknowledgment (currently inferred via leader ID).
-- Stronger partition hardening (e.g., lease-based read/write fencing).
 - Shard split/merge for hotspot scalability (non-essential for correctness).
+
+## Implemented (Advanced)
+- Snapshot/applied-index barrier before removing a source replica (stronger safety than "running + membership").
+- Per-shard epoch fencing + lease-based routing/worker checks.
+- Leader-transfer completion acknowledgements via heartbeat.
+- Partition hardening through lease expiry validation.

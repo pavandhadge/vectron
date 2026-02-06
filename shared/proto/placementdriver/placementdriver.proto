@@ -63,6 +63,10 @@ message GetWorkerResponse {
 
   // Optional: shard info
   uint32 shard_id = 2;
+  // Monotonic shard epoch for fencing
+  uint64 shard_epoch = 3;
+  // Lease expiry for routing (unix millis)
+  int64 lease_expiry_unix_ms = 4;
 }
 
 message RegisterWorkerRequest {
@@ -99,6 +103,22 @@ message ShardMembershipInfo {
   uint64 shard_id = 1;
   uint64 config_change_id = 2;
   repeated uint64 node_ids = 3;
+}
+
+// ShardProgressInfo reports per-shard applied index for fencing moves.
+message ShardProgressInfo {
+  uint64 shard_id = 1;
+  uint64 applied_index = 2;
+  uint64 shard_epoch = 3;
+}
+
+// ShardLeaderTransferAck confirms leader transfer completion.
+message ShardLeaderTransferAck {
+  uint64 shard_id = 1;
+  uint64 from_node_id = 2;
+  uint64 to_node_id = 3;
+  uint64 shard_epoch = 4;
+  int64 timestamp_unix_ms = 5;
 }
 
 // ShardMetrics contains per-shard performance metrics for hot-shard detection
@@ -142,6 +162,10 @@ message HeartbeatRequest {
 
   // Shard membership info (reported by leaders only)
   repeated ShardMembershipInfo shard_membership = 13;
+  // Shard progress info (applied index per shard on this worker)
+  repeated ShardProgressInfo shard_progress = 14;
+  // Leader transfer acknowledgements
+  repeated ShardLeaderTransferAck leader_transfer_acks = 15;
 }
 
 message HeartbeatResponse {

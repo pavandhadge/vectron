@@ -90,6 +90,10 @@ export interface GetWorkerResponse {
   grpcAddress: string;
   /** Optional: shard info */
   shardId: number;
+  /** Monotonic shard epoch for fencing */
+  shardEpoch: string;
+  /** Lease expiry for routing (unix millis) */
+  leaseExpiryUnixMs: string;
 }
 
 export interface RegisterWorkerRequest {
@@ -130,6 +134,22 @@ export interface ShardMembershipInfo {
   nodeIds: string[];
 }
 
+/** ShardProgressInfo reports per-shard applied index for fencing moves. */
+export interface ShardProgressInfo {
+  shardId: string;
+  appliedIndex: string;
+  shardEpoch: string;
+}
+
+/** ShardLeaderTransferAck confirms leader transfer completion. */
+export interface ShardLeaderTransferAck {
+  shardId: string;
+  fromNodeId: string;
+  toNodeId: string;
+  shardEpoch: string;
+  timestampUnixMs: string;
+}
+
 /** ShardMetrics contains per-shard performance metrics for hot-shard detection */
 export interface ShardMetrics {
   shardId: string;
@@ -163,6 +183,10 @@ export interface HeartbeatRequest {
   runningShards: string[];
   /** Shard membership info (reported by leaders only) */
   shardMembership: ShardMembershipInfo[];
+  /** Shard progress info (applied index per shard on this worker) */
+  shardProgress: ShardProgressInfo[];
+  /** Leader transfer acknowledgements */
+  leaderTransferAcks: ShardLeaderTransferAck[];
 }
 
 export interface HeartbeatResponse {
@@ -450,7 +474,7 @@ export const GetWorkerRequest: MessageFns<GetWorkerRequest> = {
 };
 
 function createBaseGetWorkerResponse(): GetWorkerResponse {
-  return { grpcAddress: "", shardId: 0 };
+  return { grpcAddress: "", shardId: 0, shardEpoch: "0", leaseExpiryUnixMs: "0" };
 }
 
 export const GetWorkerResponse: MessageFns<GetWorkerResponse> = {
@@ -460,6 +484,12 @@ export const GetWorkerResponse: MessageFns<GetWorkerResponse> = {
     }
     if (message.shardId !== 0) {
       writer.uint32(16).uint32(message.shardId);
+    }
+    if (message.shardEpoch !== "0") {
+      writer.uint32(24).uint64(message.shardEpoch);
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      writer.uint32(32).int64(message.leaseExpiryUnixMs);
     }
     return writer;
   },
@@ -487,6 +517,22 @@ export const GetWorkerResponse: MessageFns<GetWorkerResponse> = {
           message.shardId = reader.uint32();
           continue;
         }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.shardEpoch = reader.uint64().toString();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.leaseExpiryUnixMs = reader.int64().toString();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -500,6 +546,8 @@ export const GetWorkerResponse: MessageFns<GetWorkerResponse> = {
     return {
       grpcAddress: isSet(object.grpcAddress) ? globalThis.String(object.grpcAddress) : "",
       shardId: isSet(object.shardId) ? globalThis.Number(object.shardId) : 0,
+      shardEpoch: isSet(object.shardEpoch) ? globalThis.String(object.shardEpoch) : "0",
+      leaseExpiryUnixMs: isSet(object.leaseExpiryUnixMs) ? globalThis.String(object.leaseExpiryUnixMs) : "0",
     };
   },
 
@@ -511,6 +559,12 @@ export const GetWorkerResponse: MessageFns<GetWorkerResponse> = {
     if (message.shardId !== 0) {
       obj.shardId = Math.round(message.shardId);
     }
+    if (message.shardEpoch !== "0") {
+      obj.shardEpoch = message.shardEpoch;
+    }
+    if (message.leaseExpiryUnixMs !== "0") {
+      obj.leaseExpiryUnixMs = message.leaseExpiryUnixMs;
+    }
     return obj;
   },
 
@@ -521,6 +575,8 @@ export const GetWorkerResponse: MessageFns<GetWorkerResponse> = {
     const message = createBaseGetWorkerResponse();
     message.grpcAddress = object.grpcAddress ?? "";
     message.shardId = object.shardId ?? 0;
+    message.shardEpoch = object.shardEpoch ?? "0";
+    message.leaseExpiryUnixMs = object.leaseExpiryUnixMs ?? "0";
     return message;
   },
 };
@@ -998,6 +1054,222 @@ export const ShardMembershipInfo: MessageFns<ShardMembershipInfo> = {
   },
 };
 
+function createBaseShardProgressInfo(): ShardProgressInfo {
+  return { shardId: "0", appliedIndex: "0", shardEpoch: "0" };
+}
+
+export const ShardProgressInfo: MessageFns<ShardProgressInfo> = {
+  encode(message: ShardProgressInfo, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.shardId !== "0") {
+      writer.uint32(8).uint64(message.shardId);
+    }
+    if (message.appliedIndex !== "0") {
+      writer.uint32(16).uint64(message.appliedIndex);
+    }
+    if (message.shardEpoch !== "0") {
+      writer.uint32(24).uint64(message.shardEpoch);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ShardProgressInfo {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseShardProgressInfo();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.shardId = reader.uint64().toString();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.appliedIndex = reader.uint64().toString();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.shardEpoch = reader.uint64().toString();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ShardProgressInfo {
+    return {
+      shardId: isSet(object.shardId) ? globalThis.String(object.shardId) : "0",
+      appliedIndex: isSet(object.appliedIndex) ? globalThis.String(object.appliedIndex) : "0",
+      shardEpoch: isSet(object.shardEpoch) ? globalThis.String(object.shardEpoch) : "0",
+    };
+  },
+
+  toJSON(message: ShardProgressInfo): unknown {
+    const obj: any = {};
+    if (message.shardId !== "0") {
+      obj.shardId = message.shardId;
+    }
+    if (message.appliedIndex !== "0") {
+      obj.appliedIndex = message.appliedIndex;
+    }
+    if (message.shardEpoch !== "0") {
+      obj.shardEpoch = message.shardEpoch;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ShardProgressInfo>, I>>(base?: I): ShardProgressInfo {
+    return ShardProgressInfo.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ShardProgressInfo>, I>>(object: I): ShardProgressInfo {
+    const message = createBaseShardProgressInfo();
+    message.shardId = object.shardId ?? "0";
+    message.appliedIndex = object.appliedIndex ?? "0";
+    message.shardEpoch = object.shardEpoch ?? "0";
+    return message;
+  },
+};
+
+function createBaseShardLeaderTransferAck(): ShardLeaderTransferAck {
+  return { shardId: "0", fromNodeId: "0", toNodeId: "0", shardEpoch: "0", timestampUnixMs: "0" };
+}
+
+export const ShardLeaderTransferAck: MessageFns<ShardLeaderTransferAck> = {
+  encode(message: ShardLeaderTransferAck, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.shardId !== "0") {
+      writer.uint32(8).uint64(message.shardId);
+    }
+    if (message.fromNodeId !== "0") {
+      writer.uint32(16).uint64(message.fromNodeId);
+    }
+    if (message.toNodeId !== "0") {
+      writer.uint32(24).uint64(message.toNodeId);
+    }
+    if (message.shardEpoch !== "0") {
+      writer.uint32(32).uint64(message.shardEpoch);
+    }
+    if (message.timestampUnixMs !== "0") {
+      writer.uint32(40).int64(message.timestampUnixMs);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ShardLeaderTransferAck {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseShardLeaderTransferAck();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.shardId = reader.uint64().toString();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.fromNodeId = reader.uint64().toString();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.toNodeId = reader.uint64().toString();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.shardEpoch = reader.uint64().toString();
+          continue;
+        }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.timestampUnixMs = reader.int64().toString();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ShardLeaderTransferAck {
+    return {
+      shardId: isSet(object.shardId) ? globalThis.String(object.shardId) : "0",
+      fromNodeId: isSet(object.fromNodeId) ? globalThis.String(object.fromNodeId) : "0",
+      toNodeId: isSet(object.toNodeId) ? globalThis.String(object.toNodeId) : "0",
+      shardEpoch: isSet(object.shardEpoch) ? globalThis.String(object.shardEpoch) : "0",
+      timestampUnixMs: isSet(object.timestampUnixMs) ? globalThis.String(object.timestampUnixMs) : "0",
+    };
+  },
+
+  toJSON(message: ShardLeaderTransferAck): unknown {
+    const obj: any = {};
+    if (message.shardId !== "0") {
+      obj.shardId = message.shardId;
+    }
+    if (message.fromNodeId !== "0") {
+      obj.fromNodeId = message.fromNodeId;
+    }
+    if (message.toNodeId !== "0") {
+      obj.toNodeId = message.toNodeId;
+    }
+    if (message.shardEpoch !== "0") {
+      obj.shardEpoch = message.shardEpoch;
+    }
+    if (message.timestampUnixMs !== "0") {
+      obj.timestampUnixMs = message.timestampUnixMs;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ShardLeaderTransferAck>, I>>(base?: I): ShardLeaderTransferAck {
+    return ShardLeaderTransferAck.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ShardLeaderTransferAck>, I>>(object: I): ShardLeaderTransferAck {
+    const message = createBaseShardLeaderTransferAck();
+    message.shardId = object.shardId ?? "0";
+    message.fromNodeId = object.fromNodeId ?? "0";
+    message.toNodeId = object.toNodeId ?? "0";
+    message.shardEpoch = object.shardEpoch ?? "0";
+    message.timestampUnixMs = object.timestampUnixMs ?? "0";
+    return message;
+  },
+};
+
 function createBaseShardMetrics(): ShardMetrics {
   return { shardId: "0", queriesPerSecond: 0, vectorCount: "0", avgLatencyMs: 0 };
 }
@@ -1121,6 +1393,8 @@ function createBaseHeartbeatRequest(): HeartbeatRequest {
     shardMetrics: [],
     runningShards: [],
     shardMembership: [],
+    shardProgress: [],
+    leaderTransferAcks: [],
   };
 }
 
@@ -1166,6 +1440,12 @@ export const HeartbeatRequest: MessageFns<HeartbeatRequest> = {
     writer.join();
     for (const v of message.shardMembership) {
       ShardMembershipInfo.encode(v!, writer.uint32(106).fork()).join();
+    }
+    for (const v of message.shardProgress) {
+      ShardProgressInfo.encode(v!, writer.uint32(114).fork()).join();
+    }
+    for (const v of message.leaderTransferAcks) {
+      ShardLeaderTransferAck.encode(v!, writer.uint32(122).fork()).join();
     }
     return writer;
   },
@@ -1291,6 +1571,22 @@ export const HeartbeatRequest: MessageFns<HeartbeatRequest> = {
           message.shardMembership.push(ShardMembershipInfo.decode(reader, reader.uint32()));
           continue;
         }
+        case 14: {
+          if (tag !== 114) {
+            break;
+          }
+
+          message.shardProgress.push(ShardProgressInfo.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 15: {
+          if (tag !== 122) {
+            break;
+          }
+
+          message.leaderTransferAcks.push(ShardLeaderTransferAck.decode(reader, reader.uint32()));
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1322,6 +1618,12 @@ export const HeartbeatRequest: MessageFns<HeartbeatRequest> = {
         : [],
       shardMembership: globalThis.Array.isArray(object?.shardMembership)
         ? object.shardMembership.map((e: any) => ShardMembershipInfo.fromJSON(e))
+        : [],
+      shardProgress: globalThis.Array.isArray(object?.shardProgress)
+        ? object.shardProgress.map((e: any) => ShardProgressInfo.fromJSON(e))
+        : [],
+      leaderTransferAcks: globalThis.Array.isArray(object?.leaderTransferAcks)
+        ? object.leaderTransferAcks.map((e: any) => ShardLeaderTransferAck.fromJSON(e))
         : [],
     };
   },
@@ -1367,6 +1669,12 @@ export const HeartbeatRequest: MessageFns<HeartbeatRequest> = {
     if (message.shardMembership?.length) {
       obj.shardMembership = message.shardMembership.map((e) => ShardMembershipInfo.toJSON(e));
     }
+    if (message.shardProgress?.length) {
+      obj.shardProgress = message.shardProgress.map((e) => ShardProgressInfo.toJSON(e));
+    }
+    if (message.leaderTransferAcks?.length) {
+      obj.leaderTransferAcks = message.leaderTransferAcks.map((e) => ShardLeaderTransferAck.toJSON(e));
+    }
     return obj;
   },
 
@@ -1388,6 +1696,8 @@ export const HeartbeatRequest: MessageFns<HeartbeatRequest> = {
     message.shardMetrics = object.shardMetrics?.map((e) => ShardMetrics.fromPartial(e)) || [];
     message.runningShards = object.runningShards?.map((e) => e) || [];
     message.shardMembership = object.shardMembership?.map((e) => ShardMembershipInfo.fromPartial(e)) || [];
+    message.shardProgress = object.shardProgress?.map((e) => ShardProgressInfo.fromPartial(e)) || [];
+    message.leaderTransferAcks = object.leaderTransferAcks?.map((e) => ShardLeaderTransferAck.fromPartial(e)) || [];
     return message;
   },
 };
