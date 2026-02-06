@@ -1008,6 +1008,21 @@ func (s *UltimateE2ETest) TestStressTest(t *testing.T) {
 	t.Run("HighThroughputUpsert", func(t *testing.T) {
 		// Insert large batch of vectors
 		batchSize := 5000
+		log.Printf("📌 HighThroughputUpsert config: batchSize=%d dim=%d", batchSize, vectorDimension)
+		log.Printf("📌 Env: VECTRON_WRITE_SPEED_MODE=%s VECTRON_DURABILITY_PROFILE=%s VECTRON_WRITE_BUFFER_MB=%s",
+			os.Getenv("VECTRON_WRITE_SPEED_MODE"),
+			os.Getenv("VECTRON_DURABILITY_PROFILE"),
+			os.Getenv("VECTRON_WRITE_BUFFER_MB"),
+		)
+		log.Printf("📌 Env: VECTRON_INDEX_BATCH_SIZE=%s VECTRON_INDEX_QUEUE_SIZE=%s VECTRON_INDEX_FLUSH_MS=%s",
+			os.Getenv("VECTRON_INDEX_BATCH_SIZE"),
+			os.Getenv("VECTRON_INDEX_QUEUE_SIZE"),
+			os.Getenv("VECTRON_INDEX_FLUSH_MS"),
+		)
+		log.Printf("📌 Env: VECTRON_PEBBLE_DISABLE_WAL=%s VECTRON_INGEST_MODE=%s",
+			os.Getenv("VECTRON_PEBBLE_DISABLE_WAL"),
+			os.Getenv("VECTRON_INGEST_MODE"),
+		)
 		points := make([]*apigatewaypb.Point, batchSize)
 
 		for i := 0; i < batchSize; i++ {
@@ -1639,7 +1654,7 @@ func (s *UltimateE2ETest) startAPIGateway() {
 		"PLACEMENT_DRIVER=127.0.0.1:10001,127.0.0.1:10002,127.0.0.1:10003",
 		"AUTH_SERVICE_ADDR=127.0.0.1:10008",
 		"RERANKER_SERVICE_ADDR=127.0.0.1:10013",
-		"FEEDBACK_DB_PATH="+dataDir+"/feedback.db",
+		"FEEDBACK_DB_PATH=" + dataDir + "/feedback.db",
 		"JWT_SECRET=test-jwt-secret-for-testing-only-do-not-use-in-production",
 		"RATE_LIMIT_RPS=10000",
 	}

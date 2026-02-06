@@ -6,6 +6,7 @@ package storage
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -28,6 +29,7 @@ const (
 	hnswIndexKey          = "_hnsw_index"    // Key for the serialized HNSW index.
 	hnswIndexTimestampKey = "_hnsw_index_ts" // Key for the timestamp of the last HNSW save.
 	hnswWALPrefix         = "_hnsw_wal_"     // Prefix for HNSW write-ahead log entries.
+	hnswIngestDirtyKey    = "_hnsw_ingest_dirty"
 )
 
 // Init initializes the PebbleDB instance and the HNSW index.
@@ -35,6 +37,9 @@ const (
 func (r *PebbleDB) Init(path string, opts *Options) error {
 	dbOpts := &pebble.Options{}
 	r.opts = opts
+	if opts != nil && opts.IngestMode {
+		r.ingestMode = true
+	}
 
 	applyPebbleTuning(dbOpts, opts)
 
@@ -53,12 +58,37 @@ func (r *PebbleDB) Init(path string, opts *Options) error {
 
 	// Start background sync loop to periodically flush data to disk.
 	// This balances durability with performance.
+	minSyncInterval := 500 * time.Millisecond
+	if opts != nil && opts.BackgroundSyncInterval > 0 {
+		minSyncInterval = opts.BackgroundSyncInterval
+	}
+	maxSyncInterval := 2 * time.Second
+	if opts != nil && opts.BackgroundSyncMaxInterval > 0 {
+		maxSyncInterval = opts.BackgroundSyncMaxInterval
+	}
+	if maxSyncInterval < minSyncInterval {
+		maxSyncInterval = minSyncInterval
+	}
 	r.wg.Add(1)
-	go r.backgroundSyncLoop(100 * time.Millisecond)
+	go r.backgroundSyncLoop(minSyncInterval, maxSyncInterval)
 
-	// Load the HNSW index from the database or create a new one.
-	if err := r.loadHNSW(opts); err != nil {
-		return fmt.Errorf("failed to load HNSW index: %w", err)
+	// If ingest mode previously skipped HNSW updates, rebuild before serving.
+	if !r.ingestMode {
+		if dirty, err := r.hasIngestDirtyMarker(); err == nil && dirty {
+			if err := r.rebuildHNSWFromDB(opts); err != nil {
+				return fmt.Errorf("failed to rebuild HNSW from DB: %w", err)
+			}
+			if err := r.clearIngestDirtyMarker(); err != nil {
+				log.Printf("Warning: failed to clear ingest marker: %v", err)
+			}
+		} else if err := r.loadHNSW(opts); err != nil {
+			return fmt.Errorf("failed to load HNSW index: %w", err)
+		}
+	} else {
+		// Ingest mode: load existing snapshot if present, but skip index updates.
+		if err := r.loadHNSW(opts); err != nil {
+			return fmt.Errorf("failed to load HNSW index: %w", err)
+		}
 	}
 
 	if opts != nil && opts.HNSWConfig.WarmupEnabled {
@@ -91,14 +121,16 @@ func (r *PebbleDB) Init(path string, opts *Options) error {
 	}
 
 	if opts.HNSWConfig.AsyncIndexingEnabled {
-		queueSize := opts.HNSWConfig.IndexingQueueSize
-		if queueSize <= 0 {
-			queueSize = 10000
+		if !r.ingestMode {
+			queueSize := opts.HNSWConfig.IndexingQueueSize
+			if queueSize <= 0 {
+				queueSize = 10000
+			}
+			r.indexerCh = make(chan indexOp, queueSize)
+			r.indexerStop = make(chan struct{})
+			r.indexerWg.Add(1)
+			go r.indexerLoop()
 		}
-		r.indexerCh = make(chan indexOp, queueSize)
-		r.indexerStop = make(chan struct{})
-		r.indexerWg.Add(1)
-		go r.indexerLoop()
 	}
 
 	if opts.HNSWConfig.MaintenanceEnabled {
@@ -307,6 +339,7 @@ func (r *PebbleDB) saveHNSW() error {
 	if err := batch.Commit(r.writeOpts); err != nil {
 		return err
 	}
+	r.markDirty()
 
 	r.markHNSWSnapshotSaved(ts)
 	return nil
@@ -331,6 +364,88 @@ func (r *PebbleDB) recordHNSWWrite(count uint64) {
 	if r.opts != nil && r.opts.HNSWConfig.WALEnabled {
 		atomic.AddUint64(&r.hnswWriteCount, count)
 	}
+}
+
+func (r *PebbleDB) markDirty() {
+	atomic.StoreUint32(&r.dirty, 1)
+}
+
+func (r *PebbleDB) hasIngestDirtyMarker() (bool, error) {
+	if r.db == nil {
+		return false, errors.New("db not initialized")
+	}
+	_, closer, err := r.db.Get([]byte(hnswIngestDirtyKey))
+	if err != nil {
+		if errors.Is(err, pebble.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	closer.Close()
+	return true, nil
+}
+
+func (r *PebbleDB) clearIngestDirtyMarker() error {
+	if r.db == nil {
+		return errors.New("db not initialized")
+	}
+	return r.db.Delete([]byte(hnswIngestDirtyKey), r.writeOpts)
+}
+
+func (r *PebbleDB) markIngestDirtyBatch(batch *pebble.Batch) error {
+	if batch == nil {
+		return errors.New("nil batch")
+	}
+	return batch.Set([]byte(hnswIngestDirtyKey), []byte("1"), nil)
+}
+
+func (r *PebbleDB) rebuildHNSWFromDB(opts *Options) error {
+	if r.db == nil {
+		return errors.New("db not initialized")
+	}
+	if opts == nil {
+		return errors.New("missing options")
+	}
+	if opts.HNSWConfig.Dim <= 0 {
+		return errors.New("invalid HNSW dimension")
+	}
+	log.Printf("Rebuilding HNSW from DB (ingest mode recovery)...")
+	newH := idxhnsw.NewHNSW(r, opts.HNSWConfig.Dim, idxhnsw.HNSWConfig{
+		M:                 opts.HNSWConfig.M,
+		EfConstruction:    opts.HNSWConfig.EfConstruction,
+		EfSearch:          opts.HNSWConfig.EfSearch,
+		Distance:          opts.HNSWConfig.DistanceMetric,
+		PersistNodes:      opts.HNSWConfig.PersistNodes,
+		EnableNorms:       opts.HNSWConfig.EnableNorms,
+		NormalizeVectors:  opts.HNSWConfig.NormalizeVectors,
+		QuantizeVectors:   opts.HNSWConfig.QuantizeVectors,
+		KeepFloatVectors:  opts.HNSWConfig.QuantizeKeepFloatVectors,
+		SearchParallelism: opts.HNSWConfig.SearchParallelism,
+		PruneEnabled:      opts.HNSWConfig.PruneEnabled,
+		PruneMaxNodes:     opts.HNSWConfig.PruneMaxNodes,
+	})
+	if err := r.Iterate([]byte("v_"), func(key, value []byte) bool {
+		if len(key) < 3 || key[0] != 'v' || key[1] != '_' {
+			return true
+		}
+		id := string(key[2:])
+		vec, _, err := decodeVectorWithMeta(value)
+		if err == nil && len(vec) > 0 {
+			if err := newH.Add(id, vec); err != nil {
+				log.Printf("HNSW rebuild add failed for %s: %v", id, err)
+			}
+		}
+		return true
+	}); err != nil {
+		return err
+	}
+	r.hnsw = newH
+	r.hnswHot = nil
+	if err := r.saveHNSW(); err != nil {
+		return err
+	}
+	log.Printf("HNSW rebuild from DB completed")
+	return nil
 }
 
 func (r *PebbleDB) indexerLoop() {
@@ -371,6 +486,7 @@ func (r *PebbleDB) indexerLoop() {
 		if applied > 0 {
 			r.recordHNSWWrite(uint64(applied))
 		}
+		atomic.AddUint64(&r.indexPending, ^uint64(len(ops)-1))
 		ops = ops[:0]
 	}
 
@@ -508,6 +624,45 @@ func (r *PebbleDB) replayWALFrom(ts int64) error {
 	for iter.First(); iter.Valid(); iter.Next() {
 		key := string(iter.Key())
 		rest := strings.TrimPrefix(key, hnswWALPrefix)
+		if strings.HasPrefix(rest, "batch_") {
+			tsVal, err := strconv.ParseInt(strings.TrimPrefix(rest, "batch_"), 10, 64)
+			if err != nil {
+				continue
+			}
+			raw := iter.Value()
+			if len(raw) < 4 {
+				continue
+			}
+			count := int(binary.LittleEndian.Uint32(raw[:4]))
+			offset := 4
+			for i := 0; i < count; i++ {
+				if offset+4 > len(raw) {
+					break
+				}
+				idLen := int(binary.LittleEndian.Uint32(raw[offset : offset+4]))
+				offset += 4
+				if idLen <= 0 || offset+idLen > len(raw) {
+					break
+				}
+				id := string(raw[offset : offset+idLen])
+				offset += idLen
+				if offset+4 > len(raw) {
+					break
+				}
+				valLen := int(binary.LittleEndian.Uint32(raw[offset : offset+4]))
+				offset += 4
+				if valLen < 0 || offset+valLen > len(raw) {
+					break
+				}
+				value := append([]byte(nil), raw[offset:offset+valLen]...)
+				offset += valLen
+				prev, ok := latest[id]
+				if !ok || tsVal > prev.ts {
+					latest[id] = walEntry{ts: tsVal, delete: false, value: value}
+				}
+			}
+			continue
+		}
 		isDelete := false
 		if strings.HasSuffix(rest, "_delete") {
 			isDelete = true
@@ -663,17 +818,39 @@ func (r *PebbleDB) persistenceLoop(interval time.Duration) {
 
 // backgroundSyncLoop periodically flushes data to disk when using async writes.
 // This ensures durability without the latency penalty of synchronous writes.
-func (r *PebbleDB) backgroundSyncLoop(interval time.Duration) {
+func (r *PebbleDB) backgroundSyncLoop(minInterval, maxInterval time.Duration) {
 	defer r.wg.Done()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	current := minInterval
+	consecutiveDirty := 0
+	timer := time.NewTimer(current)
+	defer timer.Stop()
 
 	for {
 		select {
-		case <-ticker.C:
+		case <-timer.C:
+			if atomic.SwapUint32(&r.dirty, 0) == 0 {
+				consecutiveDirty = 0
+				if current != minInterval {
+					current = minInterval
+				}
+				timer.Reset(current)
+				continue
+			}
 			if err := r.Flush(); err != nil {
 				log.Printf("Error during background sync: %v", err)
+				atomic.StoreUint32(&r.dirty, 1)
+				consecutiveDirty = 0
+			} else {
+				consecutiveDirty++
+				if consecutiveDirty >= 3 && current < maxInterval {
+					current *= 2
+					if current > maxInterval {
+						current = maxInterval
+					}
+					consecutiveDirty = 0
+				}
 			}
+			timer.Reset(current)
 		case <-r.stop:
 			log.Println("Stopping background sync loop.")
 			return
@@ -807,6 +984,31 @@ func applyPebbleTuning(dbOpts *pebble.Options, opts *Options) {
 		}
 	}
 
+	// Aggressive write-speed tuning (opt-in).
+	if envBool("VECTRON_WRITE_SPEED_MODE", false) {
+		if dbOpts.MemTableSize < 256*1024*1024 {
+			dbOpts.MemTableSize = 256 * 1024 * 1024
+		}
+		if dbOpts.MemTableStopWritesThreshold < 8 {
+			dbOpts.MemTableStopWritesThreshold = 8
+		}
+		if dbOpts.L0CompactionThreshold < 16 {
+			dbOpts.L0CompactionThreshold = 16
+		}
+		if dbOpts.L0StopWritesThreshold < 48 {
+			dbOpts.L0StopWritesThreshold = 48
+		}
+		if dbOpts.BytesPerSync < 64*1024*1024 {
+			dbOpts.BytesPerSync = 64 * 1024 * 1024
+		}
+		if dbOpts.WALBytesPerSync < 64*1024*1024 {
+			dbOpts.WALBytesPerSync = 64 * 1024 * 1024
+		}
+		if envBool("VECTRON_PEBBLE_DISABLE_WAL", false) {
+			dbOpts.DisableWAL = true
+		}
+	}
+
 	// Bloom filter tuning omitted in vendored build (no pebble/bloom package).
 }
 
@@ -820,6 +1022,21 @@ func envInt(key string, def int) int {
 		return def
 	}
 	return parsed
+}
+
+func envBool(key string, def bool) bool {
+	val := strings.TrimSpace(os.Getenv(key))
+	if val == "" {
+		return def
+	}
+	switch strings.ToLower(val) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return def
+	}
 }
 
 // copyDir recursively copies a directory from src to dst.

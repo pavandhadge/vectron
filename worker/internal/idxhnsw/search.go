@@ -4,10 +4,14 @@
 
 package idxhnsw
 
+
 import (
 	"container/heap"
+	"math"
+	"os"
 	"runtime"
 	"sort"
+	"strconv"
 	"sync"
 )
 
@@ -80,6 +84,39 @@ var resultSlicePool = sync.Pool{
 	},
 }
 
+var distanceSlicePool = sync.Pool{
+	New: func() interface{} {
+		return make([]float32, 0, 256)
+	},
+}
+
+var tempCandidateSlicePool = sync.Pool{
+	New: func() interface{} {
+		return make([]candidate, 0, 256)
+	},
+}
+
+var (
+	qnodeSlicePool = sync.Pool{
+		New: func() interface{} { return make([][]int8, 0, 256) },
+	}
+	qidxSlicePool = sync.Pool{
+		New: func() interface{} { return make([]int, 0, 256) },
+	}
+	qtmpSlicePool = sync.Pool{
+		New: func() interface{} { return make([]int32, 0, 256) },
+	}
+	fnodeSlicePool = sync.Pool{
+		New: func() interface{} { return make([][]float32, 0, 256) },
+	}
+	fidxSlicePool = sync.Pool{
+		New: func() interface{} { return make([]int, 0, 256) },
+	}
+	ftmpSlicePool = sync.Pool{
+		New: func() interface{} { return make([]float32, 0, 256) },
+	}
+)
+
 var neighborNodeSlicePool = sync.Pool{
 	New: func() interface{} {
 		return make([]*Node, 0, 256)
@@ -90,6 +127,44 @@ var neighborIDSlicePool = sync.Pool{
 	New: func() interface{} {
 		return make([]uint32, 0, 256)
 	},
+}
+
+const smallEfThreshold = 32
+
+var neighborCap = func() int {
+	v := os.Getenv("VECTRON_HNSW_NEIGHBOR_CAP")
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}()
+
+func getDistanceSlice(n int) []float32 {
+	buf := distanceSlicePool.Get().([]float32)
+	if cap(buf) < n {
+		return make([]float32, n)
+	}
+	return buf[:n]
+}
+
+func putDistanceSlice(buf []float32) {
+	distanceSlicePool.Put(buf[:0])
+}
+
+func getTempCandidateSlice(n int) []candidate {
+	buf := tempCandidateSlicePool.Get().([]candidate)
+	if cap(buf) < n {
+		return make([]candidate, 0, n)
+	}
+	return buf[:0]
+}
+
+func putTempCandidateSlice(buf []candidate) {
+	tempCandidateSlicePool.Put(buf[:0])
 }
 
 func selectTopKByDist(cands []candidate, k int) []candidate {
@@ -148,6 +223,9 @@ func (h *HNSW) search(vec []float32, k int) ([]string, []float32) {
 	results := h.searchLayer(vec, qvec, curr, h.config.EfSearch, 0)
 
 	// 3. Sort the final results by distance and take the top K.
+	if len(results) > k {
+		results = selectTopKByDist(results, k)
+	}
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].dist < results[j].dist
 	})
@@ -193,6 +271,9 @@ func (h *HNSW) searchWithEf(vec []float32, k, ef int) ([]string, []float32) {
 	results := h.searchLayer(vec, qvec, curr, ef, 0)
 
 	// 3. Sort the final results by distance and take the top K.
+	if len(results) > k {
+		results = selectTopKByDist(results, k)
+	}
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].dist < results[j].dist
 	})
@@ -299,6 +380,9 @@ func (h *HNSW) searchLayerSingle(vec []float32, qvec []int8, start *Node, layer 
 // searchLayer performs an expanded search within a single layer using a priority queue.
 // It explores neighbors of neighbors up to `ef` (efConstruction or efSearch) candidates.
 func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer int) []candidate {
+	if ef <= smallEfThreshold {
+		return h.searchLayerSmall(vec, qvec, start, ef, layer)
+	}
 	tracker := visitedPool.Get().(*visitTracker)
 	maxID := int(h.nextID)
 	if maxID < 0 {
@@ -321,14 +405,15 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 	candidateSlice = candidateSlice[:0]
 	candidates := priorityQueue(candidateSlice)
 	heap.Init(&candidates)
-	heap.Push(&candidates, candidate{id: start.ID, dist: h.distanceToNode(vec, qvec, start), node: start})
+	startDist := h.distanceToNode(vec, qvec, start)
+	heap.Push(&candidates, candidate{id: start.ID, dist: startDist, node: start})
 
 	// Results queue (max-heap) to keep track of the best `ef` candidates found so far.
 	resultSlice := resultSlicePool.Get().([]candidate)
 	resultSlice = resultSlice[:0]
 	results := maxPriorityQueue(resultSlice)
 	heap.Init(&results)
-	heap.Push(&results, candidate{id: start.ID, dist: h.distanceToNode(vec, qvec, start), node: start})
+	heap.Push(&results, candidate{id: start.ID, dist: startDist, node: start})
 
 	if int(start.ID) < len(tracker.marks) {
 		tracker.marks[start.ID] = tracker.epoch
@@ -345,6 +430,9 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 
 		// Explore the neighbors of the current candidate.
 		neighbors := c.node.Neighbors[layer]
+		if neighborCap > 0 && len(neighbors) > neighborCap {
+			neighbors = neighbors[:neighborCap]
+		}
 		if len(neighbors) == 0 {
 			continue
 		}
@@ -381,7 +469,9 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 			continue
 		}
 
-		distances := h.computeDistances(vec, qvec, nodes)
+		distances := getDistanceSlice(len(nodes))
+		h.computeDistancesInto(vec, qvec, nodes, distances)
+		defer putDistanceSlice(distances)
 		if results.Len() >= ef && len(nodes) >= 256 {
 			worst := results[0].dist
 			parallelism := h.config.SearchParallelism
@@ -407,7 +497,7 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 					wg.Add(1)
 					go func(idx, s, e int) {
 						defer wg.Done()
-						local := make([]candidate, 0, e-s)
+						local := getTempCandidateSlice(e - s)
 						for i := s; i < e; i++ {
 							d := distances[i]
 							if d < worst {
@@ -419,6 +509,12 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 				}
 				wg.Wait()
 				for _, local := range locals {
+					if len(local) == 0 {
+						if local != nil {
+							putTempCandidateSlice(local)
+						}
+						continue
+					}
 					if len(local) > 0 && results.Len() > 0 {
 						local = selectTopKByDist(local, results.Len())
 					}
@@ -431,6 +527,7 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 							}
 						}
 					}
+					putTempCandidateSlice(local)
 				}
 				neighborNodeSlicePool.Put(nodes[:0])
 				neighborIDSlicePool.Put(ids[:0])
@@ -438,7 +535,7 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 			}
 		}
 		if len(nodes) > ef*2 {
-			tmp := make([]candidate, 0, len(nodes))
+			tmp := getTempCandidateSlice(len(nodes))
 			for i, n := range nodes {
 				d := distances[i]
 				if results.Len() < ef || d < results[0].dist {
@@ -457,6 +554,7 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 					}
 				}
 			}
+			putTempCandidateSlice(tmp)
 		} else {
 			for i, n := range nodes {
 				d := distances[i]
@@ -483,11 +581,243 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 	return finalResults
 }
 
-func (h *HNSW) computeDistances(vec []float32, qvec []int8, nodes []*Node) []float32 {
-	distances := make([]float32, len(nodes))
+func (h *HNSW) searchLayerSmall(vec []float32, qvec []int8, start *Node, ef, layer int) []candidate {
+	tracker := visitedPool.Get().(*visitTracker)
+	maxID := int(h.nextID)
+	if maxID < 0 {
+		maxID = 0
+	}
+	if len(tracker.marks) <= maxID {
+		tracker.marks = make([]uint32, maxID+1)
+	}
+	tracker.epoch++
+	if tracker.epoch == 0 {
+		for i := range tracker.marks {
+			tracker.marks[i] = 0
+		}
+		tracker.epoch = 1
+	}
+	defer visitedPool.Put(tracker)
+
+	candidateSlice := candidateSlicePool.Get().([]candidate)
+	candidateSlice = candidateSlice[:0]
+	startDist := h.distanceToNode(vec, qvec, start)
+	candidates := append(candidateSlice, candidate{id: start.ID, dist: startDist, node: start})
+
+	resultSlice := resultSlicePool.Get().([]candidate)
+	resultSlice = resultSlice[:0]
+	results := append(resultSlice, candidate{id: start.ID, dist: startDist, node: start})
+	worstDist := float32(math.MaxFloat32)
+	worstIdx := 0
+	if ef <= 0 {
+		ef = 1
+	}
+	if int(start.ID) < len(tracker.marks) {
+		tracker.marks[start.ID] = tracker.epoch
+	}
+
+	for len(candidates) > 0 {
+		minIdx := 0
+		for i := 1; i < len(candidates); i++ {
+			if candidates[i].dist < candidates[minIdx].dist {
+				minIdx = i
+			}
+		}
+		c := candidates[minIdx]
+		last := len(candidates) - 1
+		candidates[minIdx] = candidates[last]
+		candidates = candidates[:last]
+
+		if len(results) >= ef && c.dist > worstDist {
+			break
+		}
+
+		neighbors := c.node.Neighbors[layer]
+		if neighborCap > 0 && len(neighbors) > neighborCap {
+			neighbors = neighbors[:neighborCap]
+		}
+		if len(neighbors) == 0 {
+			continue
+		}
+
+		nodes := neighborNodeSlicePool.Get().([]*Node)
+		ids := neighborIDSlicePool.Get().([]uint32)
+		if cap(nodes) < len(neighbors) {
+			nodes = make([]*Node, 0, len(neighbors))
+		} else {
+			nodes = nodes[:0]
+		}
+		if cap(ids) < len(neighbors) {
+			ids = make([]uint32, 0, len(neighbors))
+		} else {
+			ids = ids[:0]
+		}
+
+		for _, nid := range neighbors {
+			if int(nid) < len(tracker.marks) && tracker.marks[nid] == tracker.epoch {
+				continue
+			}
+			if int(nid) < len(tracker.marks) {
+				tracker.marks[nid] = tracker.epoch
+			}
+			n := h.getNode(nid)
+			if n == nil {
+				continue
+			}
+			nodes = append(nodes, n)
+			ids = append(ids, nid)
+		}
+		if len(nodes) == 0 {
+			neighborNodeSlicePool.Put(nodes[:0])
+			neighborIDSlicePool.Put(ids[:0])
+			continue
+		}
+
+		distances := getDistanceSlice(len(nodes))
+		h.computeDistancesInto(vec, qvec, nodes, distances)
+		for i, n := range nodes {
+			d := distances[i]
+			if len(results) < ef || d < worstDist {
+				candidates = append(candidates, candidate{id: ids[i], dist: d, node: n})
+				if len(results) < ef {
+					results = append(results, candidate{id: ids[i], dist: d, node: n})
+					if len(results) == ef {
+						worstDist = results[0].dist
+						worstIdx = 0
+						for j := 1; j < len(results); j++ {
+							if results[j].dist > worstDist {
+								worstDist = results[j].dist
+								worstIdx = j
+							}
+						}
+					}
+					continue
+				}
+				if d < worstDist {
+					results[worstIdx] = candidate{id: ids[i], dist: d, node: n}
+					worstDist = results[0].dist
+					worstIdx = 0
+					for j := 1; j < len(results); j++ {
+						if results[j].dist > worstDist {
+							worstDist = results[j].dist
+							worstIdx = j
+						}
+					}
+				}
+			}
+		}
+		putDistanceSlice(distances)
+		neighborNodeSlicePool.Put(nodes[:0])
+		neighborIDSlicePool.Put(ids[:0])
+	}
+
+	finalResults := make([]candidate, len(results))
+	copy(finalResults, results)
+	candidateSlicePool.Put(candidateSlice[:0])
+	resultSlicePool.Put(resultSlice[:0])
+	return finalResults
+}
+
+func (h *HNSW) computeDistancesInto(vec []float32, qvec []int8, nodes []*Node, distances []float32) {
 	if len(nodes) == 1 {
 		distances[0] = h.distanceToNode(vec, qvec, nodes[0])
-		return distances
+		return
+	}
+
+	if qvec != nil && dotCgoBatchEnabled && len(nodes) >= dotCgoBatchMin {
+		qnodes := qnodeSlicePool.Get().([][]int8)
+		if cap(qnodes) < len(nodes) {
+			qnodes = make([][]int8, 0, len(nodes))
+		} else {
+			qnodes = qnodes[:0]
+		}
+		qidx := qidxSlicePool.Get().([]int)
+		if cap(qidx) < len(nodes) {
+			qidx = make([]int, 0, len(nodes))
+		} else {
+			qidx = qidx[:0]
+		}
+		for i, n := range nodes {
+			if n != nil && n.QVec != nil {
+				qnodes = append(qnodes, n.QVec)
+				qidx = append(qidx, i)
+			}
+		}
+		if len(qnodes) >= dotCgoBatchMin {
+			tmp := qtmpSlicePool.Get().([]int32)
+			if cap(tmp) < len(qnodes) {
+				tmp = make([]int32, len(qnodes))
+			} else {
+				tmp = tmp[:len(qnodes)]
+			}
+			if dotProductInt8BatchSIMD(qvec, qnodes, tmp) {
+				scale := float32(127 * 127)
+				for i, idx := range qidx {
+					distances[idx] = 1 - float32(tmp[i])/scale
+				}
+				for i, n := range nodes {
+					if n == nil || n.QVec != nil {
+						continue
+					}
+					distances[i] = h.distanceWithNode(vec, n.Vec, n.Norm)
+				}
+				qnodeSlicePool.Put(qnodes[:0])
+				qidxSlicePool.Put(qidx[:0])
+				qtmpSlicePool.Put(tmp[:0])
+				return
+			}
+			qtmpSlicePool.Put(tmp[:0])
+		}
+		qnodeSlicePool.Put(qnodes[:0])
+		qidxSlicePool.Put(qidx[:0])
+	}
+
+	if qvec == nil && h.config.Distance == "cosine" && h.config.NormalizeVectors &&
+		dotCgoBatchEnabled && len(nodes) >= dotCgoBatchMin {
+		fnodes := fnodeSlicePool.Get().([][]float32)
+		if cap(fnodes) < len(nodes) {
+			fnodes = make([][]float32, 0, len(nodes))
+		} else {
+			fnodes = fnodes[:0]
+		}
+		fidx := fidxSlicePool.Get().([]int)
+		if cap(fidx) < len(nodes) {
+			fidx = make([]int, 0, len(nodes))
+		} else {
+			fidx = fidx[:0]
+		}
+		for i, n := range nodes {
+			if n != nil && n.Vec != nil {
+				fnodes = append(fnodes, n.Vec)
+				fidx = append(fidx, i)
+			}
+		}
+		if len(fnodes) >= dotCgoBatchMin {
+			tmp := ftmpSlicePool.Get().([]float32)
+			if cap(tmp) < len(fnodes) {
+				tmp = make([]float32, len(fnodes))
+			} else {
+				tmp = tmp[:len(fnodes)]
+			}
+			if dotProductFloatBatchSIMD(vec, fnodes, tmp) {
+				for i, idx := range fidx {
+					distances[idx] = 1 - tmp[i]
+				}
+				for i, n := range nodes {
+					if n == nil || n.Vec != nil {
+						continue
+					}
+					distances[i] = h.distanceToNode(vec, qvec, n)
+				}
+				fnodeSlicePool.Put(fnodes[:0])
+				fidxSlicePool.Put(fidx[:0])
+				ftmpSlicePool.Put(tmp[:0])
+				return
+			}
+			ftmpSlicePool.Put(tmp[:0])
+		}
+		fnodeSlicePool.Put(fnodes[:0])
+		fidxSlicePool.Put(fidx[:0])
 	}
 
 	parallelism := h.config.SearchParallelism
@@ -497,8 +827,7 @@ func (h *HNSW) computeDistances(vec []float32, qvec []int8, nodes []*Node) []flo
 			parallelism = 1
 		}
 	}
-	// OPTIMIZATION: Lowered threshold from parallelism*8 to max(32, parallelism*4)
-	// This enables parallelization for smaller batches, improving mid-size search performance
+	// OPTIMIZATION: Avoid goroutine overhead for small batches.
 	minParallelSize := 32
 	if parallelism*4 > minParallelSize {
 		minParallelSize = parallelism * 4
@@ -507,7 +836,7 @@ func (h *HNSW) computeDistances(vec []float32, qvec []int8, nodes []*Node) []flo
 		for i, n := range nodes {
 			distances[i] = h.distanceToNode(vec, qvec, n)
 		}
-		return distances
+		return
 	}
 
 	chunk := (len(nodes) + parallelism - 1) / parallelism
@@ -526,7 +855,6 @@ func (h *HNSW) computeDistances(vec []float32, qvec []int8, nodes []*Node) []flo
 		}(start, end)
 	}
 	wg.Wait()
-	return distances
 }
 
 // selectNeighbors is a helper function used during insertion, not search.

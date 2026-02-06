@@ -7,13 +7,16 @@ import "time"
 
 // Options defines the configuration for the PebbleDB instance.
 type Options struct {
-	Path                  string     // The directory path for the database files.
-	CreateIfMissing       bool       // If true, create the database if it doesn't exist.
-	MaxOpenFiles          int        // The maximum number of open files for the database.
-	WriteBufferSize       int        // The size of the in-memory write buffer (memtable).
-	CacheSize             int64      // The size of the block cache.
-	BloomFilterBitsPerKey int        // Bloom filter bits per key (0 disables).
-	HNSWConfig            HNSWConfig // Configuration for the HNSW index.
+	Path                      string        // The directory path for the database files.
+	CreateIfMissing           bool          // If true, create the database if it doesn't exist.
+	MaxOpenFiles              int           // The maximum number of open files for the database.
+	WriteBufferSize           int           // The size of the in-memory write buffer (memtable).
+	CacheSize                 int64         // The size of the block cache.
+	BloomFilterBitsPerKey     int           // Bloom filter bits per key (0 disables).
+	BackgroundSyncInterval    time.Duration // Interval for periodic Pebble flushes when using async writes.
+	BackgroundSyncMaxInterval time.Duration // Max interval for periodic Pebble flushes during sustained writes.
+	IngestMode                bool          // If true, skip HNSW updates during ingest; rebuild later.
+	HNSWConfig                HNSWConfig    // Configuration for the HNSW index.
 }
 
 // HNSWConfig defines the configuration for the HNSW index.
@@ -24,6 +27,7 @@ type HNSWConfig struct {
 	EfSearch                 int           // The size of the dynamic candidate list during search.
 	DistanceMetric           string        // The distance metric to use (e.g., "euclidean", "cosine").
 	WALEnabled               bool          // If true, enable the write-ahead log for the HNSW index.
+	WALBatchEnabled          bool          // If true, batch WAL entries for StoreVectorBatch.
 	PersistNodes             bool          // If true, persist individual HNSW nodes on every update.
 	EnableNorms              bool          // If true, store vector norms to speed up cosine distance.
 	NormalizeVectors         bool          // If true, normalize vectors for cosine distance.

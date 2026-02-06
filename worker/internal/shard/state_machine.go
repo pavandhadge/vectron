@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -312,9 +313,71 @@ func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dime
 		adaptiveScale = 0.8
 	}
 
+	durabilityProfile := strings.ToLower(os.Getenv("VECTRON_DURABILITY_PROFILE"))
+	writeSpeedMode := os.Getenv("VECTRON_WRITE_SPEED_MODE") == "1"
+	syncInterval := 500 * time.Millisecond
+	syncMaxInterval := 2 * time.Second
+	indexFlushInterval := 200 * time.Millisecond
+	if durabilityProfile == "relaxed" {
+		syncInterval = 1 * time.Second
+		syncMaxInterval = 5 * time.Second
+		indexFlushInterval = 500 * time.Millisecond
+	}
+	indexBatchSize := 4096
+	indexQueueSize := 200000
+	if v := os.Getenv("VECTRON_INDEX_BATCH_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			indexBatchSize = n
+		}
+	}
+	if v := os.Getenv("VECTRON_INDEX_QUEUE_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			indexQueueSize = n
+		}
+	}
+	if v := os.Getenv("VECTRON_INDEX_FLUSH_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			indexFlushInterval = time.Duration(n) * time.Millisecond
+		}
+	}
+	writeBufferSize := 256 * 1024 * 1024
+	if v := os.Getenv("VECTRON_WRITE_BUFFER_MB"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			writeBufferSize = n * 1024 * 1024
+		}
+	}
+	if writeSpeedMode {
+		indexBatchSize = 8192
+		indexQueueSize = 500000
+		if durabilityProfile != "relaxed" {
+			syncInterval = 1 * time.Second
+			syncMaxInterval = 5 * time.Second
+			indexFlushInterval = 500 * time.Millisecond
+		}
+	}
+
+	hotEnabled := os.Getenv("VECTRON_HOT_INDEX_ENABLED") == "1"
+	hotMaxSize := 30000
+	if v := os.Getenv("VECTRON_HOT_INDEX_MAX"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			hotMaxSize = n
+		}
+	}
+	hotColdScale := 0.6
+	if v := os.Getenv("VECTRON_HOT_INDEX_COLD_EF_SCALE"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f < 1 {
+			hotColdScale = f
+		}
+	}
+	ingestMode := os.Getenv("VECTRON_INGEST_MODE") == "1"
+
 	opts := &storage.Options{
-		Path:            dbPath,
-		CreateIfMissing: true,
+		Path:                      dbPath,
+		CreateIfMissing:           true,
+		BackgroundSyncInterval:    syncInterval,
+		BackgroundSyncMaxInterval: syncMaxInterval,
+		WriteBufferSize:           writeBufferSize,
+		IngestMode:                ingestMode,
 		HNSWConfig: storage.HNSWConfig{
 			Dim:                      dim,
 			M:                        16,
@@ -326,7 +389,9 @@ func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dime
 			QuantizeKeepFloatVectors: keepFloatVectors,
 			VectorCompressionEnabled: compressEnabled,
 			MultiStageEnabled:        quantizeEnabled,
-			HotIndexEnabled:          false,
+			HotIndexEnabled:          hotEnabled,
+			HotIndexMaxSize:          hotMaxSize,
+			HotIndexColdEfScale:      hotColdScale,
 			BulkLoadEnabled:          true,
 			BulkLoadThreshold:        1000,
 			AdaptiveEfEnabled:        true,
@@ -337,10 +402,11 @@ func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dime
 			PruneEnabled:             false,
 			PruneMaxNodes:            2000,
 			MmapVectorsEnabled:       false,
+			WALBatchEnabled:          true,
 			AsyncIndexingEnabled:     true,
-			IndexingQueueSize:        200000,
-			IndexingBatchSize:        4096,
-			IndexingFlushInterval:    50 * time.Millisecond,
+			IndexingQueueSize:        indexQueueSize,
+			IndexingBatchSize:        indexBatchSize,
+			IndexingFlushInterval:    indexFlushInterval,
 			WarmupEnabled:            false,
 			WarmupMaxVectors:         10000,
 			WarmupDelay:              5 * time.Second,

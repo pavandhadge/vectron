@@ -148,6 +148,7 @@ type GrpcServer struct {
 	nodeHost       *dragonboat.NodeHost // The Dragonboat node host that manages all shards on this worker.
 	shardManager   *shard.Manager       // The manager for all shards hosted on this worker.
 	inFlightShards []inFlightShard
+	searchCache    *searchCache
 }
 
 type inFlightSearch struct {
@@ -162,15 +163,114 @@ type inFlightShard struct {
 }
 
 const inFlightShardCount = 256
+const searchCacheShardCount = 128
+
+const (
+	defaultSearchCacheTTL     = 200 * time.Millisecond
+	defaultSearchCacheMaxSize = 0
+)
 
 var searchHashSeed = maphash.MakeSeed()
+var searchCacheQuantBits = envInt("VECTRON_WORKER_SEARCH_CACHE_QUANT_BITS", 0)
+
+type searchCacheEntry struct {
+	resp      *worker.SearchResponse
+	expiresAt int64
+}
+
+type searchCacheShard struct {
+	mu      sync.Mutex
+	entries map[uint64]searchCacheEntry
+}
+
+type searchCache struct {
+	shards      []searchCacheShard
+	ttl         time.Duration
+	maxSize     int
+	maxPerShard int
+}
+
+func newSearchCache(ttl time.Duration, maxSize int) *searchCache {
+	if maxSize <= 0 {
+		return nil
+	}
+	shards := make([]searchCacheShard, searchCacheShardCount)
+	for i := range shards {
+		shards[i].entries = make(map[uint64]searchCacheEntry)
+	}
+	perShard := maxSize / len(shards)
+	if perShard < 1 {
+		perShard = 1
+	}
+	return &searchCache{
+		shards:      shards,
+		ttl:         ttl,
+		maxSize:     maxSize,
+		maxPerShard: perShard,
+	}
+}
+
+func (c *searchCache) Get(key uint64) (*worker.SearchResponse, bool) {
+	if c == nil {
+		return nil, false
+	}
+	shard := &c.shards[key%uint64(len(c.shards))]
+	now := time.Now().UnixNano()
+	shard.mu.Lock()
+	entry, ok := shard.entries[key]
+	if !ok {
+		shard.mu.Unlock()
+		return nil, false
+	}
+	if entry.expiresAt <= now {
+		delete(shard.entries, key)
+		shard.mu.Unlock()
+		return nil, false
+	}
+	shard.mu.Unlock()
+	return entry.resp, true
+}
+
+func (c *searchCache) Set(key uint64, resp *worker.SearchResponse) {
+	if c == nil || resp == nil {
+		return
+	}
+	shard := &c.shards[key%uint64(len(c.shards))]
+	exp := time.Now().Add(c.ttl).UnixNano()
+	shard.mu.Lock()
+	if _, exists := shard.entries[key]; exists {
+		shard.entries[key] = searchCacheEntry{resp: resp, expiresAt: exp}
+		shard.mu.Unlock()
+		return
+	}
+	if len(shard.entries) >= c.maxPerShard {
+		for k := range shard.entries {
+			delete(shard.entries, k)
+			break
+		}
+	}
+	shard.entries[key] = searchCacheEntry{resp: resp, expiresAt: exp}
+	shard.mu.Unlock()
+}
+
+func envInt(name string, def int) int {
+	if v := os.Getenv(name); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
 
 // NewGrpcServer creates a new instance of the gRPC server.
 func NewGrpcServer(nh *dragonboat.NodeHost, sm *shard.Manager) *GrpcServer {
+	cacheTTL := time.Duration(envInt("VECTRON_WORKER_SEARCH_CACHE_TTL_MS", int(defaultSearchCacheTTL.Milliseconds()))) * time.Millisecond
+	cacheMax := envInt("VECTRON_WORKER_SEARCH_CACHE_MAX", defaultSearchCacheMaxSize)
 	s := &GrpcServer{
 		nodeHost:       nh,
 		shardManager:   sm,
 		inFlightShards: make([]inFlightShard, inFlightShardCount),
+		searchCache:    newSearchCache(cacheTTL, cacheMax),
 	}
 	for i := range s.inFlightShards {
 		s.inFlightShards[i].m = make(map[uint64]*inFlightSearch)
@@ -424,11 +524,20 @@ func (s *GrpcServer) Search(ctx context.Context, req *worker.SearchRequest) (*wo
 	}
 
 	key := computeSearchKey(req)
+	cacheable := !req.GetLinearizable() && !req.GetBruteForce()
+	if cacheable {
+		if cached, ok := s.searchCache.Get(key); ok && len(cached.Ids) > 0 {
+			return cached, nil
+		}
+	}
 	if resp, err, shared := s.waitForInFlight(ctx, key); shared {
 		return resp, err
 	}
 
 	resp, err := s.searchCore(ctx, req)
+	if err == nil && cacheable && resp != nil && len(resp.Ids) > 0 {
+		s.searchCache.Set(key, resp)
+	}
 	s.finishInFlight(key, resp, err)
 	if shouldLogHotPath() {
 		log.Printf("Worker Search shard=%d broadcast=%t linearizable=%t vecDim=%d k=%d total=%s err=%v",
@@ -450,6 +559,7 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 		K:      int(req.GetK()),
 	}
 	useLinearizable := req.GetLinearizable()
+	cacheable := !useLinearizable && !req.GetBruteForce()
 
 	// If ShardId is 0, it's a broadcast search. Search all shards on this worker.
 	if req.GetShardId() == 0 {
@@ -467,6 +577,11 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 		if len(shardIDs) == 1 {
 			var res interface{}
 			var err error
+			if cacheable {
+				if cached, ok := s.searchCache.Get(computeSearchKeyWithShard(req, shardIDs[0])); ok && len(cached.Ids) > 0 {
+					return &worker.SearchResponse{Ids: cached.Ids, Scores: cached.Scores}, nil
+				}
+			}
 			if useLinearizable {
 				res, err = s.nodeHost.SyncRead(ctx, shardIDs[0], query)
 			} else {
@@ -479,6 +594,12 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 			if !ok {
 				return nil, status.Errorf(codes.Internal, "unexpected search result type: %T", res)
 			}
+			if cacheable && len(searchResult.IDs) > 0 {
+				s.searchCache.Set(computeSearchKeyWithShard(req, shardIDs[0]), &worker.SearchResponse{
+					Ids:    searchResult.IDs,
+					Scores: searchResult.Scores,
+				})
+			}
 			return &worker.SearchResponse{Ids: searchResult.IDs, Scores: searchResult.Scores}, nil
 		}
 		resultsCh := make(chan *[]searchHeapItem, len(shardIDs))
@@ -490,6 +611,38 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 				defer func() { <-searchSem }()
 				var res interface{}
 				var err error
+				if cacheable {
+					if cached, ok := s.searchCache.Get(computeSearchKeyWithShard(req, id)); ok && len(cached.Ids) > 0 {
+						searchResult := &shard.SearchResult{IDs: cached.Ids, Scores: cached.Scores}
+						limit := int(req.GetK())
+						if limit <= 0 {
+							limit = 10
+						}
+						localHeap := getSearchHeap()
+						heap.Init(localHeap)
+						for i, resultID := range searchResult.IDs {
+							if i >= len(searchResult.Scores) {
+								break
+							}
+							score := searchResult.Scores[i]
+							if localHeap.Len() < limit {
+								heap.Push(localHeap, searchHeapItem{id: resultID, score: score})
+								continue
+							}
+							if localHeap.Len() > 0 && score > (*localHeap)[0].score {
+								(*localHeap)[0] = searchHeapItem{id: resultID, score: score}
+								heap.Fix(localHeap, 0)
+							}
+						}
+						if localHeap.Len() > 0 {
+							buf := getSearchItemSlice(localHeap.Len())
+							*buf = append(*buf, (*localHeap)...)
+							resultsCh <- buf
+						}
+						putSearchHeap(localHeap)
+						return
+					}
+				}
 				if useLinearizable {
 					res, err = s.nodeHost.SyncRead(ctx, id, query)
 				} else {
@@ -504,6 +657,12 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 				if !ok {
 					log.Printf("Unexpected search result type from shard %d: %T", id, res)
 					return
+				}
+				if cacheable && len(searchResult.IDs) > 0 {
+					s.searchCache.Set(computeSearchKeyWithShard(req, id), &worker.SearchResponse{
+						Ids:    searchResult.IDs,
+						Scores: searchResult.Scores,
+					})
 				}
 
 				limit := int(req.GetK())
@@ -573,6 +732,11 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 		// Original logic for single-shard search
 		var res interface{}
 		var err error
+		if cacheable {
+			if cached, ok := s.searchCache.Get(computeSearchKeyWithShard(req, req.GetShardId())); ok && len(cached.Ids) > 0 {
+				return cached, nil
+			}
+		}
 		if useLinearizable {
 			res, err = s.nodeHost.SyncRead(ctx, req.GetShardId(), query)
 		} else {
@@ -586,6 +750,12 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 		if !ok {
 			return nil, status.Errorf(codes.Internal, "unexpected search result type: %T", res)
 		}
+		if cacheable && len(searchResult.IDs) > 0 {
+			s.searchCache.Set(computeSearchKeyWithShard(req, req.GetShardId()), &worker.SearchResponse{
+				Ids:    searchResult.IDs,
+				Scores: searchResult.Scores,
+			})
+		}
 
 		return &worker.SearchResponse{Ids: searchResult.IDs, Scores: searchResult.Scores}, nil
 	}
@@ -594,9 +764,15 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 func computeSearchKey(req *worker.SearchRequest) uint64 {
 	var h maphash.Hash
 	h.SetSeed(searchHashSeed)
+	return computeSearchKeyWithShard(req, req.GetShardId())
+}
+
+func computeSearchKeyWithShard(req *worker.SearchRequest, shardID uint64) uint64 {
+	var h maphash.Hash
+	h.SetSeed(searchHashSeed)
 	var buf8 [8]byte
 	var buf4 [4]byte
-	binary.LittleEndian.PutUint64(buf8[:], req.GetShardId())
+	binary.LittleEndian.PutUint64(buf8[:], shardID)
 	h.Write(buf8[:])
 	binary.LittleEndian.PutUint32(buf4[:], uint32(req.GetK()))
 	h.Write(buf4[:])
@@ -610,7 +786,13 @@ func computeSearchKey(req *worker.SearchRequest) uint64 {
 	h.Write([]byte{flags})
 	h.WriteString(req.GetCollection())
 	for _, v := range req.GetVector() {
-		binary.LittleEndian.PutUint32(buf4[:], math.Float32bits(v))
+		bits := math.Float32bits(v)
+		qb := searchCacheQuantBits
+		if qb > 0 && qb < 23 {
+			mantissaMask := uint32(1<<(23-qb)) - 1
+			bits = (bits & 0xFF800000) | (bits & 0x007FFFFF &^ mantissaMask)
+		}
+		binary.LittleEndian.PutUint32(buf4[:], bits)
 		h.Write(buf4[:])
 	}
 	return h.Sum64()

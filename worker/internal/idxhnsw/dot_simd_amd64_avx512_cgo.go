@@ -52,6 +52,9 @@ func dotProductSIMD(a, b []float32) float32 {
 	if len(a) != len(b) || len(a) == 0 {
 		return 0
 	}
+	if dotCgoMinDim > 0 && len(a) < dotCgoMinDim {
+		return dotProduct(a, b)
+	}
 	if cpu.X86.HasAVX512F {
 		return float32(C.dotProductAVX512((*C.float)(&a[0]), (*C.float)(&b[0]), C.int(len(a))))
 	}

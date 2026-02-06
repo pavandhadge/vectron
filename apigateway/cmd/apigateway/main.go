@@ -366,16 +366,23 @@ func NewCollectionRoutingCache(ttl time.Duration) *CollectionRoutingCache {
 	return cache
 }
 
-func NewDistributedCache(addr, password string, db int, ttl, timeout time.Duration) *DistributedCache {
+func NewDistributedCache(addr, password string, db int, ttl, timeout time.Duration, poolSize, minIdleConns int) *DistributedCache {
 	if addr == "" {
 		return nil
 	}
-	client := redis.NewClient(&redis.Options{
+	if poolSize <= 0 {
+		poolSize = adaptiveConcurrency(4, 64)
+	}
+	opts := &redis.Options{
 		Addr:     addr,
 		Password: password,
 		DB:       db,
-		PoolSize: adaptiveConcurrency(4, 64),
-	})
+		PoolSize: poolSize,
+	}
+	if minIdleConns > 0 {
+		opts.MinIdleConns = minIdleConns
+	}
+	client := redis.NewClient(opts)
 	return &DistributedCache{
 		client:  client,
 		ttl:     ttl,
@@ -3930,7 +3937,15 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 	}
 	var distributedCache *DistributedCache
 	if !config.RawSpeedMode {
-		distributedCache = NewDistributedCache(config.DistributedCacheAddr, config.DistributedCachePassword, config.DistributedCacheDB, distCacheTTL, distCacheTimeout)
+		distributedCache = NewDistributedCache(
+			config.DistributedCacheAddr,
+			config.DistributedCachePassword,
+			config.DistributedCacheDB,
+			distCacheTTL,
+			distCacheTimeout,
+			config.DistributedCachePoolSize,
+			config.DistributedCacheMinIdleConns,
+		)
 	}
 
 	var searchCache *SearchCache

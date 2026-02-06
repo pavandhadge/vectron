@@ -38,6 +38,9 @@ func dotProductInt8SIMD(a, b []int8) int32 {
 	if len(a) != len(b) || len(a) == 0 {
 		return 0
 	}
+	if dotCgoMinDim > 0 && len(a) < dotCgoMinDim {
+		return dotProductInt8(a, b)
+	}
 	if cpu.X86.HasAVX2 {
 		return int32(C.dotProductInt8AVX2((*C.schar)(&a[0]), (*C.schar)(&b[0]), C.int(len(a))))
 	}

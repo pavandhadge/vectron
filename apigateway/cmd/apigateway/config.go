@@ -42,6 +42,8 @@ type Config struct {
 	DistributedCacheTTLms         int             // TTL for distributed cache (milliseconds).
 	DistributedCacheTimeoutMs     int             // Timeout for distributed cache ops (milliseconds).
 	DistributedCacheSearchEnabled bool            // Enable distributed cache for search results.
+	DistributedCachePoolSize      int             // Redis pool size (0 = auto).
+	DistributedCacheMinIdleConns  int             // Redis min idle conns (0 = auto).
 	RoutingCacheTTLms             int             // TTL for routing cache (milliseconds).
 	WorkerListCacheTTLms          int             // TTL for worker list cache (milliseconds).
 	ResolveCacheTTLms             int             // TTL for resolve cache (milliseconds).
@@ -83,6 +85,8 @@ func LoadConfig() Config {
 		DistributedCacheTTLms:         getEnvAsInt("DISTRIBUTED_CACHE_TTL_MS", 5000),
 		DistributedCacheTimeoutMs:     getEnvAsInt("DISTRIBUTED_CACHE_TIMEOUT_MS", 8),
 		DistributedCacheSearchEnabled: getEnvAsBool("DISTRIBUTED_CACHE_SEARCH_ENABLED", true),
+		DistributedCachePoolSize:      getEnvAsInt("DISTRIBUTED_CACHE_POOL_SIZE", 0),
+		DistributedCacheMinIdleConns:  getEnvAsInt("DISTRIBUTED_CACHE_MIN_IDLE_CONNS", 0),
 		RoutingCacheTTLms:             getEnvAsInt("ROUTING_CACHE_TTL_MS", 30000),
 		WorkerListCacheTTLms:          getEnvAsInt("WORKER_LIST_CACHE_TTL_MS", 30000),
 		ResolveCacheTTLms:             getEnvAsInt("RESOLVE_CACHE_TTL_MS", 30000),

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/pebble"
@@ -77,6 +78,9 @@ type PebbleDB struct {
 	stop                       chan struct{}
 	wg                         sync.WaitGroup
 	path                       string // The path to the database directory
+	dirty                      uint32
+	ingestMode                 bool
+	indexPending               uint64
 	hnswWriteCount             uint64
 	hnswSnapshotBaseInterval   time.Duration
 	hnswSnapshotMaxInterval    time.Duration
@@ -191,60 +195,83 @@ func (r *PebbleDB) Search(query []float32, k int) (ids []string, scores []float3
 		}
 	}
 	efUsed = ef
-	if r.hnswHot != nil && r.opts != nil && r.opts.HNSWConfig.HotIndexEnabled {
-		usedHot = true
-		hotEf := r.opts.HNSWConfig.HotIndexEf
-		if hotEf <= 0 {
-			hotEf = ef
-		}
-		hotIDs, hotScores := r.hnswHot.SearchWithEf(searchVec, k, hotEf)
-
-		coldEf := ef
-		scale := r.opts.HNSWConfig.HotIndexColdEfScale
-		if scale > 0 && scale < 1 {
-			coldEf = int(float64(ef) * scale)
-			if coldEf < k {
-				coldEf = k
+	runSearch := func() ([]string, []float32) {
+		if r.hnswHot != nil && r.opts != nil && r.opts.HNSWConfig.HotIndexEnabled {
+			usedHot = true
+			hotEf := r.opts.HNSWConfig.HotIndexEf
+			if hotEf <= 0 {
+				hotEf = ef
 			}
+			hotIDs, hotScores := r.hnswHot.SearchWithEf(searchVec, k, hotEf)
+
+			coldEf := ef
+			scale := r.opts.HNSWConfig.HotIndexColdEfScale
+			if scale > 0 && scale < 1 {
+				coldEf = int(float64(ef) * scale)
+				if coldEf < k {
+					coldEf = k
+				}
+			}
+
+			var coldIDs []string
+			var coldScores []float32
+			if r.opts.HNSWConfig.MultiStageEnabled &&
+				(!r.opts.HNSWConfig.QuantizeVectors || r.opts.HNSWConfig.QuantizeKeepFloatVectors) {
+				usedTwoStage = true
+				stage1Ef := r.opts.HNSWConfig.Stage1Ef
+				if stage1Ef <= 0 {
+					stage1Ef = coldEf / 2
+				}
+				candidateFactor := r.opts.HNSWConfig.Stage1CandidateFactor
+				if candidateFactor <= 0 {
+					candidateFactor = 4
+				}
+				coldIDs, coldScores = r.hnsw.SearchTwoStage(searchVec, k, stage1Ef, candidateFactor)
+			} else {
+				coldIDs, coldScores = r.hnsw.SearchWithEf(searchVec, k, coldEf)
+			}
+
+			return mergeSearchResults(hotIDs, hotScores, coldIDs, coldScores, k)
 		}
 
-		var coldIDs []string
-		var coldScores []float32
-		if r.opts.HNSWConfig.MultiStageEnabled &&
+		if r.opts != nil && r.opts.HNSWConfig.MultiStageEnabled &&
 			(!r.opts.HNSWConfig.QuantizeVectors || r.opts.HNSWConfig.QuantizeKeepFloatVectors) {
 			usedTwoStage = true
 			stage1Ef := r.opts.HNSWConfig.Stage1Ef
 			if stage1Ef <= 0 {
-				stage1Ef = coldEf / 2
+				stage1Ef = ef / 2
 			}
 			candidateFactor := r.opts.HNSWConfig.Stage1CandidateFactor
 			if candidateFactor <= 0 {
 				candidateFactor = 4
 			}
-			coldIDs, coldScores = r.hnsw.SearchTwoStage(searchVec, k, stage1Ef, candidateFactor)
-		} else {
-			coldIDs, coldScores = r.hnsw.SearchWithEf(searchVec, k, coldEf)
+			return r.hnsw.SearchTwoStage(searchVec, k, stage1Ef, candidateFactor)
 		}
-
-		ids, scores = mergeSearchResults(hotIDs, hotScores, coldIDs, coldScores, k)
-		return ids, scores, nil
+		return r.hnsw.SearchWithEf(searchVec, k, ef)
 	}
 
-	if r.opts != nil && r.opts.HNSWConfig.MultiStageEnabled &&
-		(!r.opts.HNSWConfig.QuantizeVectors || r.opts.HNSWConfig.QuantizeKeepFloatVectors) {
-		usedTwoStage = true
-		stage1Ef := r.opts.HNSWConfig.Stage1Ef
-		if stage1Ef <= 0 {
-			stage1Ef = ef / 2
+	ids, scores = runSearch()
+	if len(ids) == 0 && atomic.LoadUint64(&r.indexPending) > 0 {
+		waitMs := envInt("VECTRON_SEARCH_WAIT_INDEX_MS", 0)
+		if waitMs <= 0 && r.opts != nil {
+			if r.opts.HNSWConfig.IndexingFlushInterval > 0 {
+				waitMs = int(r.opts.HNSWConfig.IndexingFlushInterval / time.Millisecond)
+			}
 		}
-		candidateFactor := r.opts.HNSWConfig.Stage1CandidateFactor
-		if candidateFactor <= 0 {
-			candidateFactor = 4
+		if waitMs <= 0 {
+			waitMs = 50
 		}
-		ids, scores = r.hnsw.SearchTwoStage(searchVec, k, stage1Ef, candidateFactor)
-		return ids, scores, nil
+		if waitMs > 0 {
+			deadline := time.Now().Add(time.Duration(waitMs) * time.Millisecond)
+			for time.Now().Before(deadline) {
+				if atomic.LoadUint64(&r.indexPending) == 0 {
+					break
+				}
+				time.Sleep(1 * time.Millisecond)
+			}
+			ids, scores = runSearch()
+		}
 	}
-	ids, scores = r.hnsw.SearchWithEf(searchVec, k, ef)
 	return ids, scores, nil
 }
 

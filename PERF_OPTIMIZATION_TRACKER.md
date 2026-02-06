@@ -42,3 +42,45 @@ Context: Mixed load, heavy bulk writes + high search QPS (~1k search/sec per use
 - Pooled broadcast-search heaps and result slices in worker to cut allocations.
 - Pooled neighbor node/id slices in HNSW search layer to reduce GC under concurrency.
 - Reduced heap pressure in HNSW search via partial selection for large candidate sets.
+
+---
+
+## Optimization Backlog (Pending/Done Buttons)
+
+### Pending
+- [ ] Pool HNSW candidate/visited buffers and scratch slices to cut per-query allocations.
+- [ ] Replace heap-based candidate management for small `ef` with bounded slices/partial select.
+- [ ] Batch vector distance computations to reduce `cgocall` transitions.
+- [ ] Reduce per-request syscall frequency by batching IO and avoiding small writes.
+- [ ] Lower Pebble flush contention by coalescing flushes around high write load.
+- [ ] Reduce lock contention in `StaleRead`/`Lookup` by minimizing shared state machine locks on read path.
+- [ ] Add read-through cache for hot queries at worker layer (optional consistency tradeoff).
+- [ ] Shard Pebble/state-machine instances by collection or partition to reduce lock hot spots.
+- [ ] Tune HNSW `ef` dynamically by load (latency/recall tradeoff knob).
+- [ ] Evaluate HNSW graph pruning settings to reduce search fanout under high load.
+- [ ] Reduce gateway Redis round-trips or increase pool size to avoid lock contention.
+- [ ] Add search-only and write-only benchmarks to isolate CPU vs. storage bottlenecks.
+- [ ] Capture `heap` and `trace` profiles for allocation and scheduler root-causes.
+
+### Done
+- [x] Made Pebble background sync interval configurable and raised default to reduce flush contention.
+- [x] Increased HNSW indexing flush interval default to coalesce more ops per batch.
+- [x] Pooled distance/temp candidate slices in HNSW search to cut per-query allocations.
+- [x] Removed duplicate distance calculation for the search start node.
+- [x] Skip background Pebble flush when no writes occurred since last sync.
+- [x] Reduced final-result sort cost by partial-selecting top K before sort.
+- [x] Enabled HNSW hot index with conservative defaults to shorten read critical sections.
+- [x] Added small-ef heap-free search path for HNSW to reduce heap overhead.
+- [x] Added adaptive background sync backoff under sustained writes.
+- [x] Added small worker-side search cache for non-linearizable queries.
+- [x] Added optional HNSW neighbor cap (env-controlled) to limit neighbor expansion cost.
+- [x] Coalesced WAL timestamps in batch writes to reduce per-item time.Now overhead.
+- [x] Added optional search-key quantization for worker cache (env-controlled).
+- [x] Expanded heap-free HNSW path to cover small ef up to 64 and reduced goroutine overhead in distance batches.
+- [x] Added per-shard cache use inside worker search core to reduce StaleRead pressure (BatchSearch included).
+- [x] Enabled WAL batch record for StoreVectorBatch with replay support.
+- [x] Tuned hot index defaults (size up, cold ef scale down) to lower read cost.
+- [x] Added cgo min-dimension threshold for SIMD dot products to reduce cgo overhead on small vectors.
+- [x] Added durability profile flag to relax background sync + indexing flush cadence.
+- [x] Added Redis pool size and min idle conns config for distributed cache.
+- [x] Added batched int8 dot-product SIMD path (cgo) gated by env flags to reduce cgo transitions.
