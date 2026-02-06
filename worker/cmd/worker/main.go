@@ -21,6 +21,7 @@ import (
 	"github.com/lni/dragonboat/v3"
 	"github.com/lni/dragonboat/v3/config"
 	worker "github.com/pavandhadge/vectron/shared/proto/worker"
+	"github.com/pavandhadge/vectron/shared/runtimeutil"
 	"github.com/pavandhadge/vectron/worker/internal"
 	"github.com/pavandhadge/vectron/worker/internal/pd"
 	"github.com/pavandhadge/vectron/worker/internal/shard"
@@ -123,6 +124,7 @@ func Start(nodeID uint64, raftAddr, grpcAddr string, pdAddrs []string, workerDat
 }
 
 func main() {
+	runtimeutil.ConfigureGOMAXPROCS("worker")
 	// Define and parse command-line flags.
 	var (
 		grpcAddr      = flag.String("grpc-addr", "localhost:9090", "gRPC server address")

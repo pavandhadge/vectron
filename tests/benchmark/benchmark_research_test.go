@@ -642,9 +642,19 @@ func (s *BenchmarkTest) startAPIGateway() {
 
 	dataDir := filepath.Join(benchmarkDataTempDir, "apigw-data")
 	os.MkdirAll(dataDir, 0755)
+	os.MkdirAll(benchmarkLogTempDir, 0755)
 
-	cmd := exec.CommandContext(s.ctx, "./bin/apigateway")
-	cmd.Dir = "/home/pavan/Programming/vectron"
+	repoRoot, err := findRepoRootBenchmark()
+	if err != nil {
+		s.t.Fatalf("failed to resolve repo root: %v", err)
+	}
+	apigwPath := filepath.Join(repoRoot, "bin", "apigateway")
+	if _, err := os.Stat(apigwPath); err != nil {
+		s.t.Fatalf("apigateway binary missing; build it first (make linux): %v", err)
+	}
+
+	cmd := exec.CommandContext(s.ctx, apigwPath)
+	cmd.Dir = repoRoot
 	cmd.Env = append(os.Environ(),
 		"GRPC_ADDR=127.0.0.1:10010",
 		"HTTP_ADDR=127.0.0.1:10012",

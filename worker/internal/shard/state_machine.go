@@ -275,8 +275,8 @@ const lastAppliedSnapshotFile = "_raft_last_applied"
 // and an HNSW index.
 type StateMachine struct {
 	*storage.PebbleDB
-	ClusterID uint64
-	NodeID    uint64
+	ClusterID   uint64
+	NodeID      uint64
 	lastApplied uint64
 }
 
@@ -298,38 +298,52 @@ func readLastApplied(dir string) (uint64, error) {
 func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dimension int32, distance string) (*StateMachine, error) {
 	dbPath := filepath.Join(workerDataDir, fmt.Sprintf("shard-%d", clusterID))
 
+	dim := int(dimension)
 	quantizeEnabled := distance == "cosine"
+	keepFloatVectors := quantizeEnabled
 	// Performance-first defaults: avoid extra per-insert CPU and dual-index overhead.
 	compressEnabled := false
+	adaptiveScale := 1.0
+	if dim >= 1024 {
+		adaptiveScale = 0.5
+	} else if dim >= 768 {
+		adaptiveScale = 0.65
+	} else if dim >= 512 {
+		adaptiveScale = 0.8
+	}
 
 	opts := &storage.Options{
 		Path:            dbPath,
 		CreateIfMissing: true,
 		HNSWConfig: storage.HNSWConfig{
-			Dim:              int(dimension),
-			M:                16,
-			EfConstruction:   200,
-			EfSearch:         100, // check what it controlls then tunr it
-			DistanceMetric:   distance,
-			NormalizeVectors: distance == "cosine",
-			QuantizeVectors:  quantizeEnabled,
+			Dim:                      dim,
+			M:                        16,
+			EfConstruction:           200,
+			EfSearch:                 100, // check what it controlls then tunr it
+			DistanceMetric:           distance,
+			NormalizeVectors:         distance == "cosine",
+			QuantizeVectors:          quantizeEnabled,
+			QuantizeKeepFloatVectors: keepFloatVectors,
 			VectorCompressionEnabled: compressEnabled,
-			MultiStageEnabled:        false,
+			MultiStageEnabled:        quantizeEnabled,
 			HotIndexEnabled:          false,
 			BulkLoadEnabled:          true,
 			BulkLoadThreshold:        1000,
-			MaintenanceEnabled: false,
-			MaintenanceInterval: 30 * time.Minute,
-			PruneEnabled:      false,
-			PruneMaxNodes:     2000,
-			MmapVectorsEnabled: false,
-			AsyncIndexingEnabled:  true,
-			IndexingQueueSize:     50000,
-			IndexingBatchSize:     2048,
-			IndexingFlushInterval: 25 * time.Millisecond,
-			WarmupEnabled:         false,
-			WarmupMaxVectors:      10000,
-			WarmupDelay:           5 * time.Second,
+			AdaptiveEfEnabled:        true,
+			AdaptiveEfMultiplier:     2,
+			AdaptiveEfDimScale:       adaptiveScale,
+			MaintenanceEnabled:       false,
+			MaintenanceInterval:      30 * time.Minute,
+			PruneEnabled:             false,
+			PruneMaxNodes:            2000,
+			MmapVectorsEnabled:       false,
+			AsyncIndexingEnabled:     true,
+			IndexingQueueSize:        200000,
+			IndexingBatchSize:        4096,
+			IndexingFlushInterval:    50 * time.Millisecond,
+			WarmupEnabled:            false,
+			WarmupMaxVectors:         10000,
+			WarmupDelay:              5 * time.Second,
 		},
 	}
 

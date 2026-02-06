@@ -27,6 +27,7 @@ import (
 	"time"
 
 	runtime "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"github.com/pavandhadge/vectron/shared/runtimeutil"
 
 	"github.com/pavandhadge/vectron/apigateway/internal/feedback"
 	"github.com/pavandhadge/vectron/apigateway/internal/management"
@@ -48,6 +49,12 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
+
+func fnv32(s string) uint32 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(s))
+	return h.Sum32()
+}
 
 var cfg = LoadConfig()
 
@@ -241,10 +248,7 @@ type SearchCacheEntry struct {
 
 // SearchCache provides LRU caching for search results with TTL
 type SearchCache struct {
-	mu      sync.RWMutex
-	entries map[uint64]*SearchCacheEntry
-	ttl     time.Duration
-	maxSize int
+	shards []*TinyLFUCache
 }
 
 type DistributedCache struct {
@@ -285,9 +289,8 @@ type WorkerListCacheEntry struct {
 }
 
 type WorkerListCache struct {
-	mu      sync.RWMutex
-	entries map[string]*WorkerListCacheEntry
-	ttl     time.Duration
+	shards []workerListShard
+	ttl    time.Duration
 }
 
 type WorkerResolveCacheEntry struct {
@@ -299,8 +302,7 @@ type WorkerResolveCacheEntry struct {
 }
 
 type WorkerResolveCache struct {
-	mu      sync.RWMutex
-	entries map[string]*WorkerResolveCacheEntry
+	shards  []workerResolveShard
 	ttl     time.Duration
 	maxSize int
 }
@@ -326,16 +328,40 @@ type collectionRoutingEntry struct {
 }
 
 type CollectionRoutingCache struct {
-	mu      sync.RWMutex
-	entries map[string]*collectionRoutingEntry
-	ttl     time.Duration
+	shards []collectionRoutingShard
+	ttl    time.Duration
 }
 
+type workerListShard struct {
+	mu      sync.RWMutex
+	entries map[string]*WorkerListCacheEntry
+}
+
+type workerResolveShard struct {
+	mu      sync.RWMutex
+	entries map[string]*WorkerResolveCacheEntry
+}
+
+type collectionRoutingShard struct {
+	mu      sync.RWMutex
+	entries map[string]*collectionRoutingEntry
+}
+
+const (
+	workerListShardCount        = 64
+	workerResolveShardCount     = 128
+	collectionRoutingShardCount = 64
+)
+
 func NewCollectionRoutingCache(ttl time.Duration) *CollectionRoutingCache {
-	return &CollectionRoutingCache{
-		entries: make(map[string]*collectionRoutingEntry),
-		ttl:     ttl,
+	cache := &CollectionRoutingCache{
+		shards: make([]collectionRoutingShard, collectionRoutingShardCount),
+		ttl:    ttl,
 	}
+	for i := range cache.shards {
+		cache.shards[i].entries = make(map[string]*collectionRoutingEntry)
+	}
+	return cache
 }
 
 func NewDistributedCache(addr, password string, db int, ttl, timeout time.Duration) *DistributedCache {
@@ -501,9 +527,10 @@ func (c *DistributedCache) SetResolve(ctx context.Context, key string, entry res
 }
 
 func (c *CollectionRoutingCache) Get(collection string) (*collectionRoutingEntry, bool) {
-	c.mu.RLock()
-	entry, ok := c.entries[collection]
-	c.mu.RUnlock()
+	shard := &c.shards[fnv32(collection)%uint32(len(c.shards))]
+	shard.mu.RLock()
+	entry, ok := shard.entries[collection]
+	shard.mu.RUnlock()
 	if !ok {
 		return nil, false
 	}
@@ -514,17 +541,10 @@ func (c *CollectionRoutingCache) Get(collection string) (*collectionRoutingEntry
 }
 
 func (c *CollectionRoutingCache) Set(collection string, entry *collectionRoutingEntry) {
-	c.mu.Lock()
-	c.entries[collection] = entry
-	c.mu.Unlock()
-}
-
-func NewWorkerResolveCache(ttl time.Duration, maxSize int) *WorkerResolveCache {
-	return &WorkerResolveCache{
-		entries: make(map[string]*WorkerResolveCacheEntry),
-		ttl:     ttl,
-		maxSize: maxSize,
-	}
+	shard := &c.shards[fnv32(collection)%uint32(len(c.shards))]
+	shard.mu.Lock()
+	shard.entries[collection] = entry
+	shard.mu.Unlock()
 }
 
 // TinyLFUCache implements a frequency-based cache admission policy
@@ -658,11 +678,24 @@ func (c *TinyLFUCache) Len() int {
 	return len(c.data)
 }
 
+func (c *TinyLFUCache) CleanupExpired() {
+	c.mu.Lock()
+	now := time.Now()
+	for key, entry := range c.data {
+		if now.Sub(entry.timestamp) > c.ttl {
+			delete(c.data, key)
+			delete(c.freq, key)
+		}
+	}
+	c.mu.Unlock()
+}
+
 func (c *WorkerResolveCache) Get(collection, vectorID string) (string, uint64, uint64, int64, bool) {
 	key := collection + "|" + vectorID
-	c.mu.RLock()
-	entry, ok := c.entries[key]
-	c.mu.RUnlock()
+	shard := &c.shards[fnv32(key)%uint32(len(c.shards))]
+	shard.mu.RLock()
+	entry, ok := shard.entries[key]
+	shard.mu.RUnlock()
 	if !ok {
 		return "", 0, 0, 0, false
 	}
@@ -677,34 +710,52 @@ func (c *WorkerResolveCache) Get(collection, vectorID string) (string, uint64, u
 
 func (c *WorkerResolveCache) Set(collection, vectorID string, addr string, shardID uint64, shardEpoch uint64, leaseExpiryUnixMs int64) {
 	key := collection + "|" + vectorID
-	c.mu.Lock()
-	if c.maxSize > 0 && len(c.entries) >= c.maxSize {
-		for k := range c.entries {
-			delete(c.entries, k)
+	shard := &c.shards[fnv32(key)%uint32(len(c.shards))]
+	shard.mu.Lock()
+	if c.maxSize > 0 && len(shard.entries) >= c.maxSize/len(c.shards) {
+		for k := range shard.entries {
+			delete(shard.entries, k)
 			break
 		}
 	}
-	c.entries[key] = &WorkerResolveCacheEntry{
+	shard.entries[key] = &WorkerResolveCacheEntry{
 		Addr:              addr,
 		ShardID:           shardID,
 		ShardEpoch:        shardEpoch,
 		LeaseExpiryUnixMs: leaseExpiryUnixMs,
 		Timestamp:         time.Now(),
 	}
-	c.mu.Unlock()
+	shard.mu.Unlock()
 }
 
 func NewWorkerListCache(ttl time.Duration) *WorkerListCache {
-	return &WorkerListCache{
-		entries: make(map[string]*WorkerListCacheEntry),
-		ttl:     ttl,
+	cache := &WorkerListCache{
+		shards: make([]workerListShard, workerListShardCount),
+		ttl:    ttl,
 	}
+	for i := range cache.shards {
+		cache.shards[i].entries = make(map[string]*WorkerListCacheEntry)
+	}
+	return cache
+}
+
+func NewWorkerResolveCache(ttl time.Duration, maxSize int) *WorkerResolveCache {
+	cache := &WorkerResolveCache{
+		shards:  make([]workerResolveShard, workerResolveShardCount),
+		ttl:     ttl,
+		maxSize: maxSize,
+	}
+	for i := range cache.shards {
+		cache.shards[i].entries = make(map[string]*WorkerResolveCacheEntry)
+	}
+	return cache
 }
 
 func (c *WorkerListCache) Get(collection string) ([]string, bool) {
-	c.mu.RLock()
-	entry, ok := c.entries[collection]
-	c.mu.RUnlock()
+	shard := &c.shards[fnv32(collection)%uint32(len(c.shards))]
+	shard.mu.RLock()
+	entry, ok := shard.entries[collection]
+	shard.mu.RUnlock()
 	if !ok {
 		return nil, false
 	}
@@ -715,12 +766,13 @@ func (c *WorkerListCache) Get(collection string) ([]string, bool) {
 }
 
 func (c *WorkerListCache) Set(collection string, addresses []string) {
-	c.mu.Lock()
-	c.entries[collection] = &WorkerListCacheEntry{
+	shard := &c.shards[fnv32(collection)%uint32(len(c.shards))]
+	shard.mu.Lock()
+	shard.entries[collection] = &WorkerListCacheEntry{
 		Addresses: addresses,
 		Timestamp: time.Now(),
 	}
-	c.mu.Unlock()
+	shard.mu.Unlock()
 }
 
 type searchResultHeap []*pb.SearchResult
@@ -773,11 +825,25 @@ func equalResultIDs(a, b *pb.SearchResponse) bool {
 
 // NewSearchCache creates a new search cache with specified TTL and max size
 func NewSearchCache(ttl time.Duration, maxSize int) *SearchCache {
-	cache := &SearchCache{
-		entries: make(map[uint64]*SearchCacheEntry),
-		ttl:     ttl,
-		maxSize: maxSize,
+	shardCount := searchCacheShardCount
+	if maxSize > 0 && maxSize < shardCount {
+		shardCount = maxSize
+		if shardCount < 1 {
+			shardCount = 1
+		}
 	}
+	perShard := maxSize
+	if shardCount > 0 {
+		perShard = maxSize / shardCount
+		if perShard < 1 {
+			perShard = 1
+		}
+	}
+	shards := make([]*TinyLFUCache, shardCount)
+	for i := 0; i < shardCount; i++ {
+		shards[i] = NewTinyLFUCache(ttl, perShard)
+	}
+	cache := &SearchCache{shards: shards}
 	// Start cleanup goroutine
 	go cache.cleanupLoop()
 	return cache
@@ -844,41 +910,14 @@ func (s *gatewayServer) setSearchCache(ctx context.Context, req *pb.SearchReques
 
 // Get retrieves cached results if available and not expired
 func (c *SearchCache) Get(req *pb.SearchRequest) (*pb.SearchResponse, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
 	key := computeSearchCacheKey(req)
-	entry, exists := c.entries[key]
-	if !exists {
-		return nil, false
-	}
-
-	// Check if expired
-	if time.Since(entry.Timestamp) > c.ttl {
-		return nil, false
-	}
-
-	return entry.Response, true
+	return c.shardFor(key).Get(key)
 }
 
 // Set stores search results in cache
 func (c *SearchCache) Set(req *pb.SearchRequest, resp *pb.SearchResponse) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Evict oldest entries if cache is full (simple LRU: random eviction)
-	if len(c.entries) >= c.maxSize {
-		for k := range c.entries {
-			delete(c.entries, k)
-			break // Remove just one entry
-		}
-	}
-
 	key := computeSearchCacheKey(req)
-	c.entries[key] = &SearchCacheEntry{
-		Response:  resp,
-		Timestamp: time.Now(),
-	}
+	c.shardFor(key).Set(key, resp)
 }
 
 // cleanupLoop periodically removes expired entries
@@ -887,16 +926,20 @@ func (c *SearchCache) cleanupLoop() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		c.mu.Lock()
-		now := time.Now()
-		for key, entry := range c.entries {
-			if now.Sub(entry.Timestamp) > c.ttl {
-				delete(c.entries, key)
-			}
+		for _, shard := range c.shards {
+			shard.CleanupExpired()
 		}
-		c.mu.Unlock()
 	}
 }
+
+func (c *SearchCache) shardFor(key uint64) *TinyLFUCache {
+	if len(c.shards) == 1 {
+		return c.shards[0]
+	}
+	return c.shards[key%uint64(len(c.shards))]
+}
+
+const searchCacheShardCount = 128
 
 func (c *RerankWarmupCache) Get(key uint64) (*pb.SearchResponse, bool) {
 	c.mu.RLock()
@@ -1104,15 +1147,22 @@ func (cb *circuitBreaker) allowRequest() bool {
 }
 
 type WorkerConnPool struct {
-	mu                     sync.RWMutex
-	conns                  map[string]*grpc.ClientConn
-	clients                map[string]workerpb.WorkerServiceClient
-	connCount              map[string]int // Track connections per worker
-	circuitBreakers        map[string]*circuitBreaker
+	shards                 []workerConnShard
+	totalConns             int64
 	grpcCompressionEnabled bool
 	maxConnsPerWorker      int
 	maxTotalConns          int
 }
+
+type workerConnShard struct {
+	mu              sync.RWMutex
+	conns           map[string]*grpc.ClientConn
+	clients         map[string]workerpb.WorkerServiceClient
+	connCount       map[string]int
+	circuitBreakers map[string]*circuitBreaker
+}
+
+const workerConnShardCount = 64
 
 // PDConnPool manages gRPC connections to placement driver nodes.
 type PDConnPool struct {
@@ -1178,32 +1228,29 @@ func (p *WorkerConnPool) GetClient(addr string) (workerpb.WorkerServiceClient, e
 	}
 
 	// Fast path: check for existing connection
-	p.mu.RLock()
-	if client, ok := p.clients[addr]; ok {
-		if conn := p.conns[addr]; conn != nil {
+	shard := p.shardFor(addr)
+	shard.mu.RLock()
+	if client, ok := shard.clients[addr]; ok {
+		if conn := shard.conns[addr]; conn != nil {
 			state := conn.GetState()
 			if state != connectivity.Shutdown && state != connectivity.TransientFailure {
-				p.mu.RUnlock()
+				shard.mu.RUnlock()
 				cb.recordSuccess()
 				return client, nil
 			}
 		}
 	}
-	p.mu.RUnlock()
+	shard.mu.RUnlock()
 
 	// Slow path: create new connection
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
 
 	// Check connection limits
-	totalConns := 0
-	for _, count := range p.connCount {
-		totalConns += count
-	}
-	if totalConns >= p.maxTotalConns {
+	if int(atomic.LoadInt64(&p.totalConns)) >= p.maxTotalConns {
 		// Try to find an existing healthy connection first
-		if client, ok := p.clients[addr]; ok {
-			if conn := p.conns[addr]; conn != nil {
+		if client, ok := shard.clients[addr]; ok {
+			if conn := shard.conns[addr]; conn != nil {
 				state := conn.GetState()
 				if state != connectivity.Shutdown && state != connectivity.TransientFailure {
 					return client, nil
@@ -1213,35 +1260,37 @@ func (p *WorkerConnPool) GetClient(addr string) (workerpb.WorkerServiceClient, e
 		return nil, fmt.Errorf("max total connections reached (%d)", p.maxTotalConns)
 	}
 
-	if p.connCount[addr] >= p.maxConnsPerWorker {
+	if shard.connCount[addr] >= p.maxConnsPerWorker {
 		// Limit reached for this worker, return existing if healthy
-		if client, ok := p.clients[addr]; ok {
-			if conn := p.conns[addr]; conn != nil {
+		if client, ok := shard.clients[addr]; ok {
+			if conn := shard.conns[addr]; conn != nil {
 				state := conn.GetState()
 				if state != connectivity.Shutdown && state != connectivity.TransientFailure {
 					return client, nil
 				}
 			}
 			// Connection unhealthy, close it
-			if conn := p.conns[addr]; conn != nil {
+			if conn := shard.conns[addr]; conn != nil {
 				conn.Close()
-				p.connCount[addr]--
+				shard.connCount[addr]--
+				atomic.AddInt64(&p.totalConns, -1)
 			}
 		}
 	}
 
 	// Double-check after acquiring write lock
-	if client, ok := p.clients[addr]; ok {
-		if conn := p.conns[addr]; conn != nil {
+	if client, ok := shard.clients[addr]; ok {
+		if conn := shard.conns[addr]; conn != nil {
 			state := conn.GetState()
 			if state != connectivity.Shutdown && state != connectivity.TransientFailure {
 				return client, nil
 			}
 		}
 		// Close unhealthy connection
-		if conn := p.conns[addr]; conn != nil {
+		if conn := shard.conns[addr]; conn != nil {
 			conn.Close()
-			p.connCount[addr]--
+			shard.connCount[addr]--
+			atomic.AddInt64(&p.totalConns, -1)
 		}
 	}
 
@@ -1257,58 +1306,67 @@ func (p *WorkerConnPool) GetClient(addr string) (workerpb.WorkerServiceClient, e
 	}
 
 	client := workerpb.NewWorkerServiceClient(conn)
-	p.conns[addr] = conn
-	p.clients[addr] = client
-	p.connCount[addr]++
+	shard.conns[addr] = conn
+	shard.clients[addr] = client
+	shard.connCount[addr]++
+	atomic.AddInt64(&p.totalConns, 1)
 	cb.recordSuccess()
 	return client, nil
 }
 
 func (p *WorkerConnPool) getCircuitBreaker(addr string) *circuitBreaker {
-	p.mu.RLock()
-	cb, ok := p.circuitBreakers[addr]
-	p.mu.RUnlock()
+	shard := p.shardFor(addr)
+	shard.mu.RLock()
+	cb, ok := shard.circuitBreakers[addr]
+	shard.mu.RUnlock()
 
 	if !ok {
-		p.mu.Lock()
-		cb, ok = p.circuitBreakers[addr]
+		shard.mu.Lock()
+		cb, ok = shard.circuitBreakers[addr]
 		if !ok {
 			cb = newCircuitBreaker(defaultCircuitBreakerThreshold, defaultCircuitBreakerTimeout)
-			p.circuitBreakers[addr] = cb
+			shard.circuitBreakers[addr] = cb
 		}
-		p.mu.Unlock()
+		shard.mu.Unlock()
 	}
 	return cb
 }
 
 // CloseAll closes all pooled connections. Should be called on shutdown.
 func (p *WorkerConnPool) CloseAll() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	for addr, conn := range p.conns {
-		if err := conn.Close(); err != nil {
-			log.Printf("Warning: failed to close connection to %s: %v", addr, err)
+	for i := range p.shards {
+		shard := &p.shards[i]
+		shard.mu.Lock()
+		for addr, conn := range shard.conns {
+			if err := conn.Close(); err != nil {
+				log.Printf("Warning: failed to close connection to %s: %v", addr, err)
+			}
 		}
+		shard.conns = make(map[string]*grpc.ClientConn)
+		shard.clients = make(map[string]workerpb.WorkerServiceClient)
+		shard.connCount = make(map[string]int)
+		shard.circuitBreakers = make(map[string]*circuitBreaker)
+		shard.mu.Unlock()
 	}
-	p.conns = make(map[string]*grpc.ClientConn)
-	p.clients = make(map[string]workerpb.WorkerServiceClient)
-	p.connCount = make(map[string]int)
-	p.circuitBreakers = make(map[string]*circuitBreaker)
+	atomic.StoreInt64(&p.totalConns, 0)
 }
 
 // NewWorkerConnPool creates a new worker connection pool with limits.
 // OPTIMIZATION: Added connection limits and circuit breaker pattern
 func NewWorkerConnPool(enableCompression bool) *WorkerConnPool {
-	return &WorkerConnPool{
-		conns:                  make(map[string]*grpc.ClientConn),
-		clients:                make(map[string]workerpb.WorkerServiceClient),
-		connCount:              make(map[string]int),
-		circuitBreakers:        make(map[string]*circuitBreaker),
+	pool := &WorkerConnPool{
+		shards:                 make([]workerConnShard, workerConnShardCount),
 		grpcCompressionEnabled: enableCompression,
 		maxConnsPerWorker:      defaultMaxConnsPerWorker,
 		maxTotalConns:          defaultMaxConnsPerWorker * 100, // Support up to 100 workers
 	}
+	for i := range pool.shards {
+		pool.shards[i].conns = make(map[string]*grpc.ClientConn)
+		pool.shards[i].clients = make(map[string]workerpb.WorkerServiceClient)
+		pool.shards[i].connCount = make(map[string]int)
+		pool.shards[i].circuitBreakers = make(map[string]*circuitBreaker)
+	}
+	return pool
 }
 
 // NewWorkerConnPoolWithLimits creates a pool with custom limits
@@ -1319,43 +1377,53 @@ func NewWorkerConnPoolWithLimits(enableCompression bool, maxPerWorker, maxTotal 
 	if maxTotal <= 0 {
 		maxTotal = maxPerWorker * 100
 	}
-	return &WorkerConnPool{
-		conns:                  make(map[string]*grpc.ClientConn),
-		clients:                make(map[string]workerpb.WorkerServiceClient),
-		connCount:              make(map[string]int),
-		circuitBreakers:        make(map[string]*circuitBreaker),
+	pool := &WorkerConnPool{
+		shards:                 make([]workerConnShard, workerConnShardCount),
 		grpcCompressionEnabled: enableCompression,
 		maxConnsPerWorker:      maxPerWorker,
 		maxTotalConns:          maxTotal,
 	}
+	for i := range pool.shards {
+		pool.shards[i].conns = make(map[string]*grpc.ClientConn)
+		pool.shards[i].clients = make(map[string]workerpb.WorkerServiceClient)
+		pool.shards[i].connCount = make(map[string]int)
+		pool.shards[i].circuitBreakers = make(map[string]*circuitBreaker)
+	}
+	return pool
+}
+
+func (p *WorkerConnPool) shardFor(addr string) *workerConnShard {
+	idx := fnv32(addr) % uint32(len(p.shards))
+	return &p.shards[idx]
 }
 
 // gatewayServer implements the public gRPC VectronService. It acts as a facade,
 // forwarding requests to the appropriate backend services (placement driver or workers).
 type gatewayServer struct {
 	pb.UnimplementedVectronServiceServer
-	pdAddrs                []string
-	leader                 *LeaderInfo
-	leaderMu               sync.RWMutex
-	authClient             authpb.AuthServiceClient
-	rerankerClient         reranker.RerankServiceClient
-	feedbackService        *feedback.Service
-	managementMgr          *management.Manager
-	workerPool             *WorkerConnPool // Connection pool for worker gRPC connections
-	workerSearchBatcher    *WorkerSearchBatcher
-	pdPool                 *PDConnPool
-	searchCache            *SearchCache // Cache for search results
-	workerListCache        *WorkerListCache
-	resolveCache           *WorkerResolveCache
-	routingCache           *CollectionRoutingCache
-	distributedCache       *DistributedCache
-	grpcCompressionEnabled bool
-	rerankWarmupCache      *RerankWarmupCache
-	rerankWarmupSem        chan struct{}
-	rerankWarmupMu         sync.Mutex
-	rerankWarmupInFlight   map[uint64]struct{}
-	inFlightMu             sync.Mutex
-	inFlightSearches       map[uint64]*inFlightSearch
+	pdAddrs                  []string
+	leader                   *LeaderInfo
+	leaderMu                 sync.RWMutex
+	authClient               authpb.AuthServiceClient
+	rerankerClient           reranker.RerankServiceClient
+	feedbackService          *feedback.Service
+	managementMgr            *management.Manager
+	workerPool               *WorkerConnPool // Connection pool for worker gRPC connections
+	workerSearchBatcher      *WorkerSearchBatcher
+	pdPool                   *PDConnPool
+	searchCache              *SearchCache // Cache for search results
+	workerListCache          *WorkerListCache
+	resolveCache             *WorkerResolveCache
+	routingCache             *CollectionRoutingCache
+	distributedCache         *DistributedCache
+	grpcCompressionEnabled   bool
+	rerankWarmupCache        *RerankWarmupCache
+	rerankWarmupSem          chan struct{}
+	rerankWarmupMu           sync.Mutex
+	rerankWarmupInFlight     map[uint64]struct{}
+	inFlightShards           []inFlightShard
+	inflightRoutingShards    []inflightRoutingShard
+	inflightWorkerListShards []inflightWorkerListShard
 }
 
 type inFlightSearch struct {
@@ -1363,6 +1431,38 @@ type inFlightSearch struct {
 	resp *pb.SearchResponse
 	err  error
 }
+
+type inFlightShard struct {
+	mu sync.Mutex
+	m  map[uint64]*inFlightSearch
+}
+
+const inFlightShardCount = 256
+
+type inflightRouting struct {
+	done  chan struct{}
+	entry *collectionRoutingEntry
+	err   error
+}
+
+type inflightWorkerList struct {
+	done  chan struct{}
+	addrs []string
+	err   error
+}
+
+type inflightRoutingShard struct {
+	mu sync.Mutex
+	m  map[string]*inflightRouting
+}
+
+type inflightWorkerListShard struct {
+	mu sync.Mutex
+	m  map[string]*inflightWorkerList
+}
+
+const inflightRoutingShardCount = 64
+const inflightWorkerListShardCount = 64
 
 func (s *gatewayServer) getPlacementClient() (placementpb.PlacementServiceClient, error) {
 	s.leaderMu.RLock()
@@ -1632,6 +1732,10 @@ func hashVector(vec []float32) uint64 {
 }
 
 func (s *gatewayServer) getCollectionRouting(ctx context.Context, collection string, forceRefresh bool) (*collectionRoutingEntry, error) {
+	var (
+		entry *collectionRoutingEntry
+		err   error
+	)
 	if !forceRefresh && s.routingCache != nil {
 		if entry, ok := s.routingCache.Get(collection); ok {
 			return entry, nil
@@ -1649,6 +1753,17 @@ func (s *gatewayServer) getCollectionRouting(ctx context.Context, collection str
 			}
 			return entry, nil
 		}
+	}
+
+	if !forceRefresh {
+		if entry, err, shared := s.waitForRouting(ctx, collection); shared {
+			return entry, err
+		}
+		defer func() {
+			if entry != nil || err != nil {
+				s.finishRouting(collection, entry, err)
+			}
+		}()
 	}
 
 	placementClient, err := s.getPlacementClient()
@@ -1680,7 +1795,7 @@ func (s *gatewayServer) getCollectionRouting(ctx context.Context, collection str
 	if s.routingCache != nil && s.routingCache.ttl > 0 {
 		ttl = s.routingCache.ttl
 	}
-	entry := &collectionRoutingEntry{
+	entry = &collectionRoutingEntry{
 		shards:  make([]routingShard, 0, len(resp.Shards)),
 		expires: time.Now().Add(ttl),
 	}
@@ -2662,45 +2777,66 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 	if logEnabled {
 		routeDur = time.Since(routeStart)
 	}
-	if cachedAddresses, ok := s.workerListCache.Get(req.Collection); ok {
+	if cfg.SearchFanoutEnabled {
 		if len(workerAddresses) == 0 {
-			workerAddresses = cachedAddresses
+			if routingEntry, err := s.getCollectionRouting(ctx, req.Collection, true); err == nil {
+				workerAddresses = workerAddressesForSearch(routingEntry, linearizable, routeKey)
+			}
 		}
-	}
-	if len(workerAddresses) == 0 && s.distributedCache != nil {
-		if cachedAddresses, ok := s.distributedCache.GetWorkerList(ctx, req.Collection); ok {
-			workerAddresses = cachedAddresses
-			s.workerListCache.Set(req.Collection, cachedAddresses)
+		if len(workerAddresses) == 0 {
+			return nil, nil, status.Errorf(codes.Unavailable, "routing info unavailable for collection %q", req.Collection)
 		}
-	}
-	if len(workerAddresses) == 0 {
-		placementClient, err := s.getPlacementClient()
-		if err != nil {
-			return nil, nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
+	} else {
+		if cachedAddresses, ok := s.workerListCache.Get(req.Collection); ok {
+			if len(workerAddresses) == 0 {
+				workerAddresses = cachedAddresses
+			}
 		}
-		workerListResp, err := placementClient.ListWorkersForCollection(ctx, &placementpb.ListWorkersForCollectionRequest{
-			Collection: req.Collection,
-		})
-		if err != nil {
-			if st, ok := status.FromError(err); ok && (st.Code() == codes.Unavailable || st.Code() == codes.Internal) {
-				placementClient, err = s.updateLeader()
+		if len(workerAddresses) == 0 && s.distributedCache != nil {
+			if cachedAddresses, ok := s.distributedCache.GetWorkerList(ctx, req.Collection); ok {
+				workerAddresses = cachedAddresses
+				s.workerListCache.Set(req.Collection, cachedAddresses)
+			}
+		}
+		if len(workerAddresses) == 0 {
+			if addrs, err, shared := s.waitForWorkerList(ctx, req.Collection); shared {
 				if err != nil {
-					return nil, nil, status.Errorf(codes.Internal, "could not update placement driver leader: %v", err)
+					return nil, nil, err
 				}
-				workerListResp, err = placementClient.ListWorkersForCollection(ctx, &placementpb.ListWorkersForCollectionRequest{
+				workerAddresses = addrs
+			} else {
+				defer func() {
+					s.finishWorkerList(req.Collection, workerAddresses, err)
+				}()
+				placementClient, err := s.getPlacementClient()
+				if err != nil {
+					return nil, nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
+				}
+				workerListResp, err := placementClient.ListWorkersForCollection(ctx, &placementpb.ListWorkersForCollectionRequest{
 					Collection: req.Collection,
 				})
 				if err != nil {
-					return nil, nil, status.Errorf(codes.Internal, "could not list workers for collection %q after leader update: %v", req.Collection, err)
+					if st, ok := status.FromError(err); ok && (st.Code() == codes.Unavailable || st.Code() == codes.Internal) {
+						placementClient, err = s.updateLeader()
+						if err != nil {
+							return nil, nil, status.Errorf(codes.Internal, "could not update placement driver leader: %v", err)
+						}
+						workerListResp, err = placementClient.ListWorkersForCollection(ctx, &placementpb.ListWorkersForCollectionRequest{
+							Collection: req.Collection,
+						})
+						if err != nil {
+							return nil, nil, status.Errorf(codes.Internal, "could not list workers for collection %q after leader update: %v", req.Collection, err)
+						}
+					} else {
+						return nil, nil, status.Errorf(codes.Internal, "could not list workers for collection %q: %v", req.Collection, err)
+					}
 				}
-			} else {
-				return nil, nil, status.Errorf(codes.Internal, "could not list workers for collection %q: %v", req.Collection, err)
+				workerAddresses = workerListResp.GetGrpcAddresses()
+				s.workerListCache.Set(req.Collection, workerAddresses)
+				if s.distributedCache != nil {
+					s.distributedCache.SetWorkerList(ctx, req.Collection, workerAddresses, s.workerListCache.ttl)
+				}
 			}
-		}
-		workerAddresses = workerListResp.GetGrpcAddresses()
-		s.workerListCache.Set(req.Collection, workerAddresses)
-		if s.distributedCache != nil {
-			s.distributedCache.SetWorkerList(ctx, req.Collection, workerAddresses, s.workerListCache.ttl)
 		}
 	}
 	if !cfg.SearchFanoutEnabled && len(workerAddresses) > 1 {
@@ -3008,45 +3144,66 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 			workerAddresses = cachedAddresses
 		}
 	}
-	if len(workerAddresses) == 0 && s.distributedCache != nil {
-		if cachedAddresses, ok := s.distributedCache.GetWorkerList(ctx, req.Collection); ok {
-			workerAddresses = cachedAddresses
-			s.workerListCache.Set(req.Collection, cachedAddresses)
+	if cfg.SearchFanoutEnabled {
+		if len(workerAddresses) == 0 {
+			if routingEntry, err := s.getCollectionRouting(ctx, req.Collection, true); err == nil {
+				workerAddresses = workerAddressesForSearch(routingEntry, linearizable, routeKey)
+			}
 		}
-	}
-	if len(workerAddresses) == 0 {
-		placementClient, err := s.getPlacementClient()
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
+		if len(workerAddresses) == 0 {
+			return nil, status.Errorf(codes.Unavailable, "routing info unavailable for collection %q", req.Collection)
 		}
-		listStart := time.Now()
-		workerListResp, err := placementClient.ListWorkersForCollection(ctx, &placementpb.ListWorkersForCollectionRequest{
-			Collection: req.Collection,
-		})
-		if err != nil {
-			// Attempt to update leader and retry if the placement driver client is stale
-			if st, ok := status.FromError(err); ok && (st.Code() == codes.Unavailable || st.Code() == codes.Internal) {
-				placementClient, err = s.updateLeader()
+	} else {
+		if len(workerAddresses) == 0 && s.distributedCache != nil {
+			if cachedAddresses, ok := s.distributedCache.GetWorkerList(ctx, req.Collection); ok {
+				workerAddresses = cachedAddresses
+				s.workerListCache.Set(req.Collection, cachedAddresses)
+			}
+		}
+		if len(workerAddresses) == 0 {
+			if addrs, err, shared := s.waitForWorkerList(ctx, req.Collection); shared {
 				if err != nil {
-					return nil, status.Errorf(codes.Internal, "could not update placement driver leader: %v", err)
+					return nil, err
 				}
-				workerListResp, err = placementClient.ListWorkersForCollection(ctx, &placementpb.ListWorkersForCollectionRequest{
+				workerAddresses = addrs
+			} else {
+				defer func() {
+					s.finishWorkerList(req.Collection, workerAddresses, err)
+				}()
+				placementClient, err := s.getPlacementClient()
+				if err != nil {
+					return nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
+				}
+				listStart := time.Now()
+				workerListResp, err := placementClient.ListWorkersForCollection(ctx, &placementpb.ListWorkersForCollectionRequest{
 					Collection: req.Collection,
 				})
 				if err != nil {
-					return nil, status.Errorf(codes.Internal, "could not list workers for collection %q after leader update: %v", req.Collection, err)
+					// Attempt to update leader and retry if the placement driver client is stale
+					if st, ok := status.FromError(err); ok && (st.Code() == codes.Unavailable || st.Code() == codes.Internal) {
+						placementClient, err = s.updateLeader()
+						if err != nil {
+							return nil, status.Errorf(codes.Internal, "could not update placement driver leader: %v", err)
+						}
+						workerListResp, err = placementClient.ListWorkersForCollection(ctx, &placementpb.ListWorkersForCollectionRequest{
+							Collection: req.Collection,
+						})
+						if err != nil {
+							return nil, status.Errorf(codes.Internal, "could not list workers for collection %q after leader update: %v", req.Collection, err)
+						}
+					} else {
+						return nil, status.Errorf(codes.Internal, "could not list workers for collection %q: %v", req.Collection, err)
+					}
 				}
-			} else {
-				return nil, status.Errorf(codes.Internal, "could not list workers for collection %q: %v", req.Collection, err)
+				if logEnabled {
+					listDur = time.Since(listStart)
+				}
+				workerAddresses = workerListResp.GetGrpcAddresses()
+				s.workerListCache.Set(req.Collection, workerAddresses)
+				if s.distributedCache != nil {
+					s.distributedCache.SetWorkerList(ctx, req.Collection, workerAddresses, s.workerListCache.ttl)
+				}
 			}
-		}
-		if logEnabled {
-			listDur = time.Since(listStart)
-		}
-		workerAddresses = workerListResp.GetGrpcAddresses()
-		s.workerListCache.Set(req.Collection, workerAddresses)
-		if s.distributedCache != nil {
-			s.distributedCache.SetWorkerList(ctx, req.Collection, workerAddresses, s.workerListCache.ttl)
 		}
 	}
 	if !cfg.SearchFanoutEnabled && len(workerAddresses) > 1 {
@@ -3485,9 +3642,10 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 }
 
 func (s *gatewayServer) waitForInFlight(ctx context.Context, key uint64) (*pb.SearchResponse, error, bool) {
-	s.inFlightMu.Lock()
-	if flight, ok := s.inFlightSearches[key]; ok {
-		s.inFlightMu.Unlock()
+	shard := &s.inFlightShards[key%uint64(len(s.inFlightShards))]
+	shard.mu.Lock()
+	if flight, ok := shard.m[key]; ok {
+		shard.mu.Unlock()
 		select {
 		case <-flight.done:
 			return flight.resp, flight.err, true
@@ -3496,20 +3654,87 @@ func (s *gatewayServer) waitForInFlight(ctx context.Context, key uint64) (*pb.Se
 		}
 	}
 	flight := &inFlightSearch{done: make(chan struct{})}
-	s.inFlightSearches[key] = flight
-	s.inFlightMu.Unlock()
+	shard.m[key] = flight
+	shard.mu.Unlock()
 	return nil, nil, false
 }
 
 func (s *gatewayServer) finishInFlight(key uint64, resp *pb.SearchResponse, err error) {
-	s.inFlightMu.Lock()
-	flight, ok := s.inFlightSearches[key]
+	shard := &s.inFlightShards[key%uint64(len(s.inFlightShards))]
+	shard.mu.Lock()
+	flight, ok := shard.m[key]
 	if ok {
-		delete(s.inFlightSearches, key)
+		delete(shard.m, key)
 	}
-	s.inFlightMu.Unlock()
+	shard.mu.Unlock()
 	if ok {
 		flight.resp = resp
+		flight.err = err
+		close(flight.done)
+	}
+}
+
+func (s *gatewayServer) waitForRouting(ctx context.Context, collection string) (*collectionRoutingEntry, error, bool) {
+	shard := &s.inflightRoutingShards[fnv32(collection)%uint32(len(s.inflightRoutingShards))]
+	shard.mu.Lock()
+	if flight, ok := shard.m[collection]; ok {
+		shard.mu.Unlock()
+		select {
+		case <-flight.done:
+			return flight.entry, flight.err, true
+		case <-ctx.Done():
+			return nil, ctx.Err(), true
+		}
+	}
+	flight := &inflightRouting{done: make(chan struct{})}
+	shard.m[collection] = flight
+	shard.mu.Unlock()
+	return nil, nil, false
+}
+
+func (s *gatewayServer) finishRouting(collection string, entry *collectionRoutingEntry, err error) {
+	shard := &s.inflightRoutingShards[fnv32(collection)%uint32(len(s.inflightRoutingShards))]
+	shard.mu.Lock()
+	flight, ok := shard.m[collection]
+	if ok {
+		delete(shard.m, collection)
+	}
+	shard.mu.Unlock()
+	if ok {
+		flight.entry = entry
+		flight.err = err
+		close(flight.done)
+	}
+}
+
+func (s *gatewayServer) waitForWorkerList(ctx context.Context, collection string) ([]string, error, bool) {
+	shard := &s.inflightWorkerListShards[fnv32(collection)%uint32(len(s.inflightWorkerListShards))]
+	shard.mu.Lock()
+	if flight, ok := shard.m[collection]; ok {
+		shard.mu.Unlock()
+		select {
+		case <-flight.done:
+			return flight.addrs, flight.err, true
+		case <-ctx.Done():
+			return nil, ctx.Err(), true
+		}
+	}
+	flight := &inflightWorkerList{done: make(chan struct{})}
+	shard.m[collection] = flight
+	shard.mu.Unlock()
+	return nil, nil, false
+}
+
+func (s *gatewayServer) finishWorkerList(collection string, addrs []string, err error) {
+	shard := &s.inflightWorkerListShards[fnv32(collection)%uint32(len(s.inflightWorkerListShards))]
+	shard.mu.Lock()
+	flight, ok := shard.m[collection]
+	if ok {
+		delete(shard.m, collection)
+	}
+	shard.mu.Unlock()
+	if ok {
+		flight.addrs = addrs
 		flight.err = err
 		close(flight.done)
 	}
@@ -3716,23 +3941,47 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 		workerSearchBatcher = NewWorkerSearchBatcher(2*time.Millisecond, 16)
 	}
 
+	routingTTL := time.Duration(config.RoutingCacheTTLms) * time.Millisecond
+	if routingTTL <= 0 {
+		routingTTL = 5 * time.Second
+	}
+	workerListTTL := time.Duration(config.WorkerListCacheTTLms) * time.Millisecond
+	if workerListTTL <= 0 {
+		workerListTTL = 5 * time.Second
+	}
+	resolveTTL := time.Duration(config.ResolveCacheTTLms) * time.Millisecond
+	if resolveTTL <= 0 {
+		resolveTTL = 5 * time.Second
+	}
+
 	// Create the gateway server with the list of PD addresses
 	server := &gatewayServer{
-		pdAddrs:                strings.Split(config.PlacementDriver, ","),
-		authClient:             authClient,
-		rerankerClient:         rerankerClient,
-		feedbackService:        feedbackService,
-		workerPool:             NewWorkerConnPool(config.GRPCEnableCompression), // Initialize worker connection pool for reuse
-		workerSearchBatcher:    workerSearchBatcher,
-		pdPool:                 NewPDConnPool(config.GRPCEnableCompression),
-		searchCache:            searchCache,
-		workerListCache:        NewWorkerListCache(5 * time.Second),
-		resolveCache:           NewWorkerResolveCache(5*time.Second, defaultResolveCacheSize()),
-		routingCache:           NewCollectionRoutingCache(5 * time.Second),
-		distributedCache:       distributedCache,
-		grpcCompressionEnabled: config.GRPCEnableCompression,
-		rerankWarmupInFlight:   make(map[uint64]struct{}),
-		inFlightSearches:       make(map[uint64]*inFlightSearch),
+		pdAddrs:                  strings.Split(config.PlacementDriver, ","),
+		authClient:               authClient,
+		rerankerClient:           rerankerClient,
+		feedbackService:          feedbackService,
+		workerPool:               NewWorkerConnPool(config.GRPCEnableCompression), // Initialize worker connection pool for reuse
+		workerSearchBatcher:      workerSearchBatcher,
+		pdPool:                   NewPDConnPool(config.GRPCEnableCompression),
+		searchCache:              searchCache,
+		workerListCache:          NewWorkerListCache(workerListTTL),
+		resolveCache:             NewWorkerResolveCache(resolveTTL, defaultResolveCacheSize()),
+		routingCache:             NewCollectionRoutingCache(routingTTL),
+		distributedCache:         distributedCache,
+		grpcCompressionEnabled:   config.GRPCEnableCompression,
+		rerankWarmupInFlight:     make(map[uint64]struct{}),
+		inFlightShards:           make([]inFlightShard, inFlightShardCount),
+		inflightRoutingShards:    make([]inflightRoutingShard, inflightRoutingShardCount),
+		inflightWorkerListShards: make([]inflightWorkerListShard, inflightWorkerListShardCount),
+	}
+	for i := range server.inFlightShards {
+		server.inFlightShards[i].m = make(map[uint64]*inFlightSearch)
+	}
+	for i := range server.inflightRoutingShards {
+		server.inflightRoutingShards[i].m = make(map[string]*inflightRouting)
+	}
+	for i := range server.inflightWorkerListShards {
+		server.inflightWorkerListShards[i].m = make(map[string]*inflightWorkerList)
 	}
 	if config.RerankWarmupEnabled {
 		ttl := time.Duration(config.RerankWarmupTTLms) * time.Millisecond
@@ -3863,6 +4112,7 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 // ================ MAIN ================
 
 func main() {
+	runtimeutil.ConfigureGOMAXPROCS("apigateway")
 	_, authConn := Start(cfg, nil)
 	defer authConn.Close()
 

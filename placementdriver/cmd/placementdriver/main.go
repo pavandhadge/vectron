@@ -20,6 +20,7 @@ import (
 	pdRaft "github.com/pavandhadge/vectron/placementdriver/internal/raft"
 	"github.com/pavandhadge/vectron/placementdriver/internal/server"
 	pb "github.com/pavandhadge/vectron/shared/proto/placementdriver"
+	"github.com/pavandhadge/vectron/shared/runtimeutil"
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/keepalive"
@@ -130,6 +131,7 @@ func Start(nodeID, clusterID uint64, raftAddr, grpcAddr, dataDir string, initial
 }
 
 func main() {
+	runtimeutil.ConfigureGOMAXPROCS("placementdriver")
 	flag.Parse()
 
 	if nodeID == 0 {

@@ -13,8 +13,6 @@ import (
 	"math"
 	"strconv"
 	"time"
-
-	"github.com/pavandhadge/vectron/worker/internal/idxhnsw"
 )
 
 // Put inserts or updates a single key-value pair in the database.
@@ -318,11 +316,7 @@ func (r *PebbleDB) bulkLoadVectors(vectors []VectorEntry) error {
 			return errors.New("vector id or data missing")
 		}
 
-		indexVector := v.Vector
-		if r.opts != nil && r.opts.HNSWConfig.DistanceMetric == "cosine" && r.opts.HNSWConfig.NormalizeVectors {
-			indexVector = idxhnsw.NormalizeVector(v.Vector)
-		}
-		if err := r.hnsw.Add(v.ID, indexVector); err != nil {
+		if err := r.hnsw.Add(v.ID, v.Vector); err != nil {
 			for _, id := range added {
 				_ = r.hnsw.Delete(id)
 			}

@@ -164,10 +164,14 @@ func (h *HNSW) addNoLock(id string, vec []float32) error {
 		Neighbors: make([][]uint32, layer+1),
 	}
 	if h.config.Distance == "cosine" && h.config.NormalizeVectors {
-		searchVec = NormalizeVector(searchVec)
 		normalized := NormalizeVector(vec)
+		searchVec = normalized
 		if h.config.QuantizeVectors {
 			node.QVec = quantizeVector(normalized)
+			if h.config.KeepFloatVectors {
+				nodeVec = makeVectorCopy(normalized, h)
+				node.Vec = nodeVec
+			}
 			node.Norm = 1
 		} else {
 			nodeVec = makeVectorCopy(normalized, h)

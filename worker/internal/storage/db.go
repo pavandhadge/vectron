@@ -158,6 +158,7 @@ func (r *PebbleDB) loadHNSW(opts *Options) error {
 		EnableNorms:       opts.HNSWConfig.EnableNorms,
 		NormalizeVectors:  opts.HNSWConfig.NormalizeVectors,
 		QuantizeVectors:   opts.HNSWConfig.QuantizeVectors,
+		KeepFloatVectors:  opts.HNSWConfig.QuantizeKeepFloatVectors,
 		SearchParallelism: opts.HNSWConfig.SearchParallelism,
 		PruneEnabled:      opts.HNSWConfig.PruneEnabled,
 		PruneMaxNodes:     opts.HNSWConfig.PruneMaxNodes,
@@ -174,6 +175,7 @@ func (r *PebbleDB) loadHNSW(opts *Options) error {
 			EnableNorms:       opts.HNSWConfig.EnableNorms,
 			NormalizeVectors:  opts.HNSWConfig.NormalizeVectors,
 			QuantizeVectors:   opts.HNSWConfig.QuantizeVectors,
+			KeepFloatVectors:  opts.HNSWConfig.QuantizeKeepFloatVectors,
 			SearchParallelism: opts.HNSWConfig.SearchParallelism,
 			HotIndex:          true,
 		})
@@ -208,6 +210,7 @@ func (r *PebbleDB) loadHNSW(opts *Options) error {
 			EnableNorms:       opts.HNSWConfig.EnableNorms,
 			NormalizeVectors:  opts.HNSWConfig.NormalizeVectors,
 			QuantizeVectors:   opts.HNSWConfig.QuantizeVectors,
+			KeepFloatVectors:  opts.HNSWConfig.QuantizeKeepFloatVectors,
 			SearchParallelism: opts.HNSWConfig.SearchParallelism,
 			PruneEnabled:      opts.HNSWConfig.PruneEnabled,
 			PruneMaxNodes:     opts.HNSWConfig.PruneMaxNodes,
@@ -776,29 +779,29 @@ func applyPebbleTuning(dbOpts *pebble.Options, opts *Options) {
 
 	// Performance-oriented defaults (override via env or Options).
 	if dbOpts.MemTableSize == 0 {
-		dbOpts.MemTableSize = envInt("PEBBLE_MEMTABLE_MB", 64) * 1024 * 1024
+		dbOpts.MemTableSize = envInt("PEBBLE_MEMTABLE_MB", 128) * 1024 * 1024
 	}
 	if dbOpts.MemTableStopWritesThreshold == 0 {
 		dbOpts.MemTableStopWritesThreshold = envInt("PEBBLE_MEMTABLE_STOP", 4)
 	}
 	if dbOpts.L0CompactionThreshold == 0 {
-		dbOpts.L0CompactionThreshold = envInt("PEBBLE_L0_COMPACT", 4)
+		dbOpts.L0CompactionThreshold = envInt("PEBBLE_L0_COMPACT", 8)
 	}
 	if dbOpts.L0StopWritesThreshold == 0 {
-		dbOpts.L0StopWritesThreshold = envInt("PEBBLE_L0_STOP", 12)
+		dbOpts.L0StopWritesThreshold = envInt("PEBBLE_L0_STOP", 24)
 	}
 	if dbOpts.MaxConcurrentCompactions == 0 {
 		compactions := runtime.NumCPU() / 2
-		if compactions < 2 {
-			compactions = 2
-		}
-		if compactions > 4 {
+		if compactions < 4 {
 			compactions = 4
+		}
+		if compactions > 8 {
+			compactions = 8
 		}
 		dbOpts.MaxConcurrentCompactions = compactions
 	}
 	if dbOpts.Cache == nil {
-		cacheMB := envInt("PEBBLE_CACHE_MB", 256)
+		cacheMB := envInt("PEBBLE_CACHE_MB", 512)
 		if cacheMB > 0 {
 			dbOpts.Cache = pebble.NewCache(int64(cacheMB) * 1024 * 1024)
 		}

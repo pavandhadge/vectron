@@ -147,9 +147,6 @@ func (r *PebbleDB) Search(query []float32, k int) (ids []string, scores []float3
 
 	// The HNSW search returns candidate IDs and their distances.
 	searchVec := query
-	if r.opts != nil && r.opts.HNSWConfig.DistanceMetric == "cosine" && r.opts.HNSWConfig.NormalizeVectors {
-		searchVec = idxhnsw.NormalizeVector(query)
-	}
 	ef := r.opts.HNSWConfig.EfSearch
 	if k > 0 {
 		adaptive := k * 2
@@ -184,6 +181,15 @@ func (r *PebbleDB) Search(query []float32, k int) (ids []string, scores []float3
 			ef = adaptive
 		}
 	}
+	if r.opts != nil && r.opts.HNSWConfig.AdaptiveEfDimScale > 0 && r.opts.HNSWConfig.AdaptiveEfDimScale < 1 {
+		scaled := int(float64(ef) * r.opts.HNSWConfig.AdaptiveEfDimScale)
+		if scaled < k {
+			scaled = k
+		}
+		if scaled > 0 && scaled < ef {
+			ef = scaled
+		}
+	}
 	efUsed = ef
 	if r.hnswHot != nil && r.opts != nil && r.opts.HNSWConfig.HotIndexEnabled {
 		usedHot = true
@@ -204,7 +210,8 @@ func (r *PebbleDB) Search(query []float32, k int) (ids []string, scores []float3
 
 		var coldIDs []string
 		var coldScores []float32
-		if r.opts.HNSWConfig.MultiStageEnabled && !r.opts.HNSWConfig.QuantizeVectors {
+		if r.opts.HNSWConfig.MultiStageEnabled &&
+			(!r.opts.HNSWConfig.QuantizeVectors || r.opts.HNSWConfig.QuantizeKeepFloatVectors) {
 			usedTwoStage = true
 			stage1Ef := r.opts.HNSWConfig.Stage1Ef
 			if stage1Ef <= 0 {
@@ -223,7 +230,8 @@ func (r *PebbleDB) Search(query []float32, k int) (ids []string, scores []float3
 		return ids, scores, nil
 	}
 
-	if r.opts != nil && r.opts.HNSWConfig.MultiStageEnabled && !r.opts.HNSWConfig.QuantizeVectors {
+	if r.opts != nil && r.opts.HNSWConfig.MultiStageEnabled &&
+		(!r.opts.HNSWConfig.QuantizeVectors || r.opts.HNSWConfig.QuantizeKeepFloatVectors) {
 		usedTwoStage = true
 		stage1Ef := r.opts.HNSWConfig.Stage1Ef
 		if stage1Ef <= 0 {

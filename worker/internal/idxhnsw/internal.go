@@ -143,29 +143,57 @@ func VectorNorm(a []float32) float32 {
 
 // NormalizeVector returns a normalized copy of the vector (L2 norm = 1).
 func NormalizeVector(a []float32) []float32 {
-	norm := float32(math.Sqrt(float64(sumSquares(a))))
+	return NormalizeVectorInto(nil, a)
+}
+
+// NormalizeVectorInto writes a normalized copy of src into dst (if provided).
+// If dst is nil or too small, a new slice is allocated.
+func NormalizeVectorInto(dst, src []float32) []float32 {
+	norm := float32(math.Sqrt(float64(sumSquares(src))))
 	if norm == 0 {
-		return append([]float32(nil), a...)
+		if dst == nil || cap(dst) < len(src) {
+			return append([]float32(nil), src...)
+		}
+		dst = dst[:len(src)]
+		copy(dst, src)
+		return dst
 	}
-	out := make([]float32, len(a))
+	if dst == nil || cap(dst) < len(src) {
+		dst = make([]float32, len(src))
+	} else {
+		dst = dst[:len(src)]
+	}
 	inv := 1.0 / norm
-	for i := range a {
-		out[i] = a[i] * float32(inv)
+	for i := range src {
+		dst[i] = src[i] * float32(inv)
 	}
-	return out
+	return dst
 }
 
 func quantizeVector(vec []float32) []int8 {
-	q := make([]int8, len(vec))
+	return quantizeVectorInto(nil, vec)
+}
+
+func quantizeVectorInto(dst []int8, vec []float32) []int8 {
+	if dst == nil || cap(dst) < len(vec) {
+		dst = make([]int8, len(vec))
+	} else {
+		dst = dst[:len(vec)]
+	}
+	if len(vec) >= 16 {
+		if quantizeVectorSIMD(dst, vec) {
+			return dst
+		}
+	}
 	for i, v := range vec {
 		if v > 1 {
 			v = 1
 		} else if v < -1 {
 			v = -1
 		}
-		q[i] = int8(v * 127)
+		dst[i] = int8(v * 127)
 	}
-	return q
+	return dst
 }
 
 func dequantizeVector(q []int8) []float32 {
@@ -174,6 +202,42 @@ func dequantizeVector(q []int8) []float32 {
 		out[i] = float32(v) / 127
 	}
 	return out
+}
+
+func (h *HNSW) normalizedQuery(vec []float32) ([]float32, func()) {
+	if h.config.Distance != "cosine" || !h.config.NormalizeVectors {
+		return vec, func() {}
+	}
+	pooled := getVectorFromPool()
+	usePool := true
+	if cap(pooled) < len(vec) {
+		putVectorToPool(pooled)
+		pooled = make([]float32, len(vec))
+		usePool = false
+	}
+	normed := NormalizeVectorInto(pooled, vec)
+	if usePool {
+		return normed, func() { putVectorToPool(normed) }
+	}
+	return normed, func() {}
+}
+
+func (h *HNSW) quantizedQuery(vec []float32) ([]int8, func()) {
+	if !h.config.QuantizeVectors {
+		return nil, func() {}
+	}
+	pooled := getInt8FromPool()
+	usePool := true
+	if cap(pooled) < len(vec) {
+		putInt8ToPool(pooled)
+		pooled = make([]int8, len(vec))
+		usePool = false
+	}
+	qvec := quantizeVectorInto(pooled, vec)
+	if usePool {
+		return qvec, func() { putInt8ToPool(qvec) }
+	}
+	return qvec, func() {}
 }
 
 func dotProductInt8(a, b []int8) int32 {
@@ -221,25 +285,11 @@ func dotProduct(a, b []float32) float32 {
 }
 
 func sumSquares(a []float32) float32 {
-	n := len(a)
-	var sum0, sum1, sum2, sum3 float32
-	var sum4, sum5, sum6, sum7 float32
-	i := 0
-	for ; i+7 < n; i += 8 {
-		sum0 += a[i] * a[i]
-		sum1 += a[i+1] * a[i+1]
-		sum2 += a[i+2] * a[i+2]
-		sum3 += a[i+3] * a[i+3]
-		sum4 += a[i+4] * a[i+4]
-		sum5 += a[i+5] * a[i+5]
-		sum6 += a[i+6] * a[i+6]
-		sum7 += a[i+7] * a[i+7]
+	if len(a) == 0 {
+		return 0
 	}
-	sum := (sum0 + sum1) + (sum2 + sum3) + (sum4 + sum5) + (sum6 + sum7)
-	for ; i < n; i++ {
-		sum += a[i] * a[i]
-	}
-	return sum
+	// Reuse SIMD dot product for sum of squares (AVX2/AVX-512 when available).
+	return dotProductSIMD(a, a)
 }
 
 // ======================================================================================

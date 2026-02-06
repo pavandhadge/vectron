@@ -97,13 +97,57 @@ func (h *searchMinHeap) Pop() interface{} {
 	return item
 }
 
+var searchHeapPool = sync.Pool{
+	New: func() interface{} {
+		h := make(searchMinHeap, 0, 64)
+		return &h
+	},
+}
+
+var searchItemSlicePool = sync.Pool{
+	New: func() interface{} {
+		s := make([]searchHeapItem, 0, 64)
+		return &s
+	},
+}
+
+func getSearchHeap() *searchMinHeap {
+	h := searchHeapPool.Get().(*searchMinHeap)
+	*h = (*h)[:0]
+	return h
+}
+
+func putSearchHeap(h *searchMinHeap) {
+	if h == nil {
+		return
+	}
+	*h = (*h)[:0]
+	searchHeapPool.Put(h)
+}
+
+func getSearchItemSlice(n int) *[]searchHeapItem {
+	s := searchItemSlicePool.Get().(*[]searchHeapItem)
+	if cap(*s) < n {
+		*s = make([]searchHeapItem, 0, n)
+	}
+	*s = (*s)[:0]
+	return s
+}
+
+func putSearchItemSlice(s *[]searchHeapItem) {
+	if s == nil {
+		return
+	}
+	*s = (*s)[:0]
+	searchItemSlicePool.Put(s)
+}
+
 // GrpcServer implements the gRPC worker.WorkerServiceServer interface.
 type GrpcServer struct {
 	worker.UnimplementedWorkerServiceServer
-	nodeHost     *dragonboat.NodeHost // The Dragonboat node host that manages all shards on this worker.
-	shardManager *shard.Manager       // The manager for all shards hosted on this worker.
-	inFlightMu   sync.Mutex
-	inFlight     map[uint64]*inFlightSearch
+	nodeHost       *dragonboat.NodeHost // The Dragonboat node host that manages all shards on this worker.
+	shardManager   *shard.Manager       // The manager for all shards hosted on this worker.
+	inFlightShards []inFlightShard
 }
 
 type inFlightSearch struct {
@@ -112,15 +156,26 @@ type inFlightSearch struct {
 	err  error
 }
 
+type inFlightShard struct {
+	mu sync.Mutex
+	m  map[uint64]*inFlightSearch
+}
+
+const inFlightShardCount = 256
+
 var searchHashSeed = maphash.MakeSeed()
 
 // NewGrpcServer creates a new instance of the gRPC server.
 func NewGrpcServer(nh *dragonboat.NodeHost, sm *shard.Manager) *GrpcServer {
-	return &GrpcServer{
-		nodeHost:     nh,
-		shardManager: sm,
-		inFlight:     make(map[uint64]*inFlightSearch),
+	s := &GrpcServer{
+		nodeHost:       nh,
+		shardManager:   sm,
+		inFlightShards: make([]inFlightShard, inFlightShardCount),
 	}
+	for i := range s.inFlightShards {
+		s.inFlightShards[i].m = make(map[uint64]*inFlightSearch)
+	}
+	return s
 }
 
 func (s *GrpcServer) validateShardLease(shardID uint64, shardEpoch uint64, leaseExpiryUnixMs int64) error {
@@ -297,6 +352,13 @@ func (s *GrpcServer) BatchSearch(ctx context.Context, req *worker.BatchSearchReq
 			return nil, status.Error(codes.InvalidArgument, "search vector is empty")
 		}
 	}
+	if len(requests) == 1 {
+		resp, err := s.searchCore(ctx, requests[0])
+		if err != nil {
+			return nil, err
+		}
+		return &worker.BatchSearchResponse{Responses: []*worker.SearchResponse{resp}}, nil
+	}
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -402,7 +464,24 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 		} else {
 			shardIDs = s.shardManager.GetShards()
 		}
-		resultsCh := make(chan []searchHeapItem, len(shardIDs))
+		if len(shardIDs) == 1 {
+			var res interface{}
+			var err error
+			if useLinearizable {
+				res, err = s.nodeHost.SyncRead(ctx, shardIDs[0], query)
+			} else {
+				res, err = s.nodeHost.StaleRead(shardIDs[0], query)
+			}
+			if err != nil {
+				return nil, err
+			}
+			searchResult, ok := res.(*shard.SearchResult)
+			if !ok {
+				return nil, status.Errorf(codes.Internal, "unexpected search result type: %T", res)
+			}
+			return &worker.SearchResponse{Ids: searchResult.IDs, Scores: searchResult.Scores}, nil
+		}
+		resultsCh := make(chan *[]searchHeapItem, len(shardIDs))
 		for _, shardID := range shardIDs {
 			wg.Add(1)
 			go func(id uint64) {
@@ -431,7 +510,7 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 				if limit <= 0 {
 					limit = 10
 				}
-				localHeap := &searchMinHeap{}
+				localHeap := getSearchHeap()
 				heap.Init(localHeap)
 				for i, resultID := range searchResult.IDs {
 					if i >= len(searchResult.Scores) {
@@ -448,9 +527,11 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 					}
 				}
 				if localHeap.Len() > 0 {
-					localResults := append([]searchHeapItem(nil), (*localHeap)...)
-					resultsCh <- localResults
+					buf := getSearchItemSlice(localHeap.Len())
+					*buf = append(*buf, (*localHeap)...)
+					resultsCh <- buf
 				}
+				putSearchHeap(localHeap)
 			}(shardID)
 		}
 		wg.Wait()
@@ -461,10 +542,10 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 		if limit <= 0 {
 			limit = 10
 		}
-		topKHeap := &searchMinHeap{}
+		topKHeap := getSearchHeap()
 		heap.Init(topKHeap)
 		for local := range resultsCh {
-			for _, item := range local {
+			for _, item := range *local {
 				if topKHeap.Len() < limit {
 					heap.Push(topKHeap, item)
 					continue
@@ -474,6 +555,7 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 					heap.Fix(topKHeap, 0)
 				}
 			}
+			putSearchItemSlice(local)
 		}
 
 		resultCount := topKHeap.Len()
@@ -484,6 +566,7 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 			ids[i] = item.id
 			scores[i] = item.score
 		}
+		putSearchHeap(topKHeap)
 		return &worker.SearchResponse{Ids: ids, Scores: scores}, nil
 
 	} else {
@@ -534,9 +617,10 @@ func computeSearchKey(req *worker.SearchRequest) uint64 {
 }
 
 func (s *GrpcServer) waitForInFlight(ctx context.Context, key uint64) (*worker.SearchResponse, error, bool) {
-	s.inFlightMu.Lock()
-	if flight, ok := s.inFlight[key]; ok {
-		s.inFlightMu.Unlock()
+	shard := &s.inFlightShards[key%uint64(len(s.inFlightShards))]
+	shard.mu.Lock()
+	if flight, ok := shard.m[key]; ok {
+		shard.mu.Unlock()
 		select {
 		case <-flight.done:
 			return flight.resp, flight.err, true
@@ -545,18 +629,19 @@ func (s *GrpcServer) waitForInFlight(ctx context.Context, key uint64) (*worker.S
 		}
 	}
 	flight := &inFlightSearch{done: make(chan struct{})}
-	s.inFlight[key] = flight
-	s.inFlightMu.Unlock()
+	shard.m[key] = flight
+	shard.mu.Unlock()
 	return nil, nil, false
 }
 
 func (s *GrpcServer) finishInFlight(key uint64, resp *worker.SearchResponse, err error) {
-	s.inFlightMu.Lock()
-	flight, ok := s.inFlight[key]
+	shard := &s.inFlightShards[key%uint64(len(s.inFlightShards))]
+	shard.mu.Lock()
+	flight, ok := shard.m[key]
 	if ok {
-		delete(s.inFlight, key)
+		delete(shard.m, key)
 	}
-	s.inFlightMu.Unlock()
+	shard.mu.Unlock()
 	if ok {
 		flight.resp = resp
 		flight.err = err

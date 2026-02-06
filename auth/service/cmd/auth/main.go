@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"github.com/pavandhadge/vectron/shared/runtimeutil"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	_ "google.golang.org/grpc/encoding/gzip"
@@ -66,6 +67,7 @@ func init() {
 }
 
 func main() {
+	runtimeutil.ConfigureGOMAXPROCS("auth")
 	// Initialize etcd client
 	etcdCli, err := etcdclient.NewClient([]string{etcdEndpoints}, 5*time.Second)
 	if err != nil {

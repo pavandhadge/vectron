@@ -15,6 +15,7 @@ import (
 	"github.com/pavandhadge/vectron/reranker/internal/cache"
 	"github.com/pavandhadge/vectron/reranker/internal/strategies/rule"
 	pb "github.com/pavandhadge/vectron/shared/proto/reranker"
+	"github.com/pavandhadge/vectron/shared/runtimeutil"
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/keepalive"
@@ -28,6 +29,7 @@ const (
 )
 
 func main() {
+	runtimeutil.ConfigureGOMAXPROCS("reranker")
 	// Parse command-line flags
 	port := flag.String("port", getEnv("RERANKER_PORT", defaultPort), "gRPC server port")
 	strategyType := flag.String("strategy", getEnv("RERANKER_STRATEGY", defaultStrategy), "Reranking strategy (rule/llm/rl)")

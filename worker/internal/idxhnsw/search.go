@@ -80,6 +80,50 @@ var resultSlicePool = sync.Pool{
 	},
 }
 
+var neighborNodeSlicePool = sync.Pool{
+	New: func() interface{} {
+		return make([]*Node, 0, 256)
+	},
+}
+
+var neighborIDSlicePool = sync.Pool{
+	New: func() interface{} {
+		return make([]uint32, 0, 256)
+	},
+}
+
+func selectTopKByDist(cands []candidate, k int) []candidate {
+	if len(cands) <= k || k <= 0 {
+		return cands
+	}
+	lo, hi := 0, len(cands)-1
+	for lo <= hi {
+		pivot := cands[(lo+hi)/2].dist
+		i, j := lo, hi
+		for i <= j {
+			for cands[i].dist < pivot {
+				i++
+			}
+			for cands[j].dist > pivot {
+				j--
+			}
+			if i <= j {
+				cands[i], cands[j] = cands[j], cands[i]
+				i++
+				j--
+			}
+		}
+		if k-1 <= j {
+			hi = j
+		} else if k-1 >= i {
+			lo = i
+		} else {
+			break
+		}
+	}
+	return cands[:k]
+}
+
 // search is the public entry point for finding the k-nearest neighbors to a query vector.
 func (h *HNSW) search(vec []float32, k int) ([]string, []float32) {
 	h.mu.RLock()
@@ -89,10 +133,10 @@ func (h *HNSW) search(vec []float32, k int) ([]string, []float32) {
 		return nil, nil
 	}
 
-	if h.config.Distance == "cosine" && h.config.NormalizeVectors {
-		vec = NormalizeVector(vec)
-	}
-	qvec := h.maybeQuantizeQuery(vec)
+	vec, releaseVec := h.normalizedQuery(vec)
+	qvec, releaseQ := h.quantizedQuery(vec)
+	defer releaseVec()
+	defer releaseQ()
 
 	// 1. Find the entry point at the base layer by greedily traversing from the top.
 	curr := h.getNode(h.entry)
@@ -130,10 +174,10 @@ func (h *HNSW) searchWithEf(vec []float32, k, ef int) ([]string, []float32) {
 		return nil, nil
 	}
 
-	if h.config.Distance == "cosine" && h.config.NormalizeVectors {
-		vec = NormalizeVector(vec)
-	}
-	qvec := h.maybeQuantizeQuery(vec)
+	vec, releaseVec := h.normalizedQuery(vec)
+	qvec, releaseQ := h.quantizedQuery(vec)
+	defer releaseVec()
+	defer releaseQ()
 
 	if ef < k {
 		ef = k
@@ -184,10 +228,10 @@ func (h *HNSW) searchTwoStage(vec []float32, k, stage1Ef, candidateFactor int) (
 		candidateFactor = 4
 	}
 
-	if h.config.Distance == "cosine" && h.config.NormalizeVectors {
-		vec = NormalizeVector(vec)
-	}
-	qvec := h.maybeQuantizeQuery(vec)
+	vec, releaseVec := h.normalizedQuery(vec)
+	qvec, releaseQ := h.quantizedQuery(vec)
+	defer releaseVec()
+	defer releaseQ()
 
 	curr := h.getNode(h.entry)
 	for l := h.maxLayer; l > 0; l-- {
@@ -305,8 +349,18 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 			continue
 		}
 
-		nodes := make([]*Node, 0, len(neighbors))
-		ids := make([]uint32, 0, len(neighbors))
+		nodes := neighborNodeSlicePool.Get().([]*Node)
+		ids := neighborIDSlicePool.Get().([]uint32)
+		if cap(nodes) < len(neighbors) {
+			nodes = make([]*Node, 0, len(neighbors))
+		} else {
+			nodes = nodes[:0]
+		}
+		if cap(ids) < len(neighbors) {
+			ids = make([]uint32, 0, len(neighbors))
+		} else {
+			ids = ids[:0]
+		}
 		for _, nid := range neighbors {
 			if int(nid) < len(tracker.marks) && tracker.marks[nid] == tracker.epoch {
 				continue
@@ -322,22 +376,103 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 			ids = append(ids, nid)
 		}
 		if len(nodes) == 0 {
+			neighborNodeSlicePool.Put(nodes[:0])
+			neighborIDSlicePool.Put(ids[:0])
 			continue
 		}
 
 		distances := h.computeDistances(vec, qvec, nodes)
-		for i, n := range nodes {
-			d := distances[i]
-			// If we have room in the results max-heap, or if this node is closer than the furthest one in it...
-			if results.Len() < ef || d < results[0].dist {
-				heap.Push(&candidates, candidate{id: ids[i], dist: d, node: n})
-				heap.Push(&results, candidate{id: ids[i], dist: d, node: n})
-				// If the results heap is too large, remove the furthest element.
-				if results.Len() > ef {
-					heap.Pop(&results)
+		if results.Len() >= ef && len(nodes) >= 256 {
+			worst := results[0].dist
+			parallelism := h.config.SearchParallelism
+			if parallelism <= 0 {
+				parallelism = runtime.GOMAXPROCS(0)
+				if parallelism < 1 {
+					parallelism = 1
+				}
+			}
+			if parallelism > 1 {
+				chunk := (len(nodes) + parallelism - 1) / parallelism
+				locals := make([][]candidate, parallelism)
+				var wg sync.WaitGroup
+				for w := 0; w < parallelism; w++ {
+					start := w * chunk
+					if start >= len(nodes) {
+						break
+					}
+					end := start + chunk
+					if end > len(nodes) {
+						end = len(nodes)
+					}
+					wg.Add(1)
+					go func(idx, s, e int) {
+						defer wg.Done()
+						local := make([]candidate, 0, e-s)
+						for i := s; i < e; i++ {
+							d := distances[i]
+							if d < worst {
+								local = append(local, candidate{id: ids[i], dist: d, node: nodes[i]})
+							}
+						}
+						locals[idx] = local
+					}(w, start, end)
+				}
+				wg.Wait()
+				for _, local := range locals {
+					if len(local) > 0 && results.Len() > 0 {
+						local = selectTopKByDist(local, results.Len())
+					}
+					for _, cand := range local {
+						if results.Len() < ef || cand.dist < results[0].dist {
+							heap.Push(&candidates, cand)
+							heap.Push(&results, cand)
+							if results.Len() > ef {
+								heap.Pop(&results)
+							}
+						}
+					}
+				}
+				neighborNodeSlicePool.Put(nodes[:0])
+				neighborIDSlicePool.Put(ids[:0])
+				continue
+			}
+		}
+		if len(nodes) > ef*2 {
+			tmp := make([]candidate, 0, len(nodes))
+			for i, n := range nodes {
+				d := distances[i]
+				if results.Len() < ef || d < results[0].dist {
+					tmp = append(tmp, candidate{id: ids[i], dist: d, node: n})
+				}
+			}
+			if len(tmp) > 0 {
+				tmp = selectTopKByDist(tmp, ef)
+				for _, cand := range tmp {
+					if results.Len() < ef || cand.dist < results[0].dist {
+						heap.Push(&candidates, cand)
+						heap.Push(&results, cand)
+						if results.Len() > ef {
+							heap.Pop(&results)
+						}
+					}
+				}
+			}
+		} else {
+			for i, n := range nodes {
+				d := distances[i]
+				// If we have room in the results max-heap, or if this node is closer than the furthest one in it...
+				if results.Len() < ef || d < results[0].dist {
+					heap.Push(&candidates, candidate{id: ids[i], dist: d, node: n})
+					heap.Push(&results, candidate{id: ids[i], dist: d, node: n})
+					// If the results heap is too large, remove the furthest element.
+					if results.Len() > ef {
+						heap.Pop(&results)
+					}
 				}
 			}
 		}
+		neighborNodeSlicePool.Put(nodes[:0])
+		neighborIDSlicePool.Put(ids[:0])
 	}
 
 	// The result is a max-heap, so we need to convert it to a simple slice.

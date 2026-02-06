@@ -25,6 +25,13 @@ var vectorPool = sync.Pool{
 	},
 }
 
+// int8VectorPool provides a sync.Pool for reusing int8 slices during quantization.
+var int8VectorPool = sync.Pool{
+	New: func() interface{} {
+		return make([]int8, 0, 1536)
+	},
+}
+
 // getVectorFromPool retrieves a float32 slice from the pool
 func getVectorFromPool() []float32 {
 	return vectorPool.Get().([]float32)
@@ -35,6 +42,16 @@ func putVectorToPool(vec []float32) {
 	if vec != nil && cap(vec) > 0 {
 		// Reset length but keep capacity
 		vectorPool.Put(vec[:0])
+	}
+}
+
+func getInt8FromPool() []int8 {
+	return int8VectorPool.Get().([]int8)
+}
+
+func putInt8ToPool(vec []int8) {
+	if vec != nil && cap(vec) > 0 {
+		int8VectorPool.Put(vec[:0])
 	}
 }
 
@@ -57,6 +74,7 @@ type HNSWConfig struct {
 	EnableNorms       bool   // Whether to store vector norms for cosine distance.
 	NormalizeVectors  bool   // Whether to normalize vectors for cosine distance.
 	QuantizeVectors   bool   // Whether to store vectors in int8 form (cosine+normalized only).
+	KeepFloatVectors  bool   // Whether to keep float vectors alongside quantized data for exact rerank.
 	SearchParallelism int    // Parallelism for search distance computations.
 	HotIndex          bool   // If true, this index is a hot in-memory tier.
 	PruneEnabled      bool   // If true, periodically prune redundant edges.
@@ -107,6 +125,9 @@ func NewHNSW(store NodeStore, dim int, config HNSWConfig) *HNSW {
 	}
 	if config.QuantizeVectors && (config.Distance != "cosine" || !config.NormalizeVectors) {
 		config.QuantizeVectors = false
+	}
+	if !config.QuantizeVectors {
+		config.KeepFloatVectors = false
 	}
 
 	rand.New(rand.NewSource(time.Now().UnixNano()))
