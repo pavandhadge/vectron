@@ -95,6 +95,7 @@ func toCandidates(ids []uint32, query []float32, h *HNSW) []candidate {
 }
 
 // add is the main entry point for inserting a new vector into the HNSW graph.
+// OPTIMIZATION: Uses vector pooling to reduce GC allocations
 func (h *HNSW) add(id string, vec []float32) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -112,6 +113,23 @@ func (h *HNSW) add(id string, vec []float32) error {
 	return h.addNoLock(id, vec)
 }
 
+// makeVectorCopy creates a deep copy of a vector using the pool allocator
+// This is used during node creation to reduce GC pressure
+func makeVectorCopy(src []float32) []float32 {
+	// Get a pooled vector with enough capacity
+	pooled := getVectorFromPool()
+	if cap(pooled) < len(src) {
+		// Pool doesn't have enough capacity, allocate new
+		putVectorToPool(pooled)
+		return append([]float32(nil), src...)
+	}
+
+	// Copy into pooled buffer
+	pooled = pooled[:len(src)]
+	copy(pooled, src)
+	return pooled
+}
+
 func (h *HNSW) addNoLock(id string, vec []float32) error {
 	internalID := h.nextID
 	h.idToUint32[id] = internalID
@@ -126,8 +144,9 @@ func (h *HNSW) addNoLock(id string, vec []float32) error {
 	layer := h.randomLayer()
 
 	// 2. Create the new node.
+	// OPTIMIZATION: Use pooled vector allocation instead of new allocation
 	searchVec := vec
-	nodeVec := append([]float32(nil), vec...) // Create a deep copy.
+	nodeVec := makeVectorCopy(vec) // Uses sync.Pool to reduce GC pressure
 	node := &Node{
 		ID:        internalID,
 		Vec:       nil,

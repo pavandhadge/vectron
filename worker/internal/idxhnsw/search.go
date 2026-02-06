@@ -342,7 +342,13 @@ func (h *HNSW) computeDistances(vec []float32, qvec []int8, nodes []*Node) []flo
 			parallelism = 1
 		}
 	}
-	if parallelism <= 1 || len(nodes) < parallelism*8 {
+	// OPTIMIZATION: Lowered threshold from parallelism*8 to max(32, parallelism*4)
+	// This enables parallelization for smaller batches, improving mid-size search performance
+	minParallelSize := 32
+	if parallelism*4 > minParallelSize {
+		minParallelSize = parallelism * 4
+	}
+	if parallelism <= 1 || len(nodes) < minParallelSize {
 		for i, n := range nodes {
 			distances[i] = h.distanceToNode(vec, qvec, n)
 		}

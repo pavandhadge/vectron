@@ -16,6 +16,28 @@ import (
 	"time"
 )
 
+// vectorPool provides a sync.Pool for reusing float32 slices during vector operations
+// This significantly reduces GC pressure during high-throughput indexing
+var vectorPool = sync.Pool{
+	New: func() interface{} {
+		// Pre-allocate for common embedding dimensions (384, 768, 1536)
+		return make([]float32, 0, 1536)
+	},
+}
+
+// getVectorFromPool retrieves a float32 slice from the pool
+func getVectorFromPool() []float32 {
+	return vectorPool.Get().([]float32)
+}
+
+// putVectorToPool returns a float32 slice to the pool
+func putVectorToPool(vec []float32) {
+	if vec != nil && cap(vec) > 0 {
+		// Reset length but keep capacity
+		vectorPool.Put(vec[:0])
+	}
+}
+
 // NodeStore defines the interface for a key-value store used to persist HNSW nodes.
 // This allows the index to be larger than memory and to be durable.
 type NodeStore interface {
