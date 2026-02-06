@@ -564,13 +564,36 @@ func (s *Server) GetCollectionStatus(ctx context.Context, req *pb.GetCollectionS
 		return nil, status.Errorf(codes.NotFound, "collection '%s' not found", req.Name)
 	}
 
+	workerMap := make(map[uint64]fsm.WorkerInfo)
+	for _, w := range s.fsm.GetWorkers() {
+		workerMap[w.ID] = w
+	}
+
 	shardStatuses := make([]*pb.ShardStatus, 0, len(collection.Shards))
 	for _, shard := range collection.Shards {
+		var leaderAddr string
+		if shard.LeaderID != 0 {
+			if w, ok := workerMap[shard.LeaderID]; ok && s.fsm.IsWorkerHealthy(w.ID) {
+				leaderAddr = w.GrpcAddress
+			}
+		}
+		replicaAddrs := make([]string, 0, len(shard.Replicas))
+		for _, replicaID := range shard.Replicas {
+			if w, ok := workerMap[replicaID]; ok && s.fsm.IsWorkerHealthy(w.ID) {
+				replicaAddrs = append(replicaAddrs, w.GrpcAddress)
+			}
+		}
+
 		shardStatuses = append(shardStatuses, &pb.ShardStatus{
-			ShardId:  uint32(shard.ShardID),
-			Replicas: shard.Replicas,
-			LeaderId: shard.LeaderID,
-			Ready:    shard.LeaderID > 0,
+			ShardId:              uint32(shard.ShardID),
+			Replicas:             shard.Replicas,
+			LeaderId:             shard.LeaderID,
+			Ready:                shard.LeaderID > 0,
+			KeyRangeStart:        shard.KeyRangeStart,
+			KeyRangeEnd:          shard.KeyRangeEnd,
+			ShardEpoch:           shard.Epoch,
+			LeaderGrpcAddress:    leaderAddr,
+			ReplicaGrpcAddresses: replicaAddrs,
 		})
 	}
 

@@ -294,6 +294,11 @@ export interface ShardStatus {
   replicas: string[];
   leaderId: string;
   ready: boolean;
+  keyRangeStart: string;
+  keyRangeEnd: string;
+  shardEpoch: string;
+  leaderGrpcAddress: string;
+  replicaGrpcAddresses: string[];
 }
 
 function createBaseGetLeaderRequest(): GetLeaderRequest {
@@ -3178,7 +3183,17 @@ export const GetCollectionStatusResponse: MessageFns<GetCollectionStatusResponse
 };
 
 function createBaseShardStatus(): ShardStatus {
-  return { shardId: 0, replicas: [], leaderId: "0", ready: false };
+  return {
+    shardId: 0,
+    replicas: [],
+    leaderId: "0",
+    ready: false,
+    keyRangeStart: "0",
+    keyRangeEnd: "0",
+    shardEpoch: "0",
+    leaderGrpcAddress: "",
+    replicaGrpcAddresses: [],
+  };
 }
 
 export const ShardStatus: MessageFns<ShardStatus> = {
@@ -3196,6 +3211,21 @@ export const ShardStatus: MessageFns<ShardStatus> = {
     }
     if (message.ready !== false) {
       writer.uint32(32).bool(message.ready);
+    }
+    if (message.keyRangeStart !== "0") {
+      writer.uint32(40).uint64(message.keyRangeStart);
+    }
+    if (message.keyRangeEnd !== "0") {
+      writer.uint32(48).uint64(message.keyRangeEnd);
+    }
+    if (message.shardEpoch !== "0") {
+      writer.uint32(56).uint64(message.shardEpoch);
+    }
+    if (message.leaderGrpcAddress !== "") {
+      writer.uint32(66).string(message.leaderGrpcAddress);
+    }
+    for (const v of message.replicaGrpcAddresses) {
+      writer.uint32(74).string(v!);
     }
     return writer;
   },
@@ -3249,6 +3279,46 @@ export const ShardStatus: MessageFns<ShardStatus> = {
           message.ready = reader.bool();
           continue;
         }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.keyRangeStart = reader.uint64().toString();
+          continue;
+        }
+        case 6: {
+          if (tag !== 48) {
+            break;
+          }
+
+          message.keyRangeEnd = reader.uint64().toString();
+          continue;
+        }
+        case 7: {
+          if (tag !== 56) {
+            break;
+          }
+
+          message.shardEpoch = reader.uint64().toString();
+          continue;
+        }
+        case 8: {
+          if (tag !== 66) {
+            break;
+          }
+
+          message.leaderGrpcAddress = reader.string();
+          continue;
+        }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          message.replicaGrpcAddresses.push(reader.string());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -3264,6 +3334,13 @@ export const ShardStatus: MessageFns<ShardStatus> = {
       replicas: globalThis.Array.isArray(object?.replicas) ? object.replicas.map((e: any) => globalThis.String(e)) : [],
       leaderId: isSet(object.leaderId) ? globalThis.String(object.leaderId) : "0",
       ready: isSet(object.ready) ? globalThis.Boolean(object.ready) : false,
+      keyRangeStart: isSet(object.keyRangeStart) ? globalThis.String(object.keyRangeStart) : "0",
+      keyRangeEnd: isSet(object.keyRangeEnd) ? globalThis.String(object.keyRangeEnd) : "0",
+      shardEpoch: isSet(object.shardEpoch) ? globalThis.String(object.shardEpoch) : "0",
+      leaderGrpcAddress: isSet(object.leaderGrpcAddress) ? globalThis.String(object.leaderGrpcAddress) : "",
+      replicaGrpcAddresses: globalThis.Array.isArray(object?.replicaGrpcAddresses)
+        ? object.replicaGrpcAddresses.map((e: any) => globalThis.String(e))
+        : [],
     };
   },
 
@@ -3281,6 +3358,21 @@ export const ShardStatus: MessageFns<ShardStatus> = {
     if (message.ready !== false) {
       obj.ready = message.ready;
     }
+    if (message.keyRangeStart !== "0") {
+      obj.keyRangeStart = message.keyRangeStart;
+    }
+    if (message.keyRangeEnd !== "0") {
+      obj.keyRangeEnd = message.keyRangeEnd;
+    }
+    if (message.shardEpoch !== "0") {
+      obj.shardEpoch = message.shardEpoch;
+    }
+    if (message.leaderGrpcAddress !== "") {
+      obj.leaderGrpcAddress = message.leaderGrpcAddress;
+    }
+    if (message.replicaGrpcAddresses?.length) {
+      obj.replicaGrpcAddresses = message.replicaGrpcAddresses;
+    }
     return obj;
   },
 
@@ -3293,6 +3385,11 @@ export const ShardStatus: MessageFns<ShardStatus> = {
     message.replicas = object.replicas?.map((e) => e) || [];
     message.leaderId = object.leaderId ?? "0";
     message.ready = object.ready ?? false;
+    message.keyRangeStart = object.keyRangeStart ?? "0";
+    message.keyRangeEnd = object.keyRangeEnd ?? "0";
+    message.shardEpoch = object.shardEpoch ?? "0";
+    message.leaderGrpcAddress = object.leaderGrpcAddress ?? "";
+    message.replicaGrpcAddresses = object.replicaGrpcAddresses?.map((e) => e) || [];
     return message;
   },
 };

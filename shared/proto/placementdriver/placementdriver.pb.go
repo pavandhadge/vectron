@@ -1905,13 +1905,18 @@ func (x *GetCollectionStatusResponse) GetShards() []*ShardStatus {
 }
 
 type ShardStatus struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ShardId       uint32                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
-	Replicas      []uint64               `protobuf:"varint,2,rep,packed,name=replicas,proto3" json:"replicas,omitempty"`
-	LeaderId      uint64                 `protobuf:"varint,3,opt,name=leader_id,json=leaderId,proto3" json:"leader_id,omitempty"`
-	Ready         bool                   `protobuf:"varint,4,opt,name=ready,proto3" json:"ready,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	ShardId              uint32                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	Replicas             []uint64               `protobuf:"varint,2,rep,packed,name=replicas,proto3" json:"replicas,omitempty"`
+	LeaderId             uint64                 `protobuf:"varint,3,opt,name=leader_id,json=leaderId,proto3" json:"leader_id,omitempty"`
+	Ready                bool                   `protobuf:"varint,4,opt,name=ready,proto3" json:"ready,omitempty"`
+	KeyRangeStart        uint64                 `protobuf:"varint,5,opt,name=key_range_start,json=keyRangeStart,proto3" json:"key_range_start,omitempty"`
+	KeyRangeEnd          uint64                 `protobuf:"varint,6,opt,name=key_range_end,json=keyRangeEnd,proto3" json:"key_range_end,omitempty"`
+	ShardEpoch           uint64                 `protobuf:"varint,7,opt,name=shard_epoch,json=shardEpoch,proto3" json:"shard_epoch,omitempty"`
+	LeaderGrpcAddress    string                 `protobuf:"bytes,8,opt,name=leader_grpc_address,json=leaderGrpcAddress,proto3" json:"leader_grpc_address,omitempty"`
+	ReplicaGrpcAddresses []string               `protobuf:"bytes,9,rep,name=replica_grpc_addresses,json=replicaGrpcAddresses,proto3" json:"replica_grpc_addresses,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *ShardStatus) Reset() {
@@ -1970,6 +1975,41 @@ func (x *ShardStatus) GetReady() bool {
 		return x.Ready
 	}
 	return false
+}
+
+func (x *ShardStatus) GetKeyRangeStart() uint64 {
+	if x != nil {
+		return x.KeyRangeStart
+	}
+	return 0
+}
+
+func (x *ShardStatus) GetKeyRangeEnd() uint64 {
+	if x != nil {
+		return x.KeyRangeEnd
+	}
+	return 0
+}
+
+func (x *ShardStatus) GetShardEpoch() uint64 {
+	if x != nil {
+		return x.ShardEpoch
+	}
+	return 0
+}
+
+func (x *ShardStatus) GetLeaderGrpcAddress() string {
+	if x != nil {
+		return x.LeaderGrpcAddress
+	}
+	return ""
+}
+
+func (x *ShardStatus) GetReplicaGrpcAddresses() []string {
+	if x != nil {
+		return x.ReplicaGrpcAddresses
+	}
+	return nil
 }
 
 var File_placementdriver_placementdriver_proto protoreflect.FileDescriptor
@@ -2106,12 +2146,18 @@ const file_placementdriver_placementdriver_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
 	"\tdimension\x18\x02 \x01(\x05R\tdimension\x12\x1a\n" +
 	"\bdistance\x18\x03 \x01(\tR\bdistance\x12?\n" +
-	"\x06shards\x18\x04 \x03(\v2'.vectron.placementdriver.v1.ShardStatusR\x06shards\"w\n" +
+	"\x06shards\x18\x04 \x03(\v2'.vectron.placementdriver.v1.ShardStatusR\x06shards\"\xca\x02\n" +
 	"\vShardStatus\x12\x19\n" +
 	"\bshard_id\x18\x01 \x01(\rR\ashardId\x12\x1a\n" +
 	"\breplicas\x18\x02 \x03(\x04R\breplicas\x12\x1b\n" +
 	"\tleader_id\x18\x03 \x01(\x04R\bleaderId\x12\x14\n" +
-	"\x05ready\x18\x04 \x01(\bR\x05ready*t\n" +
+	"\x05ready\x18\x04 \x01(\bR\x05ready\x12&\n" +
+	"\x0fkey_range_start\x18\x05 \x01(\x04R\rkeyRangeStart\x12\"\n" +
+	"\rkey_range_end\x18\x06 \x01(\x04R\vkeyRangeEnd\x12\x1f\n" +
+	"\vshard_epoch\x18\a \x01(\x04R\n" +
+	"shardEpoch\x12.\n" +
+	"\x13leader_grpc_address\x18\b \x01(\tR\x11leaderGrpcAddress\x124\n" +
+	"\x16replica_grpc_addresses\x18\t \x03(\tR\x14replicaGrpcAddresses*t\n" +
 	"\vWorkerState\x12\x18\n" +
 	"\x14WORKER_STATE_UNKNOWN\x10\x00\x12\x18\n" +
 	"\x14WORKER_STATE_JOINING\x10\x01\x12\x16\n" +

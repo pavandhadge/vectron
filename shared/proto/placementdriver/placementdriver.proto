@@ -273,4 +273,9 @@ message ShardStatus {
   repeated uint64 replicas = 2;
   uint64 leader_id = 3;
   bool ready = 4;
+  uint64 key_range_start = 5;
+  uint64 key_range_end = 6;
+  uint64 shard_epoch = 7;
+  string leader_grpc_address = 8;
+  repeated string replica_grpc_addresses = 9;
 }

@@ -11,6 +11,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	runtime "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"hash/fnv"
 	"hash/maphash"
 	"log"
 	"math"
@@ -71,6 +72,7 @@ const (
 	grpcWindowSize      = 1 << 20
 	streamUpsertThreshold = 2000
 	streamUpsertChunkSize = 512
+	routingLeaseTTL       = 20 * time.Second
 )
 
 func grpcClientOptions(enableCompression bool) []grpc.DialOption {
@@ -164,6 +166,52 @@ type shardBatch struct {
 	points            []*pb.Point
 	shardEpoch        uint64
 	leaseExpiryUnixMs int64
+}
+
+type routingShard struct {
+	shardID      uint64
+	start        uint64
+	end          uint64
+	shardEpoch   uint64
+	leaderAddr   string
+	replicaAddrs []string
+}
+
+type collectionRoutingEntry struct {
+	shards  []routingShard
+	expires time.Time
+}
+
+type CollectionRoutingCache struct {
+	mu      sync.RWMutex
+	entries map[string]*collectionRoutingEntry
+	ttl     time.Duration
+}
+
+func NewCollectionRoutingCache(ttl time.Duration) *CollectionRoutingCache {
+	return &CollectionRoutingCache{
+		entries: make(map[string]*collectionRoutingEntry),
+		ttl:     ttl,
+	}
+}
+
+func (c *CollectionRoutingCache) Get(collection string) (*collectionRoutingEntry, bool) {
+	c.mu.RLock()
+	entry, ok := c.entries[collection]
+	c.mu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+	if time.Now().After(entry.expires) {
+		return nil, false
+	}
+	return entry, true
+}
+
+func (c *CollectionRoutingCache) Set(collection string, entry *collectionRoutingEntry) {
+	c.mu.Lock()
+	c.entries[collection] = entry
+	c.mu.Unlock()
 }
 
 func NewWorkerResolveCache(ttl time.Duration, maxSize int) *WorkerResolveCache {
@@ -962,6 +1010,7 @@ type gatewayServer struct {
 	searchCache            *SearchCache    // Cache for search results
 	workerListCache        *WorkerListCache
 	resolveCache           *WorkerResolveCache
+	routingCache           *CollectionRoutingCache
 	grpcCompressionEnabled bool
 	rerankWarmupCache      *RerankWarmupCache
 	rerankWarmupSem        chan struct{}
@@ -1244,10 +1293,117 @@ func hashVector(vec []float32) uint64 {
 	return h
 }
 
+func (s *gatewayServer) getCollectionRouting(ctx context.Context, collection string, forceRefresh bool) (*collectionRoutingEntry, error) {
+	if !forceRefresh && s.routingCache != nil {
+		if entry, ok := s.routingCache.Get(collection); ok {
+			return entry, nil
+		}
+	}
+
+	placementClient, err := s.getPlacementClient()
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
+	}
+
+	resp, err := placementClient.GetCollectionStatus(ctx, &placementpb.GetCollectionStatusRequest{
+		Name: collection,
+	})
+	if err != nil {
+		if st, ok := status.FromError(err); ok && (st.Code() == codes.Unavailable || st.Code() == codes.Internal) {
+			placementClient, err = s.updateLeader()
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "could not update placement driver leader: %v", err)
+			}
+			resp, err = placementClient.GetCollectionStatus(ctx, &placementpb.GetCollectionStatusRequest{
+				Name: collection,
+			})
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "could not get collection status for %q after leader update: %v", collection, err)
+			}
+		} else {
+			return nil, status.Errorf(codes.Internal, "could not get collection status for %q: %v", collection, err)
+		}
+	}
+
+	ttl := 2 * time.Second
+	if s.routingCache != nil && s.routingCache.ttl > 0 {
+		ttl = s.routingCache.ttl
+	}
+	entry := &collectionRoutingEntry{
+		shards:  make([]routingShard, 0, len(resp.Shards)),
+		expires: time.Now().Add(ttl),
+	}
+	for _, shard := range resp.Shards {
+		if shard == nil {
+			continue
+		}
+		entry.shards = append(entry.shards, routingShard{
+			shardID:      uint64(shard.ShardId),
+			start:        shard.KeyRangeStart,
+			end:          shard.KeyRangeEnd,
+			shardEpoch:   shard.ShardEpoch,
+			leaderAddr:   shard.LeaderGrpcAddress,
+			replicaAddrs: shard.ReplicaGrpcAddresses,
+		})
+	}
+
+	if s.routingCache != nil {
+		s.routingCache.Set(collection, entry)
+	}
+	return entry, nil
+}
+
+func hashVectorID(id string) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(id))
+	return h.Sum64()
+}
+
+func pickShardFromRouting(entry *collectionRoutingEntry, vectorID string) *routingShard {
+	if entry == nil || vectorID == "" {
+		return nil
+	}
+	hashValue := hashVectorID(vectorID)
+	for i := range entry.shards {
+		shard := &entry.shards[i]
+		if hashValue >= shard.start && hashValue <= shard.end {
+			return shard
+		}
+	}
+	return nil
+}
+
+func pickShardAddress(shard *routingShard) string {
+	if shard == nil {
+		return ""
+	}
+	if shard.leaderAddr != "" {
+		return shard.leaderAddr
+	}
+	if len(shard.replicaAddrs) > 0 {
+		return shard.replicaAddrs[0]
+	}
+	return ""
+}
+
 func (s *gatewayServer) resolveWorker(ctx context.Context, collection string, vectorID string, forceRefresh bool) (string, uint64, uint64, int64, error) {
 	if vectorID != "" && !forceRefresh {
 		if addr, shardID, shardEpoch, leaseExpiry, ok := s.resolveCache.Get(collection, vectorID); ok {
 			return addr, shardID, shardEpoch, leaseExpiry, nil
+		}
+	}
+
+	if vectorID != "" {
+		entry, err := s.getCollectionRouting(ctx, collection, forceRefresh)
+		if err == nil && entry != nil {
+			if route := pickShardFromRouting(entry, vectorID); route != nil {
+				addr := pickShardAddress(route)
+				if addr != "" {
+					leaseExpiry := time.Now().Add(routingLeaseTTL).UnixMilli()
+					s.resolveCache.Set(collection, vectorID, addr, route.shardID, route.shardEpoch, leaseExpiry)
+					return addr, route.shardID, route.shardEpoch, leaseExpiry, nil
+				}
+			}
 		}
 	}
 
@@ -1527,6 +1683,16 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 		}
 	}
 
+	// Warm the routing cache once to avoid per-point PD lookups.
+	var routingEntry *collectionRoutingEntry
+	if s.routingCache != nil {
+		if entry, err := s.getCollectionRouting(ctx, req.Collection, false); err != nil {
+			log.Printf("Routing cache warm failed for collection %q: %v", req.Collection, err)
+		} else {
+			routingEntry = entry
+		}
+	}
+
 	// Resolve worker/shard assignments in parallel, then batch per shard.
 	var (
 		assignMu    sync.Mutex
@@ -1536,25 +1702,28 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 		assignments = make(map[string]map[uint64]*shardBatch)
 	)
 
-	for _, point := range req.Points {
-		assignWg.Add(1)
-		go func(p *pb.Point) {
-			defer assignWg.Done()
+	if routingEntry != nil && len(routingEntry.shards) > 0 {
+		for _, p := range req.Points {
+			route := pickShardFromRouting(routingEntry, p.Id)
+			addr := pickShardAddress(route)
+			shardID := uint64(0)
+			shardEpoch := uint64(0)
+			leaseExpiry := time.Now().Add(routingLeaseTTL).UnixMilli()
 
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-
-			addr, shardID, shardEpoch, leaseExpiry, err := s.resolveWorker(ctx, req.Collection, p.Id, false)
-			if err != nil {
-				assignMu.Lock()
-				if assignErr == nil {
-					assignErr = err
-				}
-				assignMu.Unlock()
-				return
+			if route != nil {
+				shardID = route.shardID
+				shardEpoch = route.shardEpoch
 			}
 
-			assignMu.Lock()
+			if addr == "" || shardID == 0 {
+				var err error
+				addr, shardID, shardEpoch, leaseExpiry, err = s.resolveWorker(ctx, req.Collection, p.Id, true)
+				if err != nil {
+					assignErr = err
+					break
+				}
+			}
+
 			shards, ok := assignments[addr]
 			if !ok {
 				shards = make(map[uint64]*shardBatch)
@@ -1576,8 +1745,51 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 			if leaseExpiry > batch.leaseExpiryUnixMs {
 				batch.leaseExpiryUnixMs = leaseExpiry
 			}
-			assignMu.Unlock()
-		}(point)
+		}
+	} else {
+		for _, point := range req.Points {
+			assignWg.Add(1)
+			go func(p *pb.Point) {
+				defer assignWg.Done()
+
+				semaphore <- struct{}{}
+				defer func() { <-semaphore }()
+
+				addr, shardID, shardEpoch, leaseExpiry, err := s.resolveWorker(ctx, req.Collection, p.Id, false)
+				if err != nil {
+					assignMu.Lock()
+					if assignErr == nil {
+						assignErr = err
+					}
+					assignMu.Unlock()
+					return
+				}
+
+				assignMu.Lock()
+				shards, ok := assignments[addr]
+				if !ok {
+					shards = make(map[uint64]*shardBatch)
+					assignments[addr] = shards
+				}
+				batch := shards[shardID]
+				if batch == nil {
+					batch = &shardBatch{
+						points:            make([]*pb.Point, 0, 8),
+						shardEpoch:        shardEpoch,
+						leaseExpiryUnixMs: leaseExpiry,
+					}
+					shards[shardID] = batch
+				}
+				batch.points = append(batch.points, p)
+				if shardEpoch > batch.shardEpoch {
+					batch.shardEpoch = shardEpoch
+				}
+				if leaseExpiry > batch.leaseExpiryUnixMs {
+					batch.leaseExpiryUnixMs = leaseExpiry
+				}
+				assignMu.Unlock()
+			}(point)
+		}
 	}
 
 	assignWg.Wait()
@@ -2577,6 +2789,7 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 		searchCache:            NewSearchCache(5*time.Second, 1000),             // Cache search results for 5s, max 1000 entries
 		workerListCache:        NewWorkerListCache(2 * time.Second),
 		resolveCache:           NewWorkerResolveCache(5*time.Second, 10000),
+		routingCache:           NewCollectionRoutingCache(5 * time.Second),
 		grpcCompressionEnabled: config.GRPCEnableCompression,
 		rerankWarmupInFlight:   make(map[uint64]struct{}),
 		inFlightSearches:       make(map[uint64]*inFlightSearch),
