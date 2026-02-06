@@ -115,12 +115,34 @@ func NewPebbleDB() *PebbleDB {
 
 // Search finds the k-nearest neighbors to a query vector using the HNSW index.
 // Optimized to use batch existence checks instead of N+1 queries.
-func (r *PebbleDB) Search(query []float32, k int) ([]string, []float32, error) {
+func (r *PebbleDB) Search(query []float32, k int) (ids []string, scores []float32, err error) {
+	logEnabled := shouldLogStorageHotPath()
+	start := time.Now()
+	usedHot := false
+	usedTwoStage := false
+	efUsed := 0
+	defer func() {
+		if logEnabled {
+			logStoragef("storage search dim=%d k=%d ef=%d hot=%t twoStage=%t quant=%t total=%s err=%v",
+				len(query),
+				k,
+				efUsed,
+				usedHot,
+				usedTwoStage,
+				r.opts != nil && r.opts.HNSWConfig.QuantizeVectors,
+				time.Since(start),
+				err,
+			)
+		}
+	}()
+
 	if r.hnsw == nil {
-		return nil, nil, errors.New("hnsw index not initialized")
+		err = errors.New("hnsw index not initialized")
+		return nil, nil, err
 	}
 	if r.opts != nil && r.opts.HNSWConfig.Dim > 0 && len(query) != r.opts.HNSWConfig.Dim {
-		return nil, nil, fmt.Errorf("search vector dimension %d does not match index dimension %d", len(query), r.opts.HNSWConfig.Dim)
+		err = fmt.Errorf("search vector dimension %d does not match index dimension %d", len(query), r.opts.HNSWConfig.Dim)
+		return nil, nil, err
 	}
 
 	// The HNSW search returns candidate IDs and their distances.
@@ -162,7 +184,9 @@ func (r *PebbleDB) Search(query []float32, k int) ([]string, []float32, error) {
 			ef = adaptive
 		}
 	}
+	efUsed = ef
 	if r.hnswHot != nil && r.opts != nil && r.opts.HNSWConfig.HotIndexEnabled {
+		usedHot = true
 		hotEf := r.opts.HNSWConfig.HotIndexEf
 		if hotEf <= 0 {
 			hotEf = ef
@@ -180,7 +204,8 @@ func (r *PebbleDB) Search(query []float32, k int) ([]string, []float32, error) {
 
 		var coldIDs []string
 		var coldScores []float32
-		if r.opts.HNSWConfig.MultiStageEnabled {
+		if r.opts.HNSWConfig.MultiStageEnabled && !r.opts.HNSWConfig.QuantizeVectors {
+			usedTwoStage = true
 			stage1Ef := r.opts.HNSWConfig.Stage1Ef
 			if stage1Ef <= 0 {
 				stage1Ef = coldEf / 2
@@ -194,11 +219,12 @@ func (r *PebbleDB) Search(query []float32, k int) ([]string, []float32, error) {
 			coldIDs, coldScores = r.hnsw.SearchWithEf(searchVec, k, coldEf)
 		}
 
-		ids, scores := mergeSearchResults(hotIDs, hotScores, coldIDs, coldScores, k)
+		ids, scores = mergeSearchResults(hotIDs, hotScores, coldIDs, coldScores, k)
 		return ids, scores, nil
 	}
 
-	if r.opts != nil && r.opts.HNSWConfig.MultiStageEnabled {
+	if r.opts != nil && r.opts.HNSWConfig.MultiStageEnabled && !r.opts.HNSWConfig.QuantizeVectors {
+		usedTwoStage = true
 		stage1Ef := r.opts.HNSWConfig.Stage1Ef
 		if stage1Ef <= 0 {
 			stage1Ef = ef / 2
@@ -207,10 +233,10 @@ func (r *PebbleDB) Search(query []float32, k int) ([]string, []float32, error) {
 		if candidateFactor <= 0 {
 			candidateFactor = 4
 		}
-		ids, scores := r.hnsw.SearchTwoStage(searchVec, k, stage1Ef, candidateFactor)
+		ids, scores = r.hnsw.SearchTwoStage(searchVec, k, stage1Ef, candidateFactor)
 		return ids, scores, nil
 	}
-	ids, scores := r.hnsw.SearchWithEf(searchVec, k, ef)
+	ids, scores = r.hnsw.SearchWithEf(searchVec, k, ef)
 	return ids, scores, nil
 }
 

@@ -91,6 +91,7 @@ var (
 	benchmarkApigatewayPort = 10010
 	benchmarkApigatewayHTTP = 10012
 	benchmarkRerankerPort   = 10013
+	benchmarkValkeyPort     = 6379
 
 	// Base directory for all temporary test files (data and logs)
 	benchmarkBaseTempDir = "./temp_vectron_benchmark"
@@ -209,6 +210,35 @@ type BenchmarkTest struct {
 	placementClient placementpb.PlacementServiceClient
 }
 
+func findRepoRootBenchmark() (string, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	dir := wd
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("go.mod not found from %s", wd)
+		}
+		dir = parent
+	}
+}
+
+func resolveBenchmarkPaths(t *testing.T) {
+	t.Helper()
+	root, err := findRepoRootBenchmark()
+	if err != nil {
+		t.Fatalf("Failed to locate repo root: %v", err)
+	}
+	benchmarkBaseTempDir = filepath.Join(root, "temp_vectron_benchmark")
+	benchmarkDataTempDir = filepath.Join(benchmarkBaseTempDir, "data")
+	benchmarkLogTempDir = filepath.Join(benchmarkBaseTempDir, "logs")
+}
+
 // =============================================================================
 // Main Research Benchmark Test
 // =============================================================================
@@ -221,6 +251,9 @@ func TestResearchBenchmark(t *testing.T) {
 	log.Println("🔬 Starting Research Benchmark Suite...")
 	log.Println("This will run comprehensive benchmarks for research paper analysis")
 	log.Println("Estimated duration: 20-30 minutes")
+
+	// Resolve temp paths relative to repo root (so child processes use correct paths).
+	resolveBenchmarkPaths(t)
 
 	// Create base temporary directories
 	if err := os.MkdirAll(benchmarkDataTempDir, 0755); err != nil {
@@ -288,10 +321,11 @@ func (s *BenchmarkTest) TestSystemStartup(t *testing.T) {
 		s.startWorkers()
 		s.startAuthService()
 		s.startReranker()
+		s.startValkey()
 		s.startAPIGateway()
 
 		// Wait for all services to be ready
-		ports := []int{benchmarkEtcdPort, benchmarkPdGRPCPort1, benchmarkWorkerPort1, benchmarkAuthGRPCPort, benchmarkApigatewayPort, benchmarkRerankerPort}
+		ports := []int{benchmarkEtcdPort, benchmarkPdGRPCPort1, benchmarkWorkerPort1, benchmarkAuthGRPCPort, benchmarkApigatewayPort, benchmarkRerankerPort, benchmarkValkeyPort}
 		for _, port := range ports {
 			require.Eventually(t, func() bool {
 				return s.isPortOpen(port)
@@ -386,6 +420,52 @@ func (s *BenchmarkTest) startEtcd() {
 		case <-ticker.C:
 			if s.isPortOpen(benchmarkEtcdPort) {
 				log.Println("✅ Etcd started and listening")
+				return
+			}
+		}
+	}
+}
+
+func (s *BenchmarkTest) startValkey() {
+	log.Println("▶️ Starting Valkey (Podman)...")
+
+	// Stop existing container if running.
+	exec.CommandContext(s.ctx, "podman", "stop", "vectron-valkey-benchmark").Run()
+
+	checkCmd := exec.CommandContext(s.ctx, "podman", "container", "exists", "vectron-valkey-benchmark")
+	if err := checkCmd.Run(); err == nil {
+		startCmd := exec.CommandContext(s.ctx, "podman", "start", "vectron-valkey-benchmark")
+		if out, err := startCmd.CombinedOutput(); err != nil {
+			s.t.Fatalf("Failed to start existing Valkey container: %v\nOutput: %s", err, string(out))
+		}
+	} else {
+		runCmd := exec.CommandContext(s.ctx, "podman", "run", "-d",
+			"--name", "vectron-valkey-benchmark",
+			"-p", fmt.Sprintf("%d:6379", benchmarkValkeyPort),
+			"valkey/valkey:latest",
+			"valkey-server",
+			"--save", "",
+			"--appendonly", "no",
+			"--maxmemory", "2gb",
+			"--maxmemory-policy", "allkeys-lru",
+		)
+		if out, err := runCmd.CombinedOutput(); err != nil {
+			s.t.Fatalf("Failed to run new Valkey container: %v\nOutput: %s", err, string(out))
+		}
+	}
+
+	log.Println("⏳ Waiting for Valkey to be ready...")
+	timeout := time.After(10 * time.Second)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeout:
+			s.t.Fatal("Timed out waiting for Valkey to start")
+		case <-ticker.C:
+			if s.isPortOpen(benchmarkValkeyPort) {
+				log.Println("✅ Valkey started and listening")
 				return
 			}
 		}
@@ -560,6 +640,7 @@ func (s *BenchmarkTest) startAPIGateway() {
 		"FEEDBACK_DB_PATH="+dataDir+"/feedback.db",
 		"JWT_SECRET=test-jwt-secret-for-testing-only-do-not-use-in-production",
 		"RATE_LIMIT_RPS=10000",
+		fmt.Sprintf("DISTRIBUTED_CACHE_ADDR=127.0.0.1:%d", benchmarkValkeyPort),
 	)
 
 	if f, err := os.OpenFile(filepath.Join(benchmarkLogTempDir, "vectron-apigw-benchmark.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {
@@ -640,6 +721,9 @@ func (s *BenchmarkTest) cleanup() {
 	// Clean up base data directory but keep logs
 	log.Printf("Removing data directory: %s", benchmarkDataTempDir)
 	os.RemoveAll(benchmarkDataTempDir)
+
+	// Stop Valkey container if running
+	exec.Command("podman", "stop", "vectron-valkey-benchmark").Run()
 
 	log.Println("✅ Cleanup complete (logs preserved in: " + benchmarkLogTempDir + ")")
 }

@@ -298,6 +298,10 @@ func readLastApplied(dir string) (uint64, error) {
 func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dimension int32, distance string) (*StateMachine, error) {
 	dbPath := filepath.Join(workerDataDir, fmt.Sprintf("shard-%d", clusterID))
 
+	quantizeEnabled := distance == "cosine"
+	// Performance-first defaults: avoid extra per-insert CPU and dual-index overhead.
+	compressEnabled := false
+
 	opts := &storage.Options{
 		Path:            dbPath,
 		CreateIfMissing: true,
@@ -308,19 +312,22 @@ func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dime
 			EfSearch:         100, // check what it controlls then tunr it
 			DistanceMetric:   distance,
 			NormalizeVectors: distance == "cosine",
-			QuantizeVectors:  distance == "cosine",
-			VectorCompressionEnabled: distance == "cosine",
-			MultiStageEnabled:        true,
-			MaintenanceEnabled: true,
+			QuantizeVectors:  quantizeEnabled,
+			VectorCompressionEnabled: compressEnabled,
+			MultiStageEnabled:        false,
+			HotIndexEnabled:          false,
+			BulkLoadEnabled:          true,
+			BulkLoadThreshold:        1000,
+			MaintenanceEnabled: false,
 			MaintenanceInterval: 30 * time.Minute,
-			PruneEnabled:      true,
+			PruneEnabled:      false,
 			PruneMaxNodes:     2000,
-			MmapVectorsEnabled: true,
+			MmapVectorsEnabled: false,
 			AsyncIndexingEnabled:  true,
-			IndexingQueueSize:     20000,
-			IndexingBatchSize:     512,
-			IndexingFlushInterval: 5 * time.Millisecond,
-			WarmupEnabled:         true,
+			IndexingQueueSize:     50000,
+			IndexingBatchSize:     2048,
+			IndexingFlushInterval: 25 * time.Millisecond,
+			WarmupEnabled:         false,
 			WarmupMaxVectors:      10000,
 			WarmupDelay:           5 * time.Second,
 		},

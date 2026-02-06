@@ -34,16 +34,22 @@ type Config struct {
 	SearchConsistencyOverrides map[string]bool // Per-collection read consistency (true = linearizable).
 	SearchCacheTTLms           int             // TTL for in-memory search cache (milliseconds).
 	SearchCacheMaxSize         int             // Max entries for in-memory search cache.
+	SearchCacheEnabled         bool            // Enable in-memory search cache.
+	SearchFanoutEnabled        bool            // Fan out search across all shards/workers when true.
 	DistributedCacheAddr       string          // Valkey/Redis address for distributed cache.
 	DistributedCachePassword   string          // Password for distributed cache.
 	DistributedCacheDB         int             // DB index for distributed cache.
 	DistributedCacheTTLms      int             // TTL for distributed cache (milliseconds).
 	DistributedCacheTimeoutMs  int             // Timeout for distributed cache ops (milliseconds).
+	DistributedCacheSearchEnabled bool         // Enable distributed cache for search results.
+	GatewayDebugLogs           bool            // Enable verbose gateway logs.
+	GatewayLogSampleEvery      int             // Sample rate for hot-path logs (1 = log all).
+	RawSpeedMode               bool            // Disable expensive features for max throughput.
 }
 
 // LoadConfig loads the configuration from environment variables with default fallbacks.
 func LoadConfig() Config {
-	return Config{
+	cfg := Config{
 		GRPCAddr:                   getEnv("GRPC_ADDR", ":8081"),
 		HTTPAddr:                   getEnv("HTTP_ADDR", ":8080"),
 		PlacementDriver:            getEnv("PLACEMENT_DRIVER", "placement:6300"),
@@ -66,12 +72,32 @@ func LoadConfig() Config {
 		SearchConsistencyOverrides: parseConsistencyOverrides(getEnv("SEARCH_CONSISTENCY_OVERRIDES", "")),
 		SearchCacheTTLms:           getEnvAsInt("SEARCH_CACHE_TTL_MS", 0),
 		SearchCacheMaxSize:         getEnvAsInt("SEARCH_CACHE_MAX_SIZE", 0),
+		SearchCacheEnabled:         getEnvAsBool("SEARCH_CACHE_ENABLED", true),
+		SearchFanoutEnabled:        getEnvAsBool("SEARCH_FANOUT_ENABLED", true),
 		DistributedCacheAddr:       getEnv("DISTRIBUTED_CACHE_ADDR", ""),
 		DistributedCachePassword:   getEnv("DISTRIBUTED_CACHE_PASSWORD", ""),
 		DistributedCacheDB:         getEnvAsInt("DISTRIBUTED_CACHE_DB", 0),
 		DistributedCacheTTLms:      getEnvAsInt("DISTRIBUTED_CACHE_TTL_MS", 5000),
 		DistributedCacheTimeoutMs:  getEnvAsInt("DISTRIBUTED_CACHE_TIMEOUT_MS", 8),
+		DistributedCacheSearchEnabled: getEnvAsBool("DISTRIBUTED_CACHE_SEARCH_ENABLED", true),
+		GatewayDebugLogs:           getEnvAsBool("GATEWAY_DEBUG_LOGS", false),
+		GatewayLogSampleEvery:      getEnvAsInt("GATEWAY_LOG_SAMPLE_EVERY", 100),
+		RawSpeedMode:               getEnvAsBool("RAW_SPEED_MODE", true),
 	}
+
+	if cfg.RawSpeedMode {
+		cfg.GRPCEnableCompression = false
+		cfg.SearchLinearizable = false
+		cfg.SearchFanoutEnabled = false
+		cfg.RerankEnabled = false
+		cfg.RerankWarmupEnabled = false
+		cfg.SearchCacheEnabled = false
+		cfg.SearchCacheTTLms = 0
+		cfg.SearchCacheMaxSize = 0
+		cfg.DistributedCacheSearchEnabled = false
+	}
+
+	return cfg
 }
 
 // getEnv retrieves an environment variable by key, returning a fallback value if not set.

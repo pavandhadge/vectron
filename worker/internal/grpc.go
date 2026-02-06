@@ -146,6 +146,7 @@ func (s *GrpcServer) StoreVector(ctx context.Context, req *worker.StoreVectorReq
 	if shouldLogHotPath() {
 		log.Printf("Received StoreVector request for ID: %s on shard %d", req.GetVector().GetId(), req.GetShardId())
 	}
+	start := time.Now()
 	if req.GetVector() == nil {
 		return nil, status.Error(codes.InvalidArgument, "vector is nil")
 	}
@@ -176,6 +177,10 @@ func (s *GrpcServer) StoreVector(ctx context.Context, req *worker.StoreVectorReq
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to propose StoreVector command: %v", err)
 	}
+	if shouldLogHotPath() {
+		log.Printf("Worker StoreVector shard=%d vecDim=%d total=%s err=nil",
+			req.GetShardId(), len(req.GetVector().GetVector()), time.Since(start))
+	}
 
 	return &worker.StoreVectorResponse{}, nil
 }
@@ -185,6 +190,7 @@ func (s *GrpcServer) BatchStoreVector(ctx context.Context, req *worker.BatchStor
 	if req == nil || len(req.GetVectors()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "vectors are empty")
 	}
+	start := time.Now()
 	if err := s.validateShardLease(req.GetShardId(), req.GetShardEpoch(), req.GetLeaseExpiryUnixMs()); err != nil {
 		return nil, err
 	}
@@ -217,6 +223,14 @@ func (s *GrpcServer) BatchStoreVector(ctx context.Context, req *worker.BatchStor
 	cs := s.nodeHost.GetNoOPSession(req.GetShardId())
 	if _, err := s.nodeHost.SyncPropose(ctx, cs, cmdBytes); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to propose batch StoreVector command: %v", err)
+	}
+	if shouldLogHotPath() {
+		vecDim := 0
+		if len(req.GetVectors()) > 0 {
+			vecDim = len(req.GetVectors()[0].GetVector())
+		}
+		log.Printf("Worker BatchStoreVector shard=%d batch=%d vecDim=%d total=%s err=nil",
+			req.GetShardId(), len(req.GetVectors()), vecDim, time.Since(start))
 	}
 
 	return &worker.BatchStoreVectorResponse{Stored: int32(len(cmdVectors))}, nil
@@ -300,6 +314,7 @@ func (s *GrpcServer) Search(ctx context.Context, req *worker.SearchRequest) (*wo
 	if shouldLogHotPath() {
 		log.Printf("Received Search request on shard %d", req.GetShardId())
 	}
+	start := time.Now()
 	if len(req.GetVector()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "search vector is empty")
 	}
@@ -314,6 +329,17 @@ func (s *GrpcServer) Search(ctx context.Context, req *worker.SearchRequest) (*wo
 
 	resp, err := s.searchCore(ctx, req)
 	s.finishInFlight(key, resp, err)
+	if shouldLogHotPath() {
+		log.Printf("Worker Search shard=%d broadcast=%t linearizable=%t vecDim=%d k=%d total=%s err=%v",
+			req.GetShardId(),
+			req.GetShardId() == 0,
+			req.GetLinearizable(),
+			len(req.GetVector()),
+			req.GetK(),
+			time.Since(start),
+			err,
+		)
+	}
 	return resp, err
 }
 
