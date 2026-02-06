@@ -197,24 +197,44 @@ func decodeVectorWithMeta(data []byte) ([]float32, []byte, error) {
 	}
 
 	vecLen32 := binary.LittleEndian.Uint32(data[:4])
-	vecLen := int(vecLen32)
-	expectedLen := 4 + vecLen*4
+	compressed := (vecLen32 & vectorCompressionFlag) != 0
+	vecLen := int(vecLen32 & ^vectorCompressionFlag)
 
-	if len(data) < expectedLen {
-		return nil, nil, errors.New("data too short for declared vector length")
+	if !compressed {
+		expectedLen := 4 + vecLen*4
+		if len(data) < expectedLen {
+			return nil, nil, errors.New("data too short for declared vector length")
+		}
+		vector := make([]float32, vecLen)
+		for i := 0; i < vecLen; i++ {
+			start := 4 + i*4
+			vector[i] = math.Float32frombits(binary.LittleEndian.Uint32(data[start : start+4]))
+		}
+		var metadata []byte
+		if len(data) > expectedLen {
+			metadata = data[expectedLen:]
+		}
+		return vector, metadata, nil
 	}
 
+	expectedLen := 4 + 4 + vecLen
+	if len(data) < expectedLen {
+		return nil, nil, errors.New("data too short for declared compressed vector length")
+	}
+	scaleBits := binary.LittleEndian.Uint32(data[4:8])
+	scale := math.Float32frombits(scaleBits)
+	if scale == 0 {
+		scale = 1
+	}
+	mult := scale / 127.0
 	vector := make([]float32, vecLen)
 	for i := 0; i < vecLen; i++ {
-		start := 4 + i*4
-		vector[i] = math.Float32frombits(binary.LittleEndian.Uint32(data[start : start+4]))
+		vector[i] = float32(int8(data[8+i])) * mult
 	}
-
 	var metadata []byte
 	if len(data) > expectedLen {
 		metadata = data[expectedLen:]
 	}
-
 	return vector, metadata, nil
 }
 

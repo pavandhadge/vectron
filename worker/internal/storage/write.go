@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 
@@ -81,7 +82,7 @@ func (r *PebbleDB) StoreVector(id string, vector []float32, metadata []byte) err
 	asyncIndex := r.opts != nil && r.opts.HNSWConfig.AsyncIndexingEnabled && r.indexerCh != nil
 
 	// 2. If HNSW add is successful, commit the vector and WAL entry to PebbleDB.
-	val, err := encodeVectorWithMeta(vector, metadata)
+	val, err := encodeVectorWithMeta(vector, metadata, r.shouldCompressVectors())
 	if err != nil {
 		return fmt.Errorf("failed to encode vector with meta: %w", err)
 	}
@@ -157,7 +158,7 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 
 		added = append(added, v.ID)
 
-		val, err := encodeVectorWithMeta(v.Vector, v.Metadata)
+		val, err := encodeVectorWithMeta(v.Vector, v.Metadata, r.shouldCompressVectors())
 		if err != nil {
 			return fmt.Errorf("failed to encode vector with meta: %w", err)
 		}
@@ -329,7 +330,7 @@ func (r *PebbleDB) bulkLoadVectors(vectors []VectorEntry) error {
 		}
 		added = append(added, v.ID)
 
-		val, err := encodeVectorWithMeta(v.Vector, v.Metadata)
+		val, err := encodeVectorWithMeta(v.Vector, v.Metadata, r.shouldCompressVectors())
 		if err != nil {
 			for _, id := range added {
 				_ = r.hnsw.Delete(id)
@@ -379,25 +380,75 @@ func (r *PebbleDB) bulkLoadVectors(vectors []VectorEntry) error {
 	return nil
 }
 
-// encodeVectorWithMeta serializes a vector and its metadata into a single byte slice.
-// The format is: [vector_length (4 bytes)] [vector_data] [metadata_data].
-func encodeVectorWithMeta(vector []float32, metadata []byte) ([]byte, error) {
-	buf := new(bytes.Buffer)
-	vecLen := int32(len(vector))
+const vectorCompressionFlag = uint32(1 << 31)
 
-	// Write the length of the vector.
-	if err := binary.Write(buf, binary.LittleEndian, vecLen); err != nil {
-		return nil, err
+func (r *PebbleDB) shouldCompressVectors() bool {
+	if r.opts == nil {
+		return false
 	}
-	// Write the vector itself.
-	if err := binary.Write(buf, binary.LittleEndian, vector); err != nil {
-		return nil, err
+	cfg := r.opts.HNSWConfig
+	if !cfg.VectorCompressionEnabled {
+		return false
 	}
-	// Append the metadata.
-	if len(metadata) > 0 {
-		if _, err := buf.Write(metadata); err != nil {
+	if cfg.DistanceMetric != "cosine" || !cfg.NormalizeVectors {
+		return false
+	}
+	return true
+}
+
+func encodeVectorWithMeta(vector []float32, metadata []byte, compress bool) ([]byte, error) {
+	vecLen := len(vector)
+	if vecLen < 0 {
+		return nil, fmt.Errorf("invalid vector length")
+	}
+	if !compress {
+		buf := new(bytes.Buffer)
+		vecLen32 := int32(vecLen)
+		if err := binary.Write(buf, binary.LittleEndian, vecLen32); err != nil {
 			return nil, err
 		}
+		if err := binary.Write(buf, binary.LittleEndian, vector); err != nil {
+			return nil, err
+		}
+		if len(metadata) > 0 {
+			if _, err := buf.Write(metadata); err != nil {
+				return nil, err
+			}
+		}
+		return buf.Bytes(), nil
 	}
-	return buf.Bytes(), nil
+
+	if vecLen > int(^vectorCompressionFlag) {
+		return nil, fmt.Errorf("vector length too large")
+	}
+
+	scale := float32(0)
+	for _, v := range vector {
+		abs := float32(math.Abs(float64(v)))
+		if abs > scale {
+			scale = abs
+		}
+	}
+	if scale == 0 {
+		scale = 1
+	}
+	invScale := 127.0 / float64(scale)
+
+	totalLen := 4 + 4 + vecLen + len(metadata)
+	buf := make([]byte, totalLen)
+	binary.LittleEndian.PutUint32(buf[:4], uint32(vecLen)|vectorCompressionFlag)
+	binary.LittleEndian.PutUint32(buf[4:8], math.Float32bits(scale))
+	for i, v := range vector {
+		q := int(math.Round(float64(v) * invScale))
+		if q > 127 {
+			q = 127
+		} else if q < -127 {
+			q = -127
+		}
+		buf[8+i] = byte(int8(q))
+	}
+	if len(metadata) > 0 {
+		copy(buf[8+vecLen:], metadata)
+	}
+	return buf, nil
 }

@@ -309,6 +309,8 @@ func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dime
 			DistanceMetric:   distance,
 			NormalizeVectors: distance == "cosine",
 			QuantizeVectors:  distance == "cosine",
+			VectorCompressionEnabled: distance == "cosine",
+			MultiStageEnabled:        true,
 			MaintenanceEnabled: true,
 			MaintenanceInterval: 30 * time.Minute,
 			PruneEnabled:      true,
