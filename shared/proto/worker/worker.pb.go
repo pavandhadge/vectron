@@ -586,6 +586,94 @@ func (x *SearchResponse) GetScores() []float32 {
 	return nil
 }
 
+type BatchSearchRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Requests      []*SearchRequest       `protobuf:"bytes,1,rep,name=requests,proto3" json:"requests,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BatchSearchRequest) Reset() {
+	*x = BatchSearchRequest{}
+	mi := &file_worker_worker_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BatchSearchRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BatchSearchRequest) ProtoMessage() {}
+
+func (x *BatchSearchRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_worker_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BatchSearchRequest.ProtoReflect.Descriptor instead.
+func (*BatchSearchRequest) Descriptor() ([]byte, []int) {
+	return file_worker_worker_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *BatchSearchRequest) GetRequests() []*SearchRequest {
+	if x != nil {
+		return x.Requests
+	}
+	return nil
+}
+
+type BatchSearchResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Responses     []*SearchResponse      `protobuf:"bytes,1,rep,name=responses,proto3" json:"responses,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BatchSearchResponse) Reset() {
+	*x = BatchSearchResponse{}
+	mi := &file_worker_worker_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BatchSearchResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BatchSearchResponse) ProtoMessage() {}
+
+func (x *BatchSearchResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_worker_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BatchSearchResponse.ProtoReflect.Descriptor instead.
+func (*BatchSearchResponse) Descriptor() ([]byte, []int) {
+	return file_worker_worker_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *BatchSearchResponse) GetResponses() []*SearchResponse {
+	if x != nil {
+		return x.Responses
+	}
+	return nil
+}
+
 // Key-value messages
 type KeyValuePair struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -597,7 +685,7 @@ type KeyValuePair struct {
 
 func (x *KeyValuePair) Reset() {
 	*x = KeyValuePair{}
-	mi := &file_worker_worker_proto_msgTypes[11]
+	mi := &file_worker_worker_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -609,7 +697,7 @@ func (x *KeyValuePair) String() string {
 func (*KeyValuePair) ProtoMessage() {}
 
 func (x *KeyValuePair) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[11]
+	mi := &file_worker_worker_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -622,7 +710,7 @@ func (x *KeyValuePair) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KeyValuePair.ProtoReflect.Descriptor instead.
 func (*KeyValuePair) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{11}
+	return file_worker_worker_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *KeyValuePair) GetKey() []byte {
@@ -649,7 +737,7 @@ type PutRequest struct {
 
 func (x *PutRequest) Reset() {
 	*x = PutRequest{}
-	mi := &file_worker_worker_proto_msgTypes[12]
+	mi := &file_worker_worker_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -661,7 +749,7 @@ func (x *PutRequest) String() string {
 func (*PutRequest) ProtoMessage() {}
 
 func (x *PutRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[12]
+	mi := &file_worker_worker_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -674,7 +762,7 @@ func (x *PutRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutRequest.ProtoReflect.Descriptor instead.
 func (*PutRequest) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{12}
+	return file_worker_worker_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *PutRequest) GetShardId() uint64 {
@@ -699,7 +787,7 @@ type PutResponse struct {
 
 func (x *PutResponse) Reset() {
 	*x = PutResponse{}
-	mi := &file_worker_worker_proto_msgTypes[13]
+	mi := &file_worker_worker_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -711,7 +799,7 @@ func (x *PutResponse) String() string {
 func (*PutResponse) ProtoMessage() {}
 
 func (x *PutResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[13]
+	mi := &file_worker_worker_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -724,7 +812,7 @@ func (x *PutResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutResponse.ProtoReflect.Descriptor instead.
 func (*PutResponse) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{13}
+	return file_worker_worker_proto_rawDescGZIP(), []int{15}
 }
 
 type GetRequest struct {
@@ -737,7 +825,7 @@ type GetRequest struct {
 
 func (x *GetRequest) Reset() {
 	*x = GetRequest{}
-	mi := &file_worker_worker_proto_msgTypes[14]
+	mi := &file_worker_worker_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -749,7 +837,7 @@ func (x *GetRequest) String() string {
 func (*GetRequest) ProtoMessage() {}
 
 func (x *GetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[14]
+	mi := &file_worker_worker_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -762,7 +850,7 @@ func (x *GetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRequest.ProtoReflect.Descriptor instead.
 func (*GetRequest) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{14}
+	return file_worker_worker_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *GetRequest) GetShardId() uint64 {
@@ -788,7 +876,7 @@ type GetResponse struct {
 
 func (x *GetResponse) Reset() {
 	*x = GetResponse{}
-	mi := &file_worker_worker_proto_msgTypes[15]
+	mi := &file_worker_worker_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -800,7 +888,7 @@ func (x *GetResponse) String() string {
 func (*GetResponse) ProtoMessage() {}
 
 func (x *GetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[15]
+	mi := &file_worker_worker_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -813,7 +901,7 @@ func (x *GetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetResponse.ProtoReflect.Descriptor instead.
 func (*GetResponse) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{15}
+	return file_worker_worker_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *GetResponse) GetKv() *KeyValuePair {
@@ -833,7 +921,7 @@ type DeleteRequest struct {
 
 func (x *DeleteRequest) Reset() {
 	*x = DeleteRequest{}
-	mi := &file_worker_worker_proto_msgTypes[16]
+	mi := &file_worker_worker_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -845,7 +933,7 @@ func (x *DeleteRequest) String() string {
 func (*DeleteRequest) ProtoMessage() {}
 
 func (x *DeleteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[16]
+	mi := &file_worker_worker_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -858,7 +946,7 @@ func (x *DeleteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteRequest.ProtoReflect.Descriptor instead.
 func (*DeleteRequest) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{16}
+	return file_worker_worker_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *DeleteRequest) GetShardId() uint64 {
@@ -883,7 +971,7 @@ type DeleteResponse struct {
 
 func (x *DeleteResponse) Reset() {
 	*x = DeleteResponse{}
-	mi := &file_worker_worker_proto_msgTypes[17]
+	mi := &file_worker_worker_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -895,7 +983,7 @@ func (x *DeleteResponse) String() string {
 func (*DeleteResponse) ProtoMessage() {}
 
 func (x *DeleteResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[17]
+	mi := &file_worker_worker_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -908,7 +996,7 @@ func (x *DeleteResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteResponse.ProtoReflect.Descriptor instead.
 func (*DeleteResponse) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{17}
+	return file_worker_worker_proto_rawDescGZIP(), []int{19}
 }
 
 // Control/Admin messages
@@ -921,7 +1009,7 @@ type StatusRequest struct {
 
 func (x *StatusRequest) Reset() {
 	*x = StatusRequest{}
-	mi := &file_worker_worker_proto_msgTypes[18]
+	mi := &file_worker_worker_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -933,7 +1021,7 @@ func (x *StatusRequest) String() string {
 func (*StatusRequest) ProtoMessage() {}
 
 func (x *StatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[18]
+	mi := &file_worker_worker_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -946,7 +1034,7 @@ func (x *StatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatusRequest.ProtoReflect.Descriptor instead.
 func (*StatusRequest) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{18}
+	return file_worker_worker_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *StatusRequest) GetShardId() uint64 {
@@ -965,7 +1053,7 @@ type StatusResponse struct {
 
 func (x *StatusResponse) Reset() {
 	*x = StatusResponse{}
-	mi := &file_worker_worker_proto_msgTypes[19]
+	mi := &file_worker_worker_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -977,7 +1065,7 @@ func (x *StatusResponse) String() string {
 func (*StatusResponse) ProtoMessage() {}
 
 func (x *StatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[19]
+	mi := &file_worker_worker_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -990,7 +1078,7 @@ func (x *StatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatusResponse.ProtoReflect.Descriptor instead.
 func (*StatusResponse) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{19}
+	return file_worker_worker_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *StatusResponse) GetStatus() string {
@@ -1009,7 +1097,7 @@ type FlushRequest struct {
 
 func (x *FlushRequest) Reset() {
 	*x = FlushRequest{}
-	mi := &file_worker_worker_proto_msgTypes[20]
+	mi := &file_worker_worker_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1021,7 +1109,7 @@ func (x *FlushRequest) String() string {
 func (*FlushRequest) ProtoMessage() {}
 
 func (x *FlushRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[20]
+	mi := &file_worker_worker_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1034,7 +1122,7 @@ func (x *FlushRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FlushRequest.ProtoReflect.Descriptor instead.
 func (*FlushRequest) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{20}
+	return file_worker_worker_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *FlushRequest) GetShardId() uint64 {
@@ -1052,7 +1140,7 @@ type FlushResponse struct {
 
 func (x *FlushResponse) Reset() {
 	*x = FlushResponse{}
-	mi := &file_worker_worker_proto_msgTypes[21]
+	mi := &file_worker_worker_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1064,7 +1152,7 @@ func (x *FlushResponse) String() string {
 func (*FlushResponse) ProtoMessage() {}
 
 func (x *FlushResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[21]
+	mi := &file_worker_worker_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1077,7 +1165,7 @@ func (x *FlushResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FlushResponse.ProtoReflect.Descriptor instead.
 func (*FlushResponse) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{21}
+	return file_worker_worker_proto_rawDescGZIP(), []int{23}
 }
 
 var File_worker_worker_proto protoreflect.FileDescriptor
@@ -1119,7 +1207,11 @@ const file_worker_worker_proto_rawDesc = "" +
 	"collection\":\n" +
 	"\x0eSearchResponse\x12\x10\n" +
 	"\x03ids\x18\x01 \x03(\tR\x03ids\x12\x16\n" +
-	"\x06scores\x18\x02 \x03(\x02R\x06scores\"6\n" +
+	"\x06scores\x18\x02 \x03(\x02R\x06scores\"R\n" +
+	"\x12BatchSearchRequest\x12<\n" +
+	"\brequests\x18\x01 \x03(\v2 .vectron.worker.v1.SearchRequestR\brequests\"V\n" +
+	"\x13BatchSearchResponse\x12?\n" +
+	"\tresponses\x18\x01 \x03(\v2!.vectron.worker.v1.SearchResponseR\tresponses\"6\n" +
 	"\fKeyValuePair\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\fR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\fR\x05value\"X\n" +
@@ -1144,13 +1236,15 @@ const file_worker_worker_proto_rawDesc = "" +
 	"\x06status\x18\x01 \x01(\tR\x06status\")\n" +
 	"\fFlushRequest\x12\x19\n" +
 	"\bshard_id\x18\x01 \x01(\x04R\ashardId\"\x0f\n" +
-	"\rFlushResponse2\xec\x06\n" +
+	"\rFlushResponse2\xc3\b\n" +
 	"\rWorkerService\x12^\n" +
 	"\vStoreVector\x12%.vectron.worker.v1.StoreVectorRequest\x1a&.vectron.worker.v1.StoreVectorResponse\"\x00\x12m\n" +
-	"\x10BatchStoreVector\x12*.vectron.worker.v1.BatchStoreVectorRequest\x1a+.vectron.worker.v1.BatchStoreVectorResponse\"\x00\x12X\n" +
+	"\x10BatchStoreVector\x12*.vectron.worker.v1.BatchStoreVectorRequest\x1a+.vectron.worker.v1.BatchStoreVectorResponse\"\x00\x12u\n" +
+	"\x16StreamBatchStoreVector\x12*.vectron.worker.v1.BatchStoreVectorRequest\x1a+.vectron.worker.v1.BatchStoreVectorResponse\"\x00(\x01\x12X\n" +
 	"\tGetVector\x12#.vectron.worker.v1.GetVectorRequest\x1a$.vectron.worker.v1.GetVectorResponse\"\x00\x12a\n" +
 	"\fDeleteVector\x12&.vectron.worker.v1.DeleteVectorRequest\x1a'.vectron.worker.v1.DeleteVectorResponse\"\x00\x12O\n" +
-	"\x06Search\x12 .vectron.worker.v1.SearchRequest\x1a!.vectron.worker.v1.SearchResponse\"\x00\x12F\n" +
+	"\x06Search\x12 .vectron.worker.v1.SearchRequest\x1a!.vectron.worker.v1.SearchResponse\"\x00\x12^\n" +
+	"\vBatchSearch\x12%.vectron.worker.v1.BatchSearchRequest\x1a&.vectron.worker.v1.BatchSearchResponse\"\x00\x12F\n" +
 	"\x03Put\x12\x1d.vectron.worker.v1.PutRequest\x1a\x1e.vectron.worker.v1.PutResponse\"\x00\x12F\n" +
 	"\x03Get\x12\x1d.vectron.worker.v1.GetRequest\x1a\x1e.vectron.worker.v1.GetResponse\"\x00\x12O\n" +
 	"\x06Delete\x12 .vectron.worker.v1.DeleteRequest\x1a!.vectron.worker.v1.DeleteResponse\"\x00\x12O\n" +
@@ -1169,7 +1263,7 @@ func file_worker_worker_proto_rawDescGZIP() []byte {
 	return file_worker_worker_proto_rawDescData
 }
 
-var file_worker_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_worker_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_worker_worker_proto_goTypes = []any{
 	(*Vector)(nil),                   // 0: vectron.worker.v1.Vector
 	(*StoreVectorRequest)(nil),       // 1: vectron.worker.v1.StoreVectorRequest
@@ -1182,49 +1276,57 @@ var file_worker_worker_proto_goTypes = []any{
 	(*DeleteVectorResponse)(nil),     // 8: vectron.worker.v1.DeleteVectorResponse
 	(*SearchRequest)(nil),            // 9: vectron.worker.v1.SearchRequest
 	(*SearchResponse)(nil),           // 10: vectron.worker.v1.SearchResponse
-	(*KeyValuePair)(nil),             // 11: vectron.worker.v1.KeyValuePair
-	(*PutRequest)(nil),               // 12: vectron.worker.v1.PutRequest
-	(*PutResponse)(nil),              // 13: vectron.worker.v1.PutResponse
-	(*GetRequest)(nil),               // 14: vectron.worker.v1.GetRequest
-	(*GetResponse)(nil),              // 15: vectron.worker.v1.GetResponse
-	(*DeleteRequest)(nil),            // 16: vectron.worker.v1.DeleteRequest
-	(*DeleteResponse)(nil),           // 17: vectron.worker.v1.DeleteResponse
-	(*StatusRequest)(nil),            // 18: vectron.worker.v1.StatusRequest
-	(*StatusResponse)(nil),           // 19: vectron.worker.v1.StatusResponse
-	(*FlushRequest)(nil),             // 20: vectron.worker.v1.FlushRequest
-	(*FlushResponse)(nil),            // 21: vectron.worker.v1.FlushResponse
+	(*BatchSearchRequest)(nil),       // 11: vectron.worker.v1.BatchSearchRequest
+	(*BatchSearchResponse)(nil),      // 12: vectron.worker.v1.BatchSearchResponse
+	(*KeyValuePair)(nil),             // 13: vectron.worker.v1.KeyValuePair
+	(*PutRequest)(nil),               // 14: vectron.worker.v1.PutRequest
+	(*PutResponse)(nil),              // 15: vectron.worker.v1.PutResponse
+	(*GetRequest)(nil),               // 16: vectron.worker.v1.GetRequest
+	(*GetResponse)(nil),              // 17: vectron.worker.v1.GetResponse
+	(*DeleteRequest)(nil),            // 18: vectron.worker.v1.DeleteRequest
+	(*DeleteResponse)(nil),           // 19: vectron.worker.v1.DeleteResponse
+	(*StatusRequest)(nil),            // 20: vectron.worker.v1.StatusRequest
+	(*StatusResponse)(nil),           // 21: vectron.worker.v1.StatusResponse
+	(*FlushRequest)(nil),             // 22: vectron.worker.v1.FlushRequest
+	(*FlushResponse)(nil),            // 23: vectron.worker.v1.FlushResponse
 }
 var file_worker_worker_proto_depIdxs = []int32{
 	0,  // 0: vectron.worker.v1.StoreVectorRequest.vector:type_name -> vectron.worker.v1.Vector
 	0,  // 1: vectron.worker.v1.BatchStoreVectorRequest.vectors:type_name -> vectron.worker.v1.Vector
 	0,  // 2: vectron.worker.v1.GetVectorResponse.vector:type_name -> vectron.worker.v1.Vector
-	11, // 3: vectron.worker.v1.PutRequest.kv:type_name -> vectron.worker.v1.KeyValuePair
-	11, // 4: vectron.worker.v1.GetResponse.kv:type_name -> vectron.worker.v1.KeyValuePair
-	1,  // 5: vectron.worker.v1.WorkerService.StoreVector:input_type -> vectron.worker.v1.StoreVectorRequest
-	3,  // 6: vectron.worker.v1.WorkerService.BatchStoreVector:input_type -> vectron.worker.v1.BatchStoreVectorRequest
-	5,  // 7: vectron.worker.v1.WorkerService.GetVector:input_type -> vectron.worker.v1.GetVectorRequest
-	7,  // 8: vectron.worker.v1.WorkerService.DeleteVector:input_type -> vectron.worker.v1.DeleteVectorRequest
-	9,  // 9: vectron.worker.v1.WorkerService.Search:input_type -> vectron.worker.v1.SearchRequest
-	12, // 10: vectron.worker.v1.WorkerService.Put:input_type -> vectron.worker.v1.PutRequest
-	14, // 11: vectron.worker.v1.WorkerService.Get:input_type -> vectron.worker.v1.GetRequest
-	16, // 12: vectron.worker.v1.WorkerService.Delete:input_type -> vectron.worker.v1.DeleteRequest
-	18, // 13: vectron.worker.v1.WorkerService.Status:input_type -> vectron.worker.v1.StatusRequest
-	20, // 14: vectron.worker.v1.WorkerService.Flush:input_type -> vectron.worker.v1.FlushRequest
-	2,  // 15: vectron.worker.v1.WorkerService.StoreVector:output_type -> vectron.worker.v1.StoreVectorResponse
-	4,  // 16: vectron.worker.v1.WorkerService.BatchStoreVector:output_type -> vectron.worker.v1.BatchStoreVectorResponse
-	6,  // 17: vectron.worker.v1.WorkerService.GetVector:output_type -> vectron.worker.v1.GetVectorResponse
-	8,  // 18: vectron.worker.v1.WorkerService.DeleteVector:output_type -> vectron.worker.v1.DeleteVectorResponse
-	10, // 19: vectron.worker.v1.WorkerService.Search:output_type -> vectron.worker.v1.SearchResponse
-	13, // 20: vectron.worker.v1.WorkerService.Put:output_type -> vectron.worker.v1.PutResponse
-	15, // 21: vectron.worker.v1.WorkerService.Get:output_type -> vectron.worker.v1.GetResponse
-	17, // 22: vectron.worker.v1.WorkerService.Delete:output_type -> vectron.worker.v1.DeleteResponse
-	19, // 23: vectron.worker.v1.WorkerService.Status:output_type -> vectron.worker.v1.StatusResponse
-	21, // 24: vectron.worker.v1.WorkerService.Flush:output_type -> vectron.worker.v1.FlushResponse
-	15, // [15:25] is the sub-list for method output_type
-	5,  // [5:15] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	9,  // 3: vectron.worker.v1.BatchSearchRequest.requests:type_name -> vectron.worker.v1.SearchRequest
+	10, // 4: vectron.worker.v1.BatchSearchResponse.responses:type_name -> vectron.worker.v1.SearchResponse
+	13, // 5: vectron.worker.v1.PutRequest.kv:type_name -> vectron.worker.v1.KeyValuePair
+	13, // 6: vectron.worker.v1.GetResponse.kv:type_name -> vectron.worker.v1.KeyValuePair
+	1,  // 7: vectron.worker.v1.WorkerService.StoreVector:input_type -> vectron.worker.v1.StoreVectorRequest
+	3,  // 8: vectron.worker.v1.WorkerService.BatchStoreVector:input_type -> vectron.worker.v1.BatchStoreVectorRequest
+	3,  // 9: vectron.worker.v1.WorkerService.StreamBatchStoreVector:input_type -> vectron.worker.v1.BatchStoreVectorRequest
+	5,  // 10: vectron.worker.v1.WorkerService.GetVector:input_type -> vectron.worker.v1.GetVectorRequest
+	7,  // 11: vectron.worker.v1.WorkerService.DeleteVector:input_type -> vectron.worker.v1.DeleteVectorRequest
+	9,  // 12: vectron.worker.v1.WorkerService.Search:input_type -> vectron.worker.v1.SearchRequest
+	11, // 13: vectron.worker.v1.WorkerService.BatchSearch:input_type -> vectron.worker.v1.BatchSearchRequest
+	14, // 14: vectron.worker.v1.WorkerService.Put:input_type -> vectron.worker.v1.PutRequest
+	16, // 15: vectron.worker.v1.WorkerService.Get:input_type -> vectron.worker.v1.GetRequest
+	18, // 16: vectron.worker.v1.WorkerService.Delete:input_type -> vectron.worker.v1.DeleteRequest
+	20, // 17: vectron.worker.v1.WorkerService.Status:input_type -> vectron.worker.v1.StatusRequest
+	22, // 18: vectron.worker.v1.WorkerService.Flush:input_type -> vectron.worker.v1.FlushRequest
+	2,  // 19: vectron.worker.v1.WorkerService.StoreVector:output_type -> vectron.worker.v1.StoreVectorResponse
+	4,  // 20: vectron.worker.v1.WorkerService.BatchStoreVector:output_type -> vectron.worker.v1.BatchStoreVectorResponse
+	4,  // 21: vectron.worker.v1.WorkerService.StreamBatchStoreVector:output_type -> vectron.worker.v1.BatchStoreVectorResponse
+	6,  // 22: vectron.worker.v1.WorkerService.GetVector:output_type -> vectron.worker.v1.GetVectorResponse
+	8,  // 23: vectron.worker.v1.WorkerService.DeleteVector:output_type -> vectron.worker.v1.DeleteVectorResponse
+	10, // 24: vectron.worker.v1.WorkerService.Search:output_type -> vectron.worker.v1.SearchResponse
+	12, // 25: vectron.worker.v1.WorkerService.BatchSearch:output_type -> vectron.worker.v1.BatchSearchResponse
+	15, // 26: vectron.worker.v1.WorkerService.Put:output_type -> vectron.worker.v1.PutResponse
+	17, // 27: vectron.worker.v1.WorkerService.Get:output_type -> vectron.worker.v1.GetResponse
+	19, // 28: vectron.worker.v1.WorkerService.Delete:output_type -> vectron.worker.v1.DeleteResponse
+	21, // 29: vectron.worker.v1.WorkerService.Status:output_type -> vectron.worker.v1.StatusResponse
+	23, // 30: vectron.worker.v1.WorkerService.Flush:output_type -> vectron.worker.v1.FlushResponse
+	19, // [19:31] is the sub-list for method output_type
+	7,  // [7:19] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_worker_worker_proto_init() }
@@ -1238,7 +1340,7 @@ func file_worker_worker_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_worker_worker_proto_rawDesc), len(file_worker_worker_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   22,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

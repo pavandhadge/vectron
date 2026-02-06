@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/binary"
 	"hash/maphash"
+	"io"
 	"log"
 	"math"
 	"os"
@@ -196,6 +197,72 @@ func (s *GrpcServer) BatchStoreVector(ctx context.Context, req *worker.BatchStor
 	}
 
 	return &worker.BatchStoreVectorResponse{Stored: int32(len(cmdVectors))}, nil
+}
+
+// StreamBatchStoreVector handles streaming multiple batch requests for large ingests.
+// Each incoming batch is proposed as a single Raft command.
+func (s *GrpcServer) StreamBatchStoreVector(stream worker.WorkerService_StreamBatchStoreVectorServer) error {
+	var totalStored int32
+	for {
+		req, err := stream.Recv()
+		if err == io.EOF {
+			return stream.SendAndClose(&worker.BatchStoreVectorResponse{Stored: totalStored})
+		}
+		if err != nil {
+			return status.Errorf(codes.Internal, "stream recv failed: %v", err)
+		}
+		if req == nil || len(req.GetVectors()) == 0 {
+			continue
+		}
+		if !s.shardManager.IsShardReady(req.GetShardId()) {
+			return status.Errorf(codes.Unavailable, "shard %d not ready", req.GetShardId())
+		}
+		cmdVectors := make([]shard.VectorEntry, 0, len(req.GetVectors()))
+		for _, v := range req.GetVectors() {
+			if v == nil || v.GetId() == "" || len(v.GetVector()) == 0 {
+				return status.Error(codes.InvalidArgument, "vector id or vector data missing")
+			}
+			cmdVectors = append(cmdVectors, shard.VectorEntry{
+				ID:       v.GetId(),
+				Vector:   v.GetVector(),
+				Metadata: v.GetMetadata(),
+			})
+		}
+
+		cmd := shard.Command{
+			Type:    shard.StoreVectorBatch,
+			Vectors: cmdVectors,
+		}
+		cmdBytes, err := shard.EncodeCommand(cmd)
+		if err != nil {
+			return status.Errorf(codes.Internal, "failed to marshal batch command: %v", err)
+		}
+
+		cs := s.nodeHost.GetNoOPSession(req.GetShardId())
+		if _, err := s.nodeHost.SyncPropose(stream.Context(), cs, cmdBytes); err != nil {
+			return status.Errorf(codes.Internal, "failed to propose batch StoreVector command: %v", err)
+		}
+		totalStored += int32(len(cmdVectors))
+	}
+}
+
+// BatchSearch performs multiple searches in a single RPC.
+func (s *GrpcServer) BatchSearch(ctx context.Context, req *worker.BatchSearchRequest) (*worker.BatchSearchResponse, error) {
+	if req == nil || len(req.GetRequests()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "batch search requests are empty")
+	}
+	responses := make([]*worker.SearchResponse, 0, len(req.GetRequests()))
+	for _, r := range req.GetRequests() {
+		if r == nil || len(r.GetVector()) == 0 {
+			return nil, status.Error(codes.InvalidArgument, "search vector is empty")
+		}
+		resp, err := s.searchCore(ctx, r)
+		if err != nil {
+			return nil, err
+		}
+		responses = append(responses, resp)
+	}
+	return &worker.BatchSearchResponse{Responses: responses}, nil
 }
 
 // Search performs a similarity search for a given vector.

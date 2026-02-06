@@ -121,6 +121,10 @@ message SearchRequest {
   
   // Optional natural language query for reranking purposes.
   string query = 4;
+
+  // Optional per-request timeout budget for search fan-out (milliseconds).
+  // If set, slow worker responses may be skipped and partial results returned.
+  uint32 timeout_ms = 5;
 }
 
 message SearchResponse {

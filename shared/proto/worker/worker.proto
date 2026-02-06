@@ -9,9 +9,13 @@ service WorkerService {
   // Vector operations
   rpc StoreVector(StoreVectorRequest) returns (StoreVectorResponse) {}
   rpc BatchStoreVector(BatchStoreVectorRequest) returns (BatchStoreVectorResponse) {}
+  // Streaming batch upsert for large ingests
+  rpc StreamBatchStoreVector(stream BatchStoreVectorRequest) returns (BatchStoreVectorResponse) {}
   rpc GetVector(GetVectorRequest) returns (GetVectorResponse) {}
   rpc DeleteVector(DeleteVectorRequest) returns (DeleteVectorResponse) {}
   rpc Search(SearchRequest) returns (SearchResponse) {}
+  // Batch multiple searches into a single RPC
+  rpc BatchSearch(BatchSearchRequest) returns (BatchSearchResponse) {}
 
   // Key-value operations
   rpc Put(PutRequest) returns (PutResponse) {}
@@ -74,6 +78,14 @@ message SearchRequest {
 message SearchResponse {
   repeated string ids = 1;
   repeated float scores = 2;
+}
+
+message BatchSearchRequest {
+  repeated SearchRequest requests = 1;
+}
+
+message BatchSearchResponse {
+  repeated SearchResponse responses = 1;
 }
 
 // Key-value messages

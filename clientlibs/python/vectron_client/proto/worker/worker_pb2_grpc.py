@@ -45,6 +45,11 @@ class WorkerServiceStub(object):
                 request_serializer=worker_dot_worker__pb2.BatchStoreVectorRequest.SerializeToString,
                 response_deserializer=worker_dot_worker__pb2.BatchStoreVectorResponse.FromString,
                 _registered_method=True)
+        self.StreamBatchStoreVector = channel.stream_unary(
+                '/vectron.worker.v1.WorkerService/StreamBatchStoreVector',
+                request_serializer=worker_dot_worker__pb2.BatchStoreVectorRequest.SerializeToString,
+                response_deserializer=worker_dot_worker__pb2.BatchStoreVectorResponse.FromString,
+                _registered_method=True)
         self.GetVector = channel.unary_unary(
                 '/vectron.worker.v1.WorkerService/GetVector',
                 request_serializer=worker_dot_worker__pb2.GetVectorRequest.SerializeToString,
@@ -59,6 +64,11 @@ class WorkerServiceStub(object):
                 '/vectron.worker.v1.WorkerService/Search',
                 request_serializer=worker_dot_worker__pb2.SearchRequest.SerializeToString,
                 response_deserializer=worker_dot_worker__pb2.SearchResponse.FromString,
+                _registered_method=True)
+        self.BatchSearch = channel.unary_unary(
+                '/vectron.worker.v1.WorkerService/BatchSearch',
+                request_serializer=worker_dot_worker__pb2.BatchSearchRequest.SerializeToString,
+                response_deserializer=worker_dot_worker__pb2.BatchSearchResponse.FromString,
                 _registered_method=True)
         self.Put = channel.unary_unary(
                 '/vectron.worker.v1.WorkerService/Put',
@@ -104,6 +114,13 @@ class WorkerServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def StreamBatchStoreVector(self, request_iterator, context):
+        """Streaming batch upsert for large ingests
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def GetVector(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -118,6 +135,13 @@ class WorkerServiceServicer(object):
 
     def Search(self, request, context):
         """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def BatchSearch(self, request, context):
+        """Batch multiple searches into a single RPC
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -167,6 +191,11 @@ def add_WorkerServiceServicer_to_server(servicer, server):
                     request_deserializer=worker_dot_worker__pb2.BatchStoreVectorRequest.FromString,
                     response_serializer=worker_dot_worker__pb2.BatchStoreVectorResponse.SerializeToString,
             ),
+            'StreamBatchStoreVector': grpc.stream_unary_rpc_method_handler(
+                    servicer.StreamBatchStoreVector,
+                    request_deserializer=worker_dot_worker__pb2.BatchStoreVectorRequest.FromString,
+                    response_serializer=worker_dot_worker__pb2.BatchStoreVectorResponse.SerializeToString,
+            ),
             'GetVector': grpc.unary_unary_rpc_method_handler(
                     servicer.GetVector,
                     request_deserializer=worker_dot_worker__pb2.GetVectorRequest.FromString,
@@ -181,6 +210,11 @@ def add_WorkerServiceServicer_to_server(servicer, server):
                     servicer.Search,
                     request_deserializer=worker_dot_worker__pb2.SearchRequest.FromString,
                     response_serializer=worker_dot_worker__pb2.SearchResponse.SerializeToString,
+            ),
+            'BatchSearch': grpc.unary_unary_rpc_method_handler(
+                    servicer.BatchSearch,
+                    request_deserializer=worker_dot_worker__pb2.BatchSearchRequest.FromString,
+                    response_serializer=worker_dot_worker__pb2.BatchSearchResponse.SerializeToString,
             ),
             'Put': grpc.unary_unary_rpc_method_handler(
                     servicer.Put,
@@ -274,6 +308,33 @@ class WorkerService(object):
             _registered_method=True)
 
     @staticmethod
+    def StreamBatchStoreVector(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_unary(
+            request_iterator,
+            target,
+            '/vectron.worker.v1.WorkerService/StreamBatchStoreVector',
+            worker_dot_worker__pb2.BatchStoreVectorRequest.SerializeToString,
+            worker_dot_worker__pb2.BatchStoreVectorResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def GetVector(request,
             target,
             options=(),
@@ -344,6 +405,33 @@ class WorkerService(object):
             '/vectron.worker.v1.WorkerService/Search',
             worker_dot_worker__pb2.SearchRequest.SerializeToString,
             worker_dot_worker__pb2.SearchResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def BatchSearch(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vectron.worker.v1.WorkerService/BatchSearch',
+            worker_dot_worker__pb2.BatchSearchRequest.SerializeToString,
+            worker_dot_worker__pb2.BatchSearchResponse.FromString,
             options,
             channel_credentials,
             insecure,

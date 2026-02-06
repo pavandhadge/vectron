@@ -69,6 +69,8 @@ const (
 	grpcReadBufferSize  = 64 * 1024
 	grpcWriteBufferSize = 64 * 1024
 	grpcWindowSize      = 1 << 20
+	streamUpsertThreshold = 2000
+	streamUpsertChunkSize = 512
 )
 
 func grpcClientOptions(enableCompression bool) []grpc.DialOption {
@@ -859,6 +861,7 @@ type gatewayServer struct {
 	feedbackService        *feedback.Service
 	managementMgr          *management.Manager
 	workerPool             *WorkerConnPool // Connection pool for worker gRPC connections
+	workerSearchBatcher    *WorkerSearchBatcher
 	searchCache            *SearchCache    // Cache for search results
 	workerListCache        *WorkerListCache
 	resolveCache           *WorkerResolveCache
@@ -909,6 +912,148 @@ type searchRequest struct {
 	req    *pb.SearchRequest
 	result chan *pb.SearchResult
 	err    chan error
+}
+
+// WorkerSearchBatcher batches multiple Search requests destined for the same worker.
+// It reduces per-request RPC overhead under high concurrency.
+type WorkerSearchBatcher struct {
+	mu       sync.Mutex
+	pending  map[string]*workerSearchGroup
+	maxWait  time.Duration
+	maxBatch int
+}
+
+type workerSearchGroup struct {
+	requests []*workerSearchRequest
+	done     chan struct{}
+}
+
+type workerSearchRequest struct {
+	ctx  context.Context
+	req  *workerpb.SearchRequest
+	resp chan *workerpb.SearchResponse
+	err  chan error
+}
+
+func NewWorkerSearchBatcher(maxWait time.Duration, maxBatch int) *WorkerSearchBatcher {
+	if maxWait <= 0 {
+		maxWait = 2 * time.Millisecond
+	}
+	if maxBatch <= 0 {
+		maxBatch = 16
+	}
+	return &WorkerSearchBatcher{
+		pending:  make(map[string]*workerSearchGroup),
+		maxWait:  maxWait,
+		maxBatch: maxBatch,
+	}
+}
+
+func (b *WorkerSearchBatcher) Search(ctx context.Context, workerAddr string, client workerpb.WorkerServiceClient, req *workerpb.SearchRequest) (*workerpb.SearchResponse, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	key := workerAddr
+	b.mu.Lock()
+	group := b.pending[key]
+	if group == nil || len(group.requests) >= b.maxBatch {
+		group = &workerSearchGroup{
+			requests: make([]*workerSearchRequest, 0, b.maxBatch),
+			done:     make(chan struct{}),
+		}
+		b.pending[key] = group
+		go b.processBatch(key, group, client)
+	}
+	reqEntry := &workerSearchRequest{
+		ctx:  ctx,
+		req:  req,
+		resp: make(chan *workerpb.SearchResponse, 1),
+		err:  make(chan error, 1),
+	}
+	group.requests = append(group.requests, reqEntry)
+	b.mu.Unlock()
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case resp := <-reqEntry.resp:
+		return resp, nil
+	case err := <-reqEntry.err:
+		return nil, err
+	}
+}
+
+func (b *WorkerSearchBatcher) processBatch(key string, group *workerSearchGroup, client workerpb.WorkerServiceClient) {
+	timer := time.NewTimer(b.maxWait)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-group.done:
+		return
+	}
+
+	b.mu.Lock()
+	delete(b.pending, key)
+	b.mu.Unlock()
+
+	reqs := make([]*workerpb.SearchRequest, 0, len(group.requests))
+	indexMap := make([]int, 0, len(group.requests))
+	for i, r := range group.requests {
+		if r.ctx.Err() != nil {
+			r.err <- r.ctx.Err()
+			continue
+		}
+		reqs = append(reqs, r.req)
+		indexMap = append(indexMap, i)
+	}
+	if len(reqs) == 0 {
+		close(group.done)
+		return
+	}
+
+	var (
+		ctx    context.Context = context.Background()
+		cancel context.CancelFunc
+	)
+	var earliest time.Time
+	for _, r := range group.requests {
+		if deadline, ok := r.ctx.Deadline(); ok {
+			if earliest.IsZero() || deadline.Before(earliest) {
+				earliest = deadline
+			}
+		}
+	}
+	if !earliest.IsZero() {
+		ctx, cancel = context.WithDeadline(context.Background(), earliest)
+		defer cancel()
+	}
+
+	resp, err := client.BatchSearch(ctx, &workerpb.BatchSearchRequest{Requests: reqs})
+	if err != nil {
+		for _, r := range group.requests {
+			if r.ctx.Err() == nil {
+				r.err <- err
+			}
+		}
+		close(group.done)
+		return
+	}
+	if len(resp.GetResponses()) != len(reqs) {
+		err := fmt.Errorf("batch search response size mismatch: got %d want %d", len(resp.GetResponses()), len(reqs))
+		for _, r := range group.requests {
+			if r.ctx.Err() == nil {
+				r.err <- err
+			}
+		}
+		close(group.done)
+		return
+	}
+
+	for i, res := range resp.GetResponses() {
+		target := group.requests[indexMap[i]]
+		target.resp <- res
+	}
+	close(group.done)
 }
 
 func NewRequestCoalescer(workerPool *WorkerConnPool, maxWait time.Duration, maxBatch int) *RequestCoalescer {
@@ -1359,6 +1504,42 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 					return
 				}
 
+				if len(pts) >= streamUpsertThreshold {
+					stream, err := client.StreamBatchStoreVector(ctx)
+					if err != nil {
+						sendMu.Lock()
+						if sendErr == nil {
+							sendErr = status.Errorf(codes.Internal, "failed to start stream upsert for shard %d: %v", sid, err)
+						}
+						sendMu.Unlock()
+						return
+					}
+					for i := 0; i < len(pts); i += streamUpsertChunkSize {
+						end := i + streamUpsertChunkSize
+						if end > len(pts) {
+							end = len(pts)
+						}
+						workerReq := translator.ToWorkerBatchStoreVectorRequestFromPoints(pts[i:end], sid)
+						if err := stream.Send(workerReq); err != nil {
+							sendMu.Lock()
+							if sendErr == nil {
+								sendErr = status.Errorf(codes.Internal, "failed to stream upsert batch for shard %d: %v", sid, err)
+							}
+							sendMu.Unlock()
+							return
+						}
+					}
+					if _, err := stream.CloseAndRecv(); err != nil {
+						sendMu.Lock()
+						if sendErr == nil {
+							sendErr = status.Errorf(codes.Internal, "failed to finalize stream upsert for shard %d: %v", sid, err)
+						}
+						sendMu.Unlock()
+						return
+					}
+					return
+				}
+
 				workerReq := translator.ToWorkerBatchStoreVectorRequestFromPoints(pts, sid)
 				var batchErr error
 				for attempt := 0; attempt < 10; attempt++ {
@@ -1430,6 +1611,14 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 }
 
 func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchRequest, warmupKey uint64, warmupKeySet bool) (*pb.SearchResponse, error) {
+	searchCtx := ctx
+	var searchCancel context.CancelFunc
+	if req.GetTimeoutMs() > 0 {
+		searchCtx, searchCancel = context.WithTimeout(ctx, time.Duration(req.GetTimeoutMs())*time.Millisecond)
+		defer searchCancel()
+	}
+	allowPartial := req.GetTimeoutMs() > 0
+
 	workerTopK := int(req.TopK * 2)
 	if workerTopK < int(req.TopK) {
 		workerTopK = int(req.TopK)
@@ -1529,7 +1718,12 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 			workerReq := translator.ToWorkerSearchRequest(req, 0, linearizable) // ShardID 0 for broadcast search
 			workerReq.K = int32(workerTopK)
 
-			res, err := workerClient.Search(ctx, workerReq)
+			var res *workerpb.SearchResponse
+			if s.workerSearchBatcher != nil {
+				res, err = s.workerSearchBatcher.Search(searchCtx, workerAddr, workerClient, workerReq)
+			} else {
+				res, err = workerClient.Search(searchCtx, workerReq)
+			}
 			if err != nil {
 				mu.Lock()
 				errs = append(errs, fmt.Errorf("worker %s search failed: %v", workerAddr, err))
@@ -1557,9 +1751,15 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 	}
 	wg.Wait()
 
-	if len(errs) > 0 {
-		// For now, return the first error. In a production system,
-		// you might want to log all errors and potentially return partial results.
+	if len(errs) > 0 && topResults.Len() == 0 {
+		// If partial results aren't allowed or we have nothing, return error.
+		if !allowPartial {
+			return nil, status.Errorf(codes.Internal, "failed to search all workers: %v", errs[0])
+		}
+		return nil, status.Errorf(codes.DeadlineExceeded, "search timed out before any results were returned: %v", errs[0])
+	}
+
+	if len(errs) > 0 && !allowPartial {
 		return nil, status.Errorf(codes.Internal, "failed to search all workers: %v", errs[0])
 	}
 
@@ -1906,6 +2106,7 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 		rerankerClient:         rerankerClient,
 		feedbackService:        feedbackService,
 		workerPool:             NewWorkerConnPool(config.GRPCEnableCompression), // Initialize worker connection pool for reuse
+		workerSearchBatcher:    NewWorkerSearchBatcher(2*time.Millisecond, 16),
 		searchCache:            NewSearchCache(5*time.Second, 1000),             // Cache search results for 5s, max 1000 entries
 		workerListCache:        NewWorkerListCache(2 * time.Second),
 		resolveCache:           NewWorkerResolveCache(5*time.Second, 10000),

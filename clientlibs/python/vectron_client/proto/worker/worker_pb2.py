@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13worker/worker.proto\x12\x11vectron.worker.v1\"6\n\x06Vector\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0e\n\x06vector\x18\x02 \x03(\x02\x12\x10\n\x08metadata\x18\x03 \x01(\x0c\"Q\n\x12StoreVectorRequest\x12\x10\n\x08shard_id\x18\x01 \x01(\x04\x12)\n\x06vector\x18\x02 \x01(\x0b\x32\x19.vectron.worker.v1.Vector\"\x15\n\x13StoreVectorResponse\"W\n\x17\x42\x61tchStoreVectorRequest\x12\x10\n\x08shard_id\x18\x01 \x01(\x04\x12*\n\x07vectors\x18\x02 \x03(\x0b\x32\x19.vectron.worker.v1.Vector\"*\n\x18\x42\x61tchStoreVectorResponse\x12\x0e\n\x06stored\x18\x01 \x01(\x05\"0\n\x10GetVectorRequest\x12\x10\n\x08shard_id\x18\x01 \x01(\x04\x12\n\n\x02id\x18\x02 \x01(\t\">\n\x11GetVectorResponse\x12)\n\x06vector\x18\x01 \x01(\x0b\x32\x19.vectron.worker.v1.Vector\"3\n\x13\x44\x65leteVectorRequest\x12\x10\n\x08shard_id\x18\x01 \x01(\x04\x12\n\n\x02id\x18\x02 \x01(\t\"\x16\n\x14\x44\x65leteVectorResponse\"{\n\rSearchRequest\x12\x10\n\x08shard_id\x18\x01 \x01(\x04\x12\x0e\n\x06vector\x18\x02 \x03(\x02\x12\t\n\x01k\x18\x03 \x01(\x05\x12\x13\n\x0b\x62rute_force\x18\x04 \x01(\x08\x12\x14\n\x0clinearizable\x18\x05 \x01(\x08\x12\x12\n\ncollection\x18\x06 \x01(\t\"-\n\x0eSearchResponse\x12\x0b\n\x03ids\x18\x01 \x03(\t\x12\x0e\n\x06scores\x18\x02 \x03(\x02\"*\n\x0cKeyValuePair\x12\x0b\n\x03key\x18\x01 \x01(\x0c\x12\r\n\x05value\x18\x02 \x01(\x0c\"K\n\nPutRequest\x12\x10\n\x08shard_id\x18\x01 \x01(\x04\x12+\n\x02kv\x18\x02 \x01(\x0b\x32\x1f.vectron.worker.v1.KeyValuePair\"\r\n\x0bPutResponse\"+\n\nGetRequest\x12\x10\n\x08shard_id\x18\x01 \x01(\x04\x12\x0b\n\x03key\x18\x02 \x01(\x0c\":\n\x0bGetResponse\x12+\n\x02kv\x18\x01 \x01(\x0b\x32\x1f.vectron.worker.v1.KeyValuePair\".\n\rDeleteRequest\x12\x10\n\x08shard_id\x18\x01 \x01(\x04\x12\x0b\n\x03key\x18\x02 \x01(\x0c\"\x10\n\x0e\x44\x65leteResponse\"!\n\rStatusRequest\x12\x10\n\x08shard_id\x18\x01 \x01(\x04\" \n\x0eStatusResponse\x12\x0e\n\x06status\x18\x01 \x01(\t\" \n\x0c\x46lushRequest\x12\x10\n\x08shard_id\x18\x01 \x01(\x04\"\x0f\n\rFlushResponse2\xec\x06\n\rWorkerService\x12^\n\x0bStoreVector\x12%.vectron.worker.v1.StoreVectorRequest\x1a&.vectron.worker.v1.StoreVectorResponse\"\x00\x12m\n\x10\x42\x61tchStoreVector\x12*.vectron.worker.v1.BatchStoreVectorRequest\x1a+.vectron.worker.v1.BatchStoreVectorResponse\"\x00\x12X\n\tGetVector\x12#.vectron.worker.v1.GetVectorRequest\x1a$.vectron.worker.v1.GetVectorResponse\"\x00\x12\x61\n\x0c\x44\x65leteVector\x12&.vectron.worker.v1.DeleteVectorRequest\x1a\'.vectron.worker.v1.DeleteVectorResponse\"\x00\x12O\n\x06Search\x12 .vectron.worker.v1.SearchRequest\x1a!.vectron.worker.v1.SearchResponse\"\x00\x12\x46\n\x03Put\x12\x1d.vectron.worker.v1.PutRequest\x1a\x1e.vectron.worker.v1.PutResponse\"\x00\x12\x46\n\x03Get\x12\x1d.vectron.worker.v1.GetRequest\x1a\x1e.vectron.worker.v1.GetResponse\"\x00\x12O\n\x06\x44\x65lete\x12 .vectron.worker.v1.DeleteRequest\x1a!.vectron.worker.v1.DeleteResponse\"\x00\x12O\n\x06Status\x12 .vectron.worker.v1.StatusRequest\x1a!.vectron.worker.v1.StatusResponse\"\x00\x12L\n\x05\x46lush\x12\x1f.vectron.worker.v1.FlushRequest\x1a .vectron.worker.v1.FlushResponse\"\x00\x42\x34Z2github.com/pavandhadge/vectron/shared/proto/workerb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13worker/worker.proto\x12\x11vectron.worker.v1\"6\n\x06Vector\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0e\n\x06vector\x18\x02 \x03(\x02\x12\x10\n\x08metadata\x18\x03 \x01(\x0c\"Q\n\x12StoreVectorRequest\x12\x10\n\x08shard_id\x18\x01 \x01(\x04\x12)\n\x06vector\x18\x02 \x01(\x0b\x32\x19.vectron.worker.v1.Vector\"\x15\n\x13StoreVectorResponse\"W\n\x17\x42\x61tchStoreVectorRequest\x12\x10\n\x08shard_id\x18\x01 \x01(\x04\x12*\n\x07vectors\x18\x02 \x03(\x0b\x32\x19.vectron.worker.v1.Vector\"*\n\x18\x42\x61tchStoreVectorResponse\x12\x0e\n\x06stored\x18\x01 \x01(\x05\"0\n\x10GetVectorRequest\x12\x10\n\x08shard_id\x18\x01 \x01(\x04\x12\n\n\x02id\x18\x02 \x01(\t\">\n\x11GetVectorResponse\x12)\n\x06vector\x18\x01 \x01(\x0b\x32\x19.vectron.worker.v1.Vector\"3\n\x13\x44\x65leteVectorRequest\x12\x10\n\x08shard_id\x18\x01 \x01(\x04\x12\n\n\x02id\x18\x02 \x01(\t\"\x16\n\x14\x44\x65leteVectorResponse\"{\n\rSearchRequest\x12\x10\n\x08shard_id\x18\x01 \x01(\x04\x12\x0e\n\x06vector\x18\x02 \x03(\x02\x12\t\n\x01k\x18\x03 \x01(\x05\x12\x13\n\x0b\x62rute_force\x18\x04 \x01(\x08\x12\x14\n\x0clinearizable\x18\x05 \x01(\x08\x12\x12\n\ncollection\x18\x06 \x01(\t\"-\n\x0eSearchResponse\x12\x0b\n\x03ids\x18\x01 \x03(\t\x12\x0e\n\x06scores\x18\x02 \x03(\x02\"H\n\x12\x42\x61tchSearchRequest\x12\x32\n\x08requests\x18\x01 \x03(\x0b\x32 .vectron.worker.v1.SearchRequest\"K\n\x13\x42\x61tchSearchResponse\x12\x34\n\tresponses\x18\x01 \x03(\x0b\x32!.vectron.worker.v1.SearchResponse\"*\n\x0cKeyValuePair\x12\x0b\n\x03key\x18\x01 \x01(\x0c\x12\r\n\x05value\x18\x02 \x01(\x0c\"K\n\nPutRequest\x12\x10\n\x08shard_id\x18\x01 \x01(\x04\x12+\n\x02kv\x18\x02 \x01(\x0b\x32\x1f.vectron.worker.v1.KeyValuePair\"\r\n\x0bPutResponse\"+\n\nGetRequest\x12\x10\n\x08shard_id\x18\x01 \x01(\x04\x12\x0b\n\x03key\x18\x02 \x01(\x0c\":\n\x0bGetResponse\x12+\n\x02kv\x18\x01 \x01(\x0b\x32\x1f.vectron.worker.v1.KeyValuePair\".\n\rDeleteRequest\x12\x10\n\x08shard_id\x18\x01 \x01(\x04\x12\x0b\n\x03key\x18\x02 \x01(\x0c\"\x10\n\x0e\x44\x65leteResponse\"!\n\rStatusRequest\x12\x10\n\x08shard_id\x18\x01 \x01(\x04\" \n\x0eStatusResponse\x12\x0e\n\x06status\x18\x01 \x01(\t\" \n\x0c\x46lushRequest\x12\x10\n\x08shard_id\x18\x01 \x01(\x04\"\x0f\n\rFlushResponse2\xc3\x08\n\rWorkerService\x12^\n\x0bStoreVector\x12%.vectron.worker.v1.StoreVectorRequest\x1a&.vectron.worker.v1.StoreVectorResponse\"\x00\x12m\n\x10\x42\x61tchStoreVector\x12*.vectron.worker.v1.BatchStoreVectorRequest\x1a+.vectron.worker.v1.BatchStoreVectorResponse\"\x00\x12u\n\x16StreamBatchStoreVector\x12*.vectron.worker.v1.BatchStoreVectorRequest\x1a+.vectron.worker.v1.BatchStoreVectorResponse\"\x00(\x01\x12X\n\tGetVector\x12#.vectron.worker.v1.GetVectorRequest\x1a$.vectron.worker.v1.GetVectorResponse\"\x00\x12\x61\n\x0c\x44\x65leteVector\x12&.vectron.worker.v1.DeleteVectorRequest\x1a\'.vectron.worker.v1.DeleteVectorResponse\"\x00\x12O\n\x06Search\x12 .vectron.worker.v1.SearchRequest\x1a!.vectron.worker.v1.SearchResponse\"\x00\x12^\n\x0b\x42\x61tchSearch\x12%.vectron.worker.v1.BatchSearchRequest\x1a&.vectron.worker.v1.BatchSearchResponse\"\x00\x12\x46\n\x03Put\x12\x1d.vectron.worker.v1.PutRequest\x1a\x1e.vectron.worker.v1.PutResponse\"\x00\x12\x46\n\x03Get\x12\x1d.vectron.worker.v1.GetRequest\x1a\x1e.vectron.worker.v1.GetResponse\"\x00\x12O\n\x06\x44\x65lete\x12 .vectron.worker.v1.DeleteRequest\x1a!.vectron.worker.v1.DeleteResponse\"\x00\x12O\n\x06Status\x12 .vectron.worker.v1.StatusRequest\x1a!.vectron.worker.v1.StatusResponse\"\x00\x12L\n\x05\x46lush\x12\x1f.vectron.worker.v1.FlushRequest\x1a .vectron.worker.v1.FlushResponse\"\x00\x42\x34Z2github.com/pavandhadge/vectron/shared/proto/workerb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -54,28 +54,32 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_SEARCHREQUEST']._serialized_end=651
   _globals['_SEARCHRESPONSE']._serialized_start=653
   _globals['_SEARCHRESPONSE']._serialized_end=698
-  _globals['_KEYVALUEPAIR']._serialized_start=700
-  _globals['_KEYVALUEPAIR']._serialized_end=742
-  _globals['_PUTREQUEST']._serialized_start=744
-  _globals['_PUTREQUEST']._serialized_end=819
-  _globals['_PUTRESPONSE']._serialized_start=821
-  _globals['_PUTRESPONSE']._serialized_end=834
-  _globals['_GETREQUEST']._serialized_start=836
-  _globals['_GETREQUEST']._serialized_end=879
-  _globals['_GETRESPONSE']._serialized_start=881
-  _globals['_GETRESPONSE']._serialized_end=939
-  _globals['_DELETEREQUEST']._serialized_start=941
-  _globals['_DELETEREQUEST']._serialized_end=987
-  _globals['_DELETERESPONSE']._serialized_start=989
-  _globals['_DELETERESPONSE']._serialized_end=1005
-  _globals['_STATUSREQUEST']._serialized_start=1007
-  _globals['_STATUSREQUEST']._serialized_end=1040
-  _globals['_STATUSRESPONSE']._serialized_start=1042
-  _globals['_STATUSRESPONSE']._serialized_end=1074
-  _globals['_FLUSHREQUEST']._serialized_start=1076
-  _globals['_FLUSHREQUEST']._serialized_end=1108
-  _globals['_FLUSHRESPONSE']._serialized_start=1110
-  _globals['_FLUSHRESPONSE']._serialized_end=1125
-  _globals['_WORKERSERVICE']._serialized_start=1128
-  _globals['_WORKERSERVICE']._serialized_end=2004
+  _globals['_BATCHSEARCHREQUEST']._serialized_start=700
+  _globals['_BATCHSEARCHREQUEST']._serialized_end=772
+  _globals['_BATCHSEARCHRESPONSE']._serialized_start=774
+  _globals['_BATCHSEARCHRESPONSE']._serialized_end=849
+  _globals['_KEYVALUEPAIR']._serialized_start=851
+  _globals['_KEYVALUEPAIR']._serialized_end=893
+  _globals['_PUTREQUEST']._serialized_start=895
+  _globals['_PUTREQUEST']._serialized_end=970
+  _globals['_PUTRESPONSE']._serialized_start=972
+  _globals['_PUTRESPONSE']._serialized_end=985
+  _globals['_GETREQUEST']._serialized_start=987
+  _globals['_GETREQUEST']._serialized_end=1030
+  _globals['_GETRESPONSE']._serialized_start=1032
+  _globals['_GETRESPONSE']._serialized_end=1090
+  _globals['_DELETEREQUEST']._serialized_start=1092
+  _globals['_DELETEREQUEST']._serialized_end=1138
+  _globals['_DELETERESPONSE']._serialized_start=1140
+  _globals['_DELETERESPONSE']._serialized_end=1156
+  _globals['_STATUSREQUEST']._serialized_start=1158
+  _globals['_STATUSREQUEST']._serialized_end=1191
+  _globals['_STATUSRESPONSE']._serialized_start=1193
+  _globals['_STATUSRESPONSE']._serialized_end=1225
+  _globals['_FLUSHREQUEST']._serialized_start=1227
+  _globals['_FLUSHREQUEST']._serialized_end=1259
+  _globals['_FLUSHRESPONSE']._serialized_start=1261
+  _globals['_FLUSHRESPONSE']._serialized_end=1276
+  _globals['_WORKERSERVICE']._serialized_start=1279
+  _globals['_WORKERSERVICE']._serialized_end=2370
 # @@protoc_insertion_point(module_scope)
