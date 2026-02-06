@@ -27,6 +27,8 @@ type Config struct {
 	RerankTopNOverrides           map[string]int  // Per-collection TopN overrides.
 	RerankTimeoutOverrides        map[string]int  // Per-collection timeout overrides (ms).
 	GRPCEnableCompression         bool            // Enable gzip compression for gRPC clients.
+	GRPCMaxRecvMB                 int             // Max gRPC receive message size (MB).
+	GRPCMaxSendMB                 int             // Max gRPC send message size (MB).
 	RerankWarmupEnabled           bool            // Enable async rerank warmup for recurring queries.
 	RerankWarmupTTLms             int             // TTL for warmup rerank cache (milliseconds).
 	RerankWarmupMaxSize           int             // Max entries for warmup rerank cache.
@@ -70,6 +72,8 @@ func LoadConfig() Config {
 		RerankTopNOverrides:           parseKVIntMap(getEnv("RERANK_TOP_N_OVERRIDES", "")),
 		RerankTimeoutOverrides:        parseKVIntMap(getEnv("RERANK_TIMEOUT_OVERRIDES", "")),
 		GRPCEnableCompression:         getEnvAsBool("GRPC_ENABLE_COMPRESSION", false),
+		GRPCMaxRecvMB:                 getEnvAsInt("GRPC_MAX_RECV_MB", 256),
+		GRPCMaxSendMB:                 getEnvAsInt("GRPC_MAX_SEND_MB", 256),
 		RerankWarmupEnabled:           getEnvAsBool("RERANK_WARMUP_ENABLED", false),
 		RerankWarmupTTLms:             getEnvAsInt("RERANK_WARMUP_TTL_MS", 30000),
 		RerankWarmupMaxSize:           getEnvAsInt("RERANK_WARMUP_MAX_SIZE", 2000),

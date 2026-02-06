@@ -106,6 +106,8 @@ func Start(nodeID uint64, raftAddr, grpcAddr string, pdAddrs []string, workerDat
 	if err != nil {
 		log.Fatalf("failed to listen on %s: %v", grpcAddr, err)
 	}
+	maxRecv := envIntDefault("GRPC_MAX_RECV_MB", 256) * 1024 * 1024
+	maxSend := envIntDefault("GRPC_MAX_SEND_MB", 256) * 1024 * 1024
 	s := grpc.NewServer(
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			Time:    30 * time.Second,
@@ -118,6 +120,8 @@ func Start(nodeID uint64, raftAddr, grpcAddr string, pdAddrs []string, workerDat
 		grpc.ReadBufferSize(64*1024),
 		grpc.WriteBufferSize(64*1024),
 		grpc.MaxConcurrentStreams(1024),
+		grpc.MaxRecvMsgSize(maxRecv),
+		grpc.MaxSendMsgSize(maxSend),
 	)
 	worker.RegisterWorkerServiceServer(s, internal.NewGrpcServer(nh, shardManager))
 	log.Printf("gRPC server listening at %v", lis.Addr())

@@ -202,7 +202,9 @@ const (
 	routingLeaseTTL       = 20 * time.Second
 )
 
-func grpcClientOptions(enableCompression bool) []grpc.DialOption {
+func grpcClientOptions(enableCompression bool, maxRecvMB, maxSendMB int) []grpc.DialOption {
+	maxRecv := maxRecvMB * 1024 * 1024
+	maxSend := maxSendMB * 1024 * 1024
 	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
@@ -214,6 +216,10 @@ func grpcClientOptions(enableCompression bool) []grpc.DialOption {
 		grpc.WithInitialConnWindowSize(grpcWindowSize),
 		grpc.WithReadBufferSize(grpcReadBufferSize),
 		grpc.WithWriteBufferSize(grpcWriteBufferSize),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(maxRecv),
+			grpc.MaxCallSendMsgSize(maxSend),
+		),
 	}
 	if enableCompression {
 		opts = append(opts, grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)))
@@ -221,7 +227,9 @@ func grpcClientOptions(enableCompression bool) []grpc.DialOption {
 	return opts
 }
 
-func grpcServerOptions() []grpc.ServerOption {
+func grpcServerOptions(maxRecvMB, maxSendMB int) []grpc.ServerOption {
+	maxRecv := maxRecvMB * 1024 * 1024
+	maxSend := maxSendMB * 1024 * 1024
 	return []grpc.ServerOption{
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			Time:    30 * time.Second,
@@ -234,6 +242,8 @@ func grpcServerOptions() []grpc.ServerOption {
 		grpc.ReadBufferSize(grpcReadBufferSize),
 		grpc.WriteBufferSize(grpcWriteBufferSize),
 		grpc.MaxConcurrentStreams(1024),
+		grpc.MaxRecvMsgSize(maxRecv),
+		grpc.MaxSendMsgSize(maxSend),
 	}
 }
 
@@ -1159,6 +1169,8 @@ type WorkerConnPool struct {
 	shards                 []workerConnShard
 	totalConns             int64
 	grpcCompressionEnabled bool
+	grpcMaxRecvMB          int
+	grpcMaxSendMB          int
 	maxConnsPerWorker      int
 	maxTotalConns          int
 }
@@ -1179,13 +1191,17 @@ type PDConnPool struct {
 	conns                  map[string]*grpc.ClientConn
 	clients                map[string]placementpb.PlacementServiceClient
 	grpcCompressionEnabled bool
+	grpcMaxRecvMB          int
+	grpcMaxSendMB          int
 }
 
-func NewPDConnPool(enableCompression bool) *PDConnPool {
+func NewPDConnPool(enableCompression bool, maxRecvMB, maxSendMB int) *PDConnPool {
 	return &PDConnPool{
 		conns:                  make(map[string]*grpc.ClientConn),
 		clients:                make(map[string]placementpb.PlacementServiceClient),
 		grpcCompressionEnabled: enableCompression,
+		grpcMaxRecvMB:          maxRecvMB,
+		grpcMaxSendMB:          maxSendMB,
 	}
 }
 
@@ -1215,7 +1231,7 @@ func (p *PDConnPool) GetClient(addr string) (placementpb.PlacementServiceClient,
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	opts := append(grpcClientOptions(p.grpcCompressionEnabled), grpc.WithBlock())
+	opts := append(grpcClientOptions(p.grpcCompressionEnabled, p.grpcMaxRecvMB, p.grpcMaxSendMB), grpc.WithBlock())
 	conn, err := grpc.DialContext(ctx, addr, opts...)
 	if err != nil {
 		return nil, nil, err
@@ -1307,7 +1323,7 @@ func (p *WorkerConnPool) GetClient(addr string) (workerpb.WorkerServiceClient, e
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	opts := append(grpcClientOptions(p.grpcCompressionEnabled), grpc.WithBlock())
+	opts := append(grpcClientOptions(p.grpcCompressionEnabled, p.grpcMaxRecvMB, p.grpcMaxSendMB), grpc.WithBlock())
 	conn, err := grpc.DialContext(ctx, addr, opts...)
 	if err != nil {
 		cb.recordFailure()
@@ -1362,10 +1378,12 @@ func (p *WorkerConnPool) CloseAll() {
 
 // NewWorkerConnPool creates a new worker connection pool with limits.
 // OPTIMIZATION: Added connection limits and circuit breaker pattern
-func NewWorkerConnPool(enableCompression bool) *WorkerConnPool {
+func NewWorkerConnPool(enableCompression bool, maxRecvMB, maxSendMB int) *WorkerConnPool {
 	pool := &WorkerConnPool{
 		shards:                 make([]workerConnShard, workerConnShardCount),
 		grpcCompressionEnabled: enableCompression,
+		grpcMaxRecvMB:          maxRecvMB,
+		grpcMaxSendMB:          maxSendMB,
 		maxConnsPerWorker:      defaultMaxConnsPerWorker,
 		maxTotalConns:          defaultMaxConnsPerWorker * 100, // Support up to 100 workers
 	}
@@ -1379,7 +1397,7 @@ func NewWorkerConnPool(enableCompression bool) *WorkerConnPool {
 }
 
 // NewWorkerConnPoolWithLimits creates a pool with custom limits
-func NewWorkerConnPoolWithLimits(enableCompression bool, maxPerWorker, maxTotal int) *WorkerConnPool {
+func NewWorkerConnPoolWithLimits(enableCompression bool, maxRecvMB, maxSendMB, maxPerWorker, maxTotal int) *WorkerConnPool {
 	if maxPerWorker <= 0 {
 		maxPerWorker = defaultMaxConnsPerWorker
 	}
@@ -1389,6 +1407,8 @@ func NewWorkerConnPoolWithLimits(enableCompression bool, maxPerWorker, maxTotal 
 	pool := &WorkerConnPool{
 		shards:                 make([]workerConnShard, workerConnShardCount),
 		grpcCompressionEnabled: enableCompression,
+		grpcMaxRecvMB:          maxRecvMB,
+		grpcMaxSendMB:          maxSendMB,
 		maxConnsPerWorker:      maxPerWorker,
 		maxTotalConns:          maxTotal,
 	}
@@ -1426,6 +1446,8 @@ type gatewayServer struct {
 	routingCache             *CollectionRoutingCache
 	distributedCache         *DistributedCache
 	grpcCompressionEnabled   bool
+	grpcMaxRecvMB            int
+	grpcMaxSendMB            int
 	rerankWarmupCache        *RerankWarmupCache
 	rerankWarmupSem          chan struct{}
 	rerankWarmupMu           sync.Mutex
@@ -2145,7 +2167,7 @@ func (s *gatewayServer) updateLeader() (placementpb.PlacementServiceClient, erro
 	defer s.leaderMu.Unlock()
 
 	if s.pdPool == nil {
-		s.pdPool = NewPDConnPool(s.grpcCompressionEnabled)
+		s.pdPool = NewPDConnPool(s.grpcCompressionEnabled, s.grpcMaxRecvMB, s.grpcMaxSendMB)
 	}
 
 	for _, addr := range s.pdAddrs {
@@ -3900,14 +3922,14 @@ func managementHandlers(mgr *management.Manager) http.Handler {
 // Start initializes and runs the API Gateway's gRPC and HTTP servers.
 func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.ClientConn) {
 	// Establish gRPC connection to Auth service
-	authConn, err := grpc.Dial(config.AuthServiceAddr, grpcClientOptions(config.GRPCEnableCompression)...)
+	authConn, err := grpc.Dial(config.AuthServiceAddr, grpcClientOptions(config.GRPCEnableCompression, config.GRPCMaxRecvMB, config.GRPCMaxSendMB)...)
 	if err != nil {
 		log.Fatalf("Failed to connect to Auth service: %v", err)
 	}
 	authClient := authpb.NewAuthServiceClient(authConn)
 
 	// Establish gRPC connection to Reranker service
-	rerankerConn, err := grpc.Dial(config.RerankerServiceAddr, grpcClientOptions(config.GRPCEnableCompression)...)
+	rerankerConn, err := grpc.Dial(config.RerankerServiceAddr, grpcClientOptions(config.GRPCEnableCompression, config.GRPCMaxRecvMB, config.GRPCMaxSendMB)...)
 	if err != nil {
 		log.Fatalf("Failed to connect to Reranker service: %v", err)
 	}
@@ -3977,15 +3999,17 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 		authClient:               authClient,
 		rerankerClient:           rerankerClient,
 		feedbackService:          feedbackService,
-		workerPool:               NewWorkerConnPool(config.GRPCEnableCompression), // Initialize worker connection pool for reuse
+		workerPool:               NewWorkerConnPool(config.GRPCEnableCompression, config.GRPCMaxRecvMB, config.GRPCMaxSendMB), // Initialize worker connection pool for reuse
 		workerSearchBatcher:      workerSearchBatcher,
-		pdPool:                   NewPDConnPool(config.GRPCEnableCompression),
+		pdPool:                   NewPDConnPool(config.GRPCEnableCompression, config.GRPCMaxRecvMB, config.GRPCMaxSendMB),
 		searchCache:              searchCache,
 		workerListCache:          NewWorkerListCache(workerListTTL),
 		resolveCache:             NewWorkerResolveCache(resolveTTL, defaultResolveCacheSize()),
 		routingCache:             NewCollectionRoutingCache(routingTTL),
 		distributedCache:         distributedCache,
 		grpcCompressionEnabled:   config.GRPCEnableCompression,
+		grpcMaxRecvMB:            config.GRPCMaxRecvMB,
+		grpcMaxSendMB:            config.GRPCMaxSendMB,
 		rerankWarmupInFlight:     make(map[uint64]struct{}),
 		inFlightShards:           make([]inFlightShard, inFlightShardCount),
 		inflightRoutingShards:    make([]inflightRoutingShard, inflightRoutingShardCount),
@@ -4050,7 +4074,7 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 	if !config.RawSpeedMode {
 		interceptors = append(interceptors, middleware.LoggingInterceptor)
 	}
-	grpcOpts := grpcServerOptions()
+	grpcOpts := grpcServerOptions(config.GRPCMaxRecvMB, config.GRPCMaxSendMB)
 	if len(interceptors) > 0 {
 		grpcOpts = append(grpcOpts, grpc.ChainUnaryInterceptor(interceptors...))
 	}
@@ -4059,7 +4083,7 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 
 	// Set up the HTTP/JSON gateway to proxy requests to the gRPC server.
 	mux := runtime.NewServeMux()
-	opts := grpcClientOptions(config.GRPCEnableCompression)
+	opts := grpcClientOptions(config.GRPCEnableCompression, config.GRPCMaxRecvMB, config.GRPCMaxSendMB)
 	if err := pb.RegisterVectronServiceHandlerFromEndpoint(context.Background(), mux, config.GRPCAddr, opts); err != nil {
 		log.Fatalf("Failed to register VectronServiceHandlerFromEndpoint: %v", err)
 	}
