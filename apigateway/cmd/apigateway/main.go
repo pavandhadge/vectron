@@ -91,6 +91,7 @@ func adaptiveConcurrency(multiplier, maxCap int) int {
 	return limit
 }
 
+
 func totalMemoryBytes() uint64 {
 	data, err := os.ReadFile("/proc/meminfo")
 	if err != nil {
@@ -230,6 +231,7 @@ func grpcClientOptions(enableCompression bool, maxRecvMB, maxSendMB int) []grpc.
 func grpcServerOptions(maxRecvMB, maxSendMB int) []grpc.ServerOption {
 	maxRecv := maxRecvMB * 1024 * 1024
 	maxSend := maxSendMB * 1024 * 1024
+	maxStreams := envIntDefault("GRPC_MAX_STREAMS", 1024)
 	return []grpc.ServerOption{
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			Time:    30 * time.Second,
@@ -241,7 +243,7 @@ func grpcServerOptions(maxRecvMB, maxSendMB int) []grpc.ServerOption {
 		}),
 		grpc.ReadBufferSize(grpcReadBufferSize),
 		grpc.WriteBufferSize(grpcWriteBufferSize),
-		grpc.MaxConcurrentStreams(1024),
+		grpc.MaxConcurrentStreams(uint32(maxStreams)),
 		grpc.MaxRecvMsgSize(maxRecv),
 		grpc.MaxSendMsgSize(maxSend),
 	}
@@ -2328,7 +2330,7 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 		assignMu    sync.Mutex
 		assignErr   error
 		assignWg    sync.WaitGroup
-		semaphore   = make(chan struct{}, adaptiveConcurrency(4, 64))
+		semaphore   = make(chan struct{}, envIntDefault("VECTRON_GW_ROUTE_CONCURRENCY", adaptiveConcurrency(4, 64)))
 		assignments = make(map[string]map[uint64]*shardBatch)
 	)
 
@@ -2431,7 +2433,7 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 		sendErr error
 		sendWg  sync.WaitGroup
 		sendMu  sync.Mutex
-		sendSem = make(chan struct{}, adaptiveConcurrency(4, 64))
+		sendSem = make(chan struct{}, envIntDefault("VECTRON_GW_SEND_CONCURRENCY", adaptiveConcurrency(4, 64)))
 	)
 
 	for addr, shards := range assignments {
@@ -2967,7 +2969,7 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 	}
 
 	resultsCh := make(chan workerResult, len(workerAddresses))
-	searchSem := make(chan struct{}, adaptiveConcurrency(2, 32))
+	searchSem := make(chan struct{}, envIntDefault("VECTRON_GW_SEARCH_CONCURRENCY", adaptiveConcurrency(2, 32)))
 	useBatcher := s.workerSearchBatcher != nil && len(workerAddresses) > 1
 	var wg sync.WaitGroup
 
@@ -3446,7 +3448,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 	)
 	resultsCh := make(chan []*pb.SearchResult, len(workerAddresses))
 
-	searchSem := make(chan struct{}, adaptiveConcurrency(2, 32))
+	searchSem := make(chan struct{}, envIntDefault("VECTRON_GW_SEARCH_CONCURRENCY", adaptiveConcurrency(2, 32)))
 	useBatcher := s.workerSearchBatcher != nil && len(workerAddresses) > 1
 	workerStart := time.Now()
 	for _, addr := range workerAddresses {

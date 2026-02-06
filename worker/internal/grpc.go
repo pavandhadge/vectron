@@ -81,6 +81,15 @@ func adaptiveConcurrency(multiplier, maxCap int) int {
 	return limit
 }
 
+func envIntDefault(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
 type searchMinHeap []searchHeapItem
 
 func (h searchMinHeap) Len() int           { return len(h) }
@@ -468,7 +477,7 @@ func (s *GrpcServer) BatchSearch(ctx context.Context, req *worker.BatchSearchReq
 		wg       sync.WaitGroup
 		mu       sync.Mutex
 		firstErr error
-		sem      = make(chan struct{}, adaptiveConcurrency(2, 32))
+		sem      = make(chan struct{}, envIntDefault("VECTRON_WORKER_BATCHSEARCH_CONCURRENCY", adaptiveConcurrency(2, 32)))
 	)
 
 	for i, r := range requests {
@@ -567,7 +576,7 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 			wg sync.WaitGroup
 		)
 
-		searchSem := make(chan struct{}, adaptiveConcurrency(2, 32))
+		searchSem := make(chan struct{}, envIntDefault("VECTRON_WORKER_SEARCH_CONCURRENCY", adaptiveConcurrency(2, 32)))
 		var shardIDs []uint64
 		if req.GetCollection() != "" {
 			shardIDs = s.shardManager.GetShardsForCollection(req.GetCollection())

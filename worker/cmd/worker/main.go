@@ -108,6 +108,7 @@ func Start(nodeID uint64, raftAddr, grpcAddr string, pdAddrs []string, workerDat
 	}
 	maxRecv := envIntDefault("GRPC_MAX_RECV_MB", 256) * 1024 * 1024
 	maxSend := envIntDefault("GRPC_MAX_SEND_MB", 256) * 1024 * 1024
+	maxStreams := envIntDefault("GRPC_MAX_STREAMS", 1024)
 	s := grpc.NewServer(
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			Time:    30 * time.Second,
@@ -119,7 +120,7 @@ func Start(nodeID uint64, raftAddr, grpcAddr string, pdAddrs []string, workerDat
 		}),
 		grpc.ReadBufferSize(64*1024),
 		grpc.WriteBufferSize(64*1024),
-		grpc.MaxConcurrentStreams(1024),
+		grpc.MaxConcurrentStreams(uint32(maxStreams)),
 		grpc.MaxRecvMsgSize(maxRecv),
 		grpc.MaxSendMsgSize(maxSend),
 	)
