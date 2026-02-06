@@ -487,6 +487,7 @@ func (s *BenchmarkTest) startValkey() {
 }
 
 func (s *BenchmarkTest) startPlacementDriverCluster() {
+	profileDir := os.Getenv("BENCH_PROFILE_DIR")
 	nodes := []struct {
 		id       uint64
 		raftAddr string
@@ -527,6 +528,16 @@ func (s *BenchmarkTest) startPlacementDriverCluster() {
 			"--initial-members", "1:127.0.0.1:11001,2:127.0.0.1:11002,3:127.0.0.1:11003",
 			"--data-dir", dataDir,
 		)
+		if profileDir != "" {
+			cmd.Env = append(os.Environ(),
+				"PPROF_MUTEX_FRACTION=5",
+				"PPROF_BLOCK_RATE=1",
+				"PPROF_CPU_SECONDS=15",
+				fmt.Sprintf("PPROF_CPU_PATH=%s", filepath.Join(profileDir, fmt.Sprintf("pd%d_cpu.pprof", node.id))),
+				fmt.Sprintf("PPROF_MUTEX_PATH=%s", filepath.Join(profileDir, fmt.Sprintf("pd%d_mutex.pprof", node.id))),
+				fmt.Sprintf("PPROF_BLOCK_PATH=%s", filepath.Join(profileDir, fmt.Sprintf("pd%d_block.pprof", node.id))),
+			)
+		}
 		cmd.Dir = "/home/pavan/Programming/vectron"
 
 		logFile := filepath.Join(benchmarkLogTempDir, fmt.Sprintf("vectron-pd%d-benchmark.log", node.id))
@@ -545,6 +556,7 @@ func (s *BenchmarkTest) startPlacementDriverCluster() {
 }
 
 func (s *BenchmarkTest) startWorkers() {
+	profileDir := os.Getenv("BENCH_PROFILE_DIR")
 	for i := 1; i <= 2; i++ {
 		port := benchmarkWorkerPort1 + (i-1)*10
 		raftPort := 20000 + i
@@ -567,6 +579,16 @@ func (s *BenchmarkTest) startWorkers() {
 			"--pd-addrs", "127.0.0.1:10001,127.0.0.1:10002,127.0.0.1:10003",
 			"--data-dir", dataDir,
 		)
+		if profileDir != "" {
+			cmd.Env = append(os.Environ(),
+				"PPROF_MUTEX_FRACTION=5",
+				"PPROF_BLOCK_RATE=1",
+				"PPROF_CPU_SECONDS=15",
+				fmt.Sprintf("PPROF_CPU_PATH=%s", filepath.Join(profileDir, fmt.Sprintf("worker%d_cpu.pprof", i))),
+				fmt.Sprintf("PPROF_MUTEX_PATH=%s", filepath.Join(profileDir, fmt.Sprintf("worker%d_mutex.pprof", i))),
+				fmt.Sprintf("PPROF_BLOCK_PATH=%s", filepath.Join(profileDir, fmt.Sprintf("worker%d_block.pprof", i))),
+			)
+		}
 		cmd.Dir = "/home/pavan/Programming/vectron"
 
 		logFile := filepath.Join(benchmarkLogTempDir, fmt.Sprintf("vectron-worker%d-benchmark.log", i))
@@ -643,6 +665,7 @@ func (s *BenchmarkTest) startAPIGateway() {
 	dataDir := filepath.Join(benchmarkDataTempDir, "apigw-data")
 	os.MkdirAll(dataDir, 0755)
 	os.MkdirAll(benchmarkLogTempDir, 0755)
+	profileDir := os.Getenv("BENCH_PROFILE_DIR")
 
 	repoRoot, err := findRepoRootBenchmark()
 	if err != nil {
@@ -666,6 +689,16 @@ func (s *BenchmarkTest) startAPIGateway() {
 		"RATE_LIMIT_RPS=10000",
 		fmt.Sprintf("DISTRIBUTED_CACHE_ADDR=127.0.0.1:%d", benchmarkValkeyPort),
 	)
+	if profileDir != "" {
+		cmd.Env = append(cmd.Env,
+			"PPROF_MUTEX_FRACTION=5",
+			"PPROF_BLOCK_RATE=1",
+			"PPROF_CPU_SECONDS=15",
+			fmt.Sprintf("PPROF_CPU_PATH=%s", filepath.Join(profileDir, "apigateway_cpu.pprof")),
+			fmt.Sprintf("PPROF_MUTEX_PATH=%s", filepath.Join(profileDir, "apigateway_mutex.pprof")),
+			fmt.Sprintf("PPROF_BLOCK_PATH=%s", filepath.Join(profileDir, "apigateway_block.pprof")),
+		)
+	}
 
 	if f, err := os.OpenFile(filepath.Join(benchmarkLogTempDir, "vectron-apigw-benchmark.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {
 		cmd.Stdout = f

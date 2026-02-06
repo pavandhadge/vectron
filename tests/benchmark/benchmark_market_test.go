@@ -21,6 +21,9 @@ import (
 
 // Market-traffic style benchmark: mixed reads/writes, hot queries, repeats, and multi-dimension sweep.
 func TestMarketTrafficBenchmark(t *testing.T) {
+	// Resolve temp paths relative to repo root (so child processes use correct paths).
+	resolveBenchmarkPaths(t)
+
 	// Mirror research benchmark setup to ensure context and temp dirs exist.
 	_ = os.RemoveAll(benchmarkDataTempDir)
 	if err := os.MkdirAll(benchmarkDataTempDir, 0755); err != nil {
@@ -96,6 +99,9 @@ func TestMarketTrafficBenchmark(t *testing.T) {
 		})
 		if err != nil {
 			t.Fatalf("failed to create collection: %v", err)
+		}
+		if err := waitForCollectionReady(ctx, client, collection, 120*time.Second); err != nil {
+			t.Fatalf("collection not ready: %v", err)
 		}
 
 		log.Printf("\n▶️  Dim=%d Dataset=%d Collection=%s", dim, datasetSize, collection)

@@ -18,7 +18,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	stdruntime "runtime"
+	rpprof "runtime/pprof"
 	"sort"
 	"strconv"
 	"strings"
@@ -4113,8 +4115,82 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 
 func main() {
 	runtimeutil.ConfigureGOMAXPROCS("apigateway")
+	startSelfDumpProfiles("apigateway")
 	_, authConn := Start(cfg, nil)
 	defer authConn.Close()
 
 	select {}
+}
+
+func startSelfDumpProfiles(role string) {
+	if v := envInt("PPROF_MUTEX_FRACTION"); v > 0 {
+		stdruntime.SetMutexProfileFraction(v)
+	}
+	if v := envInt("PPROF_BLOCK_RATE"); v > 0 {
+		stdruntime.SetBlockProfileRate(v)
+	}
+
+	cpuPath := os.Getenv("PPROF_CPU_PATH")
+	if cpuPath != "" {
+		_ = os.MkdirAll(filepath.Dir(cpuPath), 0755)
+		if f, err := os.Create(cpuPath); err == nil {
+			if err := rpprof.StartCPUProfile(f); err == nil {
+				seconds := envIntDefault("PPROF_CPU_SECONDS", 15)
+				go func() {
+					time.Sleep(time.Duration(seconds) * time.Second)
+					rpprof.StopCPUProfile()
+					_ = f.Close()
+					log.Printf("%s cpu profile -> %s", role, cpuPath)
+				}()
+			} else {
+				_ = f.Close()
+			}
+		}
+	}
+
+	mutexPath := os.Getenv("PPROF_MUTEX_PATH")
+	if mutexPath != "" {
+		_ = os.MkdirAll(filepath.Dir(mutexPath), 0755)
+		seconds := envIntDefault("PPROF_MUTEX_SECONDS", envIntDefault("PPROF_CPU_SECONDS", 15))
+		go func() {
+			time.Sleep(time.Duration(seconds) * time.Second)
+			if f, err := os.Create(mutexPath); err == nil {
+				_ = rpprof.Lookup("mutex").WriteTo(f, 0)
+				_ = f.Close()
+				log.Printf("%s mutex profile -> %s", role, mutexPath)
+			}
+		}()
+	}
+
+	blockPath := os.Getenv("PPROF_BLOCK_PATH")
+	if blockPath != "" {
+		_ = os.MkdirAll(filepath.Dir(blockPath), 0755)
+		seconds := envIntDefault("PPROF_BLOCK_SECONDS", envIntDefault("PPROF_CPU_SECONDS", 15))
+		go func() {
+			time.Sleep(time.Duration(seconds) * time.Second)
+			if f, err := os.Create(blockPath); err == nil {
+				_ = rpprof.Lookup("block").WriteTo(f, 0)
+				_ = f.Close()
+				log.Printf("%s block profile -> %s", role, blockPath)
+			}
+		}()
+	}
+}
+
+func envInt(key string) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+func envIntDefault(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return fallback
 }
