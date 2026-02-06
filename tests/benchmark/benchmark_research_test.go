@@ -255,6 +255,11 @@ func TestResearchBenchmark(t *testing.T) {
 	// Resolve temp paths relative to repo root (so child processes use correct paths).
 	resolveBenchmarkPaths(t)
 
+	// Clean up stale data from previous runs to avoid disk-full failures.
+	if err := os.RemoveAll(benchmarkDataTempDir); err != nil {
+		log.Printf("Warning: failed to remove stale data dir %s: %v", benchmarkDataTempDir, err)
+	}
+
 	// Create base temporary directories
 	if err := os.MkdirAll(benchmarkDataTempDir, 0755); err != nil {
 		t.Fatalf("Failed to create data temp dir %s: %v", benchmarkDataTempDir, err)
@@ -265,7 +270,7 @@ func TestResearchBenchmark(t *testing.T) {
 
 	suite := &BenchmarkTest{t: t}
 	suite.ctx, suite.cancel = context.WithTimeout(context.Background(), 60*time.Minute)
-	t.Cleanup(suite.cleanup) // Register cleanup function
+	t.Cleanup(suite.cleanup)
 	defer suite.cancel()
 
 	// Start all services
@@ -274,30 +279,39 @@ func TestResearchBenchmark(t *testing.T) {
 	// Initialize clients and authenticate
 	t.Run("InitializeAndAuthenticate", suite.TestInitializeAndAuthenticate)
 
-	// Run comprehensive benchmark scenarios
 	benchmarkSuite := &BenchmarkSuite{}
 
-	t.Run("Scenario1_VectorSearchScalability", func(t *testing.T) {
+	runScenario := func(name string, reset bool, fn func(t *testing.T)) {
+		t.Run(name, func(t *testing.T) {
+			if reset {
+				suite.resetSystem(t)
+			}
+			fn(t)
+		})
+	}
+
+	// Run comprehensive benchmark scenarios (single system, reset between scenarios).
+	runScenario("Scenario1_VectorSearchScalability", false, func(t *testing.T) {
 		benchmarkVectorSearchScalability(t, suite.getAuthenticatedContext(), suite.apigwClient, benchmarkSuite)
 	})
 
-	t.Run("Scenario2_DimensionImpact", func(t *testing.T) {
+	runScenario("Scenario2_DimensionImpact", true, func(t *testing.T) {
 		benchmarkDimensionImpact(t, suite.getAuthenticatedContext(), suite.apigwClient, benchmarkSuite)
 	})
 
-	t.Run("Scenario3_ConcurrentWorkload", func(t *testing.T) {
+	runScenario("Scenario3_ConcurrentWorkload", true, func(t *testing.T) {
 		benchmarkConcurrentWorkload(t, suite.getAuthenticatedContext(), suite.apigwClient, benchmarkSuite)
 	})
 
-	t.Run("Scenario4_RerankerEffectiveness", func(t *testing.T) {
+	runScenario("Scenario4_RerankerEffectiveness", true, func(t *testing.T) {
 		benchmarkRerankerEffectiveness(t, suite.getAuthenticatedContext(), suite.apigwClient, benchmarkSuite)
 	})
 
-	t.Run("Scenario5_DistributedScalability", func(t *testing.T) {
+	runScenario("Scenario5_DistributedScalability", true, func(t *testing.T) {
 		benchmarkDistributedScalability(t, suite.getAuthenticatedContext(), suite.apigwClient, suite.placementClient, benchmarkSuite)
 	})
 
-	t.Run("Scenario6_EndToEndLatency", func(t *testing.T) {
+	runScenario("Scenario6_EndToEndLatency", true, func(t *testing.T) {
 		benchmarkEndToEndLatency(t, suite.getAuthenticatedContext(), suite.apigwClient, benchmarkSuite)
 	})
 
@@ -697,35 +711,67 @@ func (s *BenchmarkTest) cleanup() {
 		s.cancel()
 	}
 
+	s.stopProcesses()
+	s.cleanupDataDirs()
+
+	// Stop Valkey container if running
+	exec.Command("podman", "stop", "vectron-valkey-benchmark").Run()
+	// Stop etcd container if running
+	exec.Command("podman", "stop", "etcd").Run()
+
+	log.Println("✅ Cleanup complete (logs preserved in: " + benchmarkLogTempDir + ")")
+}
+
+func (s *BenchmarkTest) stopProcesses() {
 	// Kill all registered processes
 	s.processesMutex.Lock()
 	for _, cmd := range s.processes {
 		if cmd.Process != nil {
 			log.Printf("Stopping process %d...", cmd.Process.Pid)
-			cmd.Process.Kill()
-			cmd.Process.Wait()
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
 		}
 	}
 	s.processes = nil
 	s.processesMutex.Unlock()
+}
 
+func (s *BenchmarkTest) cleanupDataDirs() {
 	// Clean up data directories only (keep logs for debugging)
 	s.dataDirsMutex.Lock()
 	for _, dir := range s.dataDirs {
 		log.Printf("Removing data directory: %s", dir)
-		os.RemoveAll(dir)
+		_ = os.RemoveAll(dir)
 	}
 	s.dataDirs = nil
 	s.dataDirsMutex.Unlock()
 
 	// Clean up base data directory but keep logs
 	log.Printf("Removing data directory: %s", benchmarkDataTempDir)
-	os.RemoveAll(benchmarkDataTempDir)
+	_ = os.RemoveAll(benchmarkDataTempDir)
+}
 
-	// Stop Valkey container if running
+func (s *BenchmarkTest) resetSystem(t *testing.T) {
+	log.Println("🔄 Resetting system between scenarios...")
+
+	s.stopProcesses()
 	exec.Command("podman", "stop", "vectron-valkey-benchmark").Run()
+	exec.Command("podman", "stop", "etcd").Run()
+	s.cleanupDataDirs()
 
-	log.Println("✅ Cleanup complete (logs preserved in: " + benchmarkLogTempDir + ")")
+	if err := os.MkdirAll(benchmarkDataTempDir, 0755); err != nil {
+		t.Fatalf("Failed to create data temp dir %s: %v", benchmarkDataTempDir, err)
+	}
+	if err := os.MkdirAll(benchmarkLogTempDir, 0755); err != nil {
+		t.Fatalf("Failed to create log temp dir %s: %v", benchmarkLogTempDir, err)
+	}
+
+	s.jwtToken = ""
+	s.apiKey = ""
+	s.userID = ""
+
+	s.TestSystemStartup(t)
+	s.TestInitializeAndAuthenticate(t)
 }
 
 func (s *BenchmarkTest) registerProcess(cmd *exec.Cmd) {

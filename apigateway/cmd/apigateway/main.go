@@ -64,12 +64,8 @@ func shouldLogGatewayHotPath() bool {
 	}
 	return atomic.AddUint64(&gatewayLogSampleCounter, 1)%uint64(cfg.GatewayLogSampleEvery) == 0
 }
+
 var cacheHashSeed = maphash.MakeSeed()
-var searchResultSlicePool = sync.Pool{
-	New: func() interface{} {
-		return make([]*pb.SearchResult, 0, 256)
-	},
-}
 
 func adaptiveConcurrency(multiplier, maxCap int) int {
 	procs := stdruntime.GOMAXPROCS(0)
@@ -189,9 +185,9 @@ func defaultDistributedCacheTimeout() time.Duration {
 }
 
 const (
-	grpcReadBufferSize  = 64 * 1024
-	grpcWriteBufferSize = 64 * 1024
-	grpcWindowSize      = 1 << 20
+	grpcReadBufferSize    = 64 * 1024
+	grpcWriteBufferSize   = 64 * 1024
+	grpcWindowSize        = 1 << 20
 	streamUpsertThreshold = 2000
 	streamUpsertChunkSize = 512
 	routingLeaseTTL       = 20 * time.Second
@@ -271,8 +267,8 @@ type collectionRoutingCacheEntry struct {
 }
 
 type resolveCacheEntry struct {
-	Addr      string `json:"addr"`
-	ShardID   uint64 `json:"shard_id"`
+	Addr       string `json:"addr"`
+	ShardID    uint64 `json:"shard_id"`
 	ShardEpoch uint64 `json:"shard_epoch"`
 }
 
@@ -295,11 +291,11 @@ type WorkerListCache struct {
 }
 
 type WorkerResolveCacheEntry struct {
-	Addr      string
-	ShardID   uint64
-	ShardEpoch uint64
+	Addr              string
+	ShardID           uint64
+	ShardEpoch        uint64
 	LeaseExpiryUnixMs int64
-	Timestamp time.Time
+	Timestamp         time.Time
 }
 
 type WorkerResolveCache struct {
@@ -689,11 +685,11 @@ func (c *WorkerResolveCache) Set(collection, vectorID string, addr string, shard
 		}
 	}
 	c.entries[key] = &WorkerResolveCacheEntry{
-		Addr:      addr,
-		ShardID:   shardID,
-		ShardEpoch: shardEpoch,
+		Addr:              addr,
+		ShardID:           shardID,
+		ShardEpoch:        shardEpoch,
 		LeaseExpiryUnixMs: leaseExpiryUnixMs,
-		Timestamp: time.Now(),
+		Timestamp:         time.Now(),
 	}
 	c.mu.Unlock()
 }
@@ -1348,7 +1344,7 @@ type gatewayServer struct {
 	workerPool             *WorkerConnPool // Connection pool for worker gRPC connections
 	workerSearchBatcher    *WorkerSearchBatcher
 	pdPool                 *PDConnPool
-	searchCache            *SearchCache    // Cache for search results
+	searchCache            *SearchCache // Cache for search results
 	workerListCache        *WorkerListCache
 	resolveCache           *WorkerResolveCache
 	routingCache           *CollectionRoutingCache
@@ -1877,8 +1873,8 @@ func (s *gatewayServer) resolveWorker(ctx context.Context, collection string, ve
 					s.resolveCache.Set(collection, vectorID, addr, route.shardID, route.shardEpoch, leaseExpiry)
 					if s.distributedCache != nil {
 						s.distributedCache.SetResolve(ctx, collection+"|"+vectorID, resolveCacheEntry{
-							Addr:      addr,
-							ShardID:   route.shardID,
+							Addr:       addr,
+							ShardID:    route.shardID,
 							ShardEpoch: route.shardEpoch,
 						}, s.resolveCache.ttl)
 					}
@@ -1925,8 +1921,8 @@ func (s *gatewayServer) resolveWorker(ctx context.Context, collection string, ve
 		s.resolveCache.Set(collection, vectorID, addr, shardID, shardEpoch, leaseExpiry)
 		if s.distributedCache != nil {
 			s.distributedCache.SetResolve(ctx, collection+"|"+vectorID, resolveCacheEntry{
-				Addr:      addr,
-				ShardID:   shardID,
+				Addr:       addr,
+				ShardID:    shardID,
 				ShardEpoch: shardEpoch,
 			}, s.resolveCache.ttl)
 		}
@@ -2305,7 +2301,7 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 				if err != nil {
 					sendMu.Lock()
 					if sendErr == nil {
-						sendErr = status.Errorf(codes.Internal, "worker %s unreachable: %v", workerAddr, err)
+						sendErr = status.Errorf(codes.Unavailable, "worker %s unreachable: %v", workerAddr, err)
 					}
 					sendMu.Unlock()
 					return
@@ -2446,7 +2442,7 @@ func (s *gatewayServer) retryUpsertWithFreshRouting(ctx context.Context, collect
 	for addr, shards := range assignments {
 		client, err := s.workerPool.GetClient(addr)
 		if err != nil {
-			return status.Errorf(codes.Internal, "worker %s unreachable: %v", addr, err)
+			return status.Errorf(codes.Unavailable, "worker %s unreachable: %v", addr, err)
 		}
 		for shardID, batch := range shards {
 			workerReq := translator.ToWorkerBatchStoreVectorRequestFromPoints(batch.points, shardID, batch.shardEpoch, batch.leaseExpiryUnixMs)
@@ -2728,7 +2724,7 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 		workerAddr := workerAddresses[0]
 		workerClient, err := s.workerPool.GetClient(workerAddr)
 		if err != nil {
-			return nil, nil, status.Errorf(codes.Internal, "worker %s unreachable: %v", workerAddr, err)
+			return nil, nil, status.Errorf(codes.Unavailable, "worker %s unreachable: %v", workerAddr, err)
 		}
 
 		shardID := uint64(0)
@@ -2750,7 +2746,7 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 					if workerAddr != workerAddresses[0] {
 						workerClient, err = s.workerPool.GetClient(workerAddr)
 						if err != nil {
-							return nil, nil, status.Errorf(codes.Internal, "worker %s unreachable: %v", workerAddr, err)
+							return nil, nil, status.Errorf(codes.Unavailable, "worker %s unreachable: %v", workerAddr, err)
 						}
 					}
 					workerReq = translator.ToWorkerSearchRequest(req, shardID, shardEpoch, 0, linearizable)
@@ -2799,8 +2795,8 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 	}
 
 	type workerResult struct {
-		resp *workerpb.SearchResponse
-		err  error
+		results []*pb.SearchResult
+		err     error
 	}
 
 	resultsCh := make(chan workerResult, len(workerAddresses))
@@ -2834,7 +2830,27 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 				resultsCh <- workerResult{err: fmt.Errorf("worker %s search failed: %v", workerAddr, err)}
 				return
 			}
-			resultsCh <- workerResult{resp: res}
+			workerSearchResponse := translator.FromWorkerSearchResponse(res)
+			localHeap := &searchResultHeap{}
+			heap.Init(localHeap)
+			for _, r := range workerSearchResponse.Results {
+				if candidateLimit <= 0 {
+					continue
+				}
+				if localHeap.Len() < candidateLimit {
+					heap.Push(localHeap, r)
+					continue
+				}
+				if localHeap.Len() > 0 && r.Score > (*localHeap)[0].Score {
+					(*localHeap)[0] = r
+					heap.Fix(localHeap, 0)
+				}
+			}
+			var localResults []*pb.SearchResult
+			if localHeap.Len() > 0 {
+				localResults = append([]*pb.SearchResult(nil), (*localHeap)...)
+			}
+			resultsCh <- workerResult{results: localResults}
 		}(addr)
 	}
 
@@ -2858,8 +2874,7 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 			continue
 		}
 		received++
-		workerSearchResponse := translator.FromWorkerSearchResponse(result.resp)
-		for _, r := range workerSearchResponse.Results {
+		for _, r := range result.results {
 			if candidateLimit <= 0 {
 				continue
 			}
@@ -3051,7 +3066,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		workerAddr := workerAddresses[0]
 		workerClient, err := s.workerPool.GetClient(workerAddr)
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, "worker %s unreachable: %v", workerAddr, err)
+			return nil, status.Errorf(codes.Unavailable, "worker %s unreachable: %v", workerAddr, err)
 		}
 
 		shardID := uint64(0)
@@ -3074,7 +3089,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 					if workerAddr != workerAddresses[0] {
 						workerClient, err = s.workerPool.GetClient(workerAddr)
 						if err != nil {
-							return nil, status.Errorf(codes.Internal, "worker %s unreachable: %v", workerAddr, err)
+							return nil, status.Errorf(codes.Unavailable, "worker %s unreachable: %v", workerAddr, err)
 						}
 					}
 					workerReq = translator.ToWorkerSearchRequest(req, shardID, shardEpoch, 0, linearizable)
@@ -3111,8 +3126,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 			}
 		}
 
-		results = searchResultSlicePool.Get().([]*pb.SearchResult)
-		results = results[:topResults.Len()]
+		results = make([]*pb.SearchResult, topResults.Len())
 		for i := len(results) - 1; i >= 0; i-- {
 			results[i] = heap.Pop(topResults).(*pb.SearchResult)
 		}
@@ -3122,7 +3136,6 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		}
 
 		if len(searchResponse.Results) == 0 {
-			searchResultSlicePool.Put(results[:0])
 			return searchResponse, nil
 		}
 
@@ -3144,7 +3157,6 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 				searchResponse.Results = searchResponse.Results[:req.TopK]
 			}
 			s.setSearchCache(ctx, req, searchResponse)
-			searchResultSlicePool.Put(results[:0])
 			return searchResponse, nil
 		}
 
@@ -3190,7 +3202,6 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 				searchResponse.Results = searchResponse.Results[:req.TopK]
 			}
 			s.setSearchCache(ctx, req, searchResponse)
-			searchResultSlicePool.Put(results[:0])
 			return searchResponse, nil
 		}
 
@@ -3216,7 +3227,6 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 				searchResponse.Results = searchResponse.Results[:req.TopK]
 			}
 			s.setSearchCache(ctx, req, searchResponse)
-			searchResultSlicePool.Put(results[:0])
 			return searchResponse, nil
 		}
 
@@ -3238,17 +3248,15 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 			Results: rerankedResults,
 		}
 		s.setSearchCache(ctx, req, finalResponse)
-		searchResultSlicePool.Put(results[:0])
 		return finalResponse, nil
 	}
 
 	var (
-		wg         sync.WaitGroup
-		mu         sync.Mutex
-		topResults = &searchResultHeap{}
-		errs       []error
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		errs []error
 	)
-	heap.Init(topResults)
+	resultsCh := make(chan []*pb.SearchResult, len(workerAddresses))
 
 	searchSem := make(chan struct{}, adaptiveConcurrency(2, 32))
 	useBatcher := s.workerSearchBatcher != nil && len(workerAddresses) > 1
@@ -3286,26 +3294,49 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 			}
 
 			workerSearchResponse := translator.FromWorkerSearchResponse(res)
-			mu.Lock()
+			localHeap := &searchResultHeap{}
+			heap.Init(localHeap)
 			for _, result := range workerSearchResponse.Results {
 				if candidateLimit <= 0 {
 					continue
 				}
-				if topResults.Len() < candidateLimit {
-					heap.Push(topResults, result)
+				if localHeap.Len() < candidateLimit {
+					heap.Push(localHeap, result)
 					continue
 				}
-				if topResults.Len() > 0 && result.Score > (*topResults)[0].Score {
-					(*topResults)[0] = result
-					heap.Fix(topResults, 0)
+				if localHeap.Len() > 0 && result.Score > (*localHeap)[0].Score {
+					(*localHeap)[0] = result
+					heap.Fix(localHeap, 0)
 				}
 			}
-			mu.Unlock()
+			if localHeap.Len() > 0 {
+				localResults := append([]*pb.SearchResult(nil), (*localHeap)...)
+				resultsCh <- localResults
+			}
 		}(addr)
 	}
 	wg.Wait()
+	close(resultsCh)
 	if logEnabled {
 		workerDur = time.Since(workerStart)
+	}
+
+	topResults := &searchResultHeap{}
+	heap.Init(topResults)
+	for local := range resultsCh {
+		for _, result := range local {
+			if candidateLimit <= 0 {
+				continue
+			}
+			if topResults.Len() < candidateLimit {
+				heap.Push(topResults, result)
+				continue
+			}
+			if topResults.Len() > 0 && result.Score > (*topResults)[0].Score {
+				(*topResults)[0] = result
+				heap.Fix(topResults, 0)
+			}
+		}
 	}
 
 	if len(errs) > 0 && topResults.Len() == 0 {
@@ -3321,8 +3352,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 	}
 
 	mergeStart := time.Now()
-	results = searchResultSlicePool.Get().([]*pb.SearchResult)
-	results = results[:topResults.Len()]
+	results = make([]*pb.SearchResult, topResults.Len())
 	for i := len(results) - 1; i >= 0; i-- {
 		results[i] = heap.Pop(topResults).(*pb.SearchResult)
 	}
@@ -3332,7 +3362,6 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 	}
 
 	if len(searchResponse.Results) == 0 {
-		searchResultSlicePool.Put(results[:0])
 		return searchResponse, nil
 	}
 
@@ -3357,7 +3386,6 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 			searchResponse.Results = searchResponse.Results[:req.TopK]
 		}
 		s.setSearchCache(ctx, req, searchResponse)
-		searchResultSlicePool.Put(results[:0])
 		return searchResponse, nil
 	}
 
@@ -3403,7 +3431,6 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 			searchResponse.Results = searchResponse.Results[:req.TopK]
 		}
 		s.setSearchCache(ctx, req, searchResponse)
-		searchResultSlicePool.Put(results[:0])
 		return searchResponse, nil
 	}
 
@@ -3432,7 +3459,6 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		}
 		// Cache the results before returning
 		s.setSearchCache(ctx, req, searchResponse)
-		searchResultSlicePool.Put(results[:0])
 		return searchResponse, nil
 	}
 
@@ -3455,7 +3481,6 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 	}
 	// Cache the results before returning
 	s.setSearchCache(ctx, req, finalResponse)
-	searchResultSlicePool.Put(results[:0])
 	return finalResponse, nil
 }
 

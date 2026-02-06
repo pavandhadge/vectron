@@ -21,8 +21,11 @@ func (h *HNSW) PruneNeighbors(maxNodes int) int {
 		}
 	}
 
-	for id := range h.nodes {
-		if h.pruneNodeLocked(id) {
+	for idx := range h.nodes {
+		if idx == 0 {
+			continue
+		}
+		if h.pruneNodeLocked(uint32(idx)) {
 			processed++
 			if maxNodes > 0 && processed >= maxNodes {
 				break
@@ -63,6 +66,9 @@ func (h *HNSW) takePruneCandidates(maxNodes int) []uint32 {
 }
 
 func (h *HNSW) pruneNodeLocked(id uint32) bool {
+	if int(id) >= len(h.nodes) {
+		return false
+	}
 	node := h.nodes[id]
 	if node == nil || (node.Vec == nil && node.QVec == nil) {
 		return false

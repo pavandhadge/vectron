@@ -105,7 +105,10 @@ func (h *HNSW) add(id string, vec []float32) error {
 		if err := h.deleteNoLock(id); err != nil {
 			return err
 		}
-		delete(h.nodes, internalID)
+		if int(internalID) < len(h.nodes) && h.nodes[internalID] != nil {
+			h.nodes[internalID] = nil
+			h.nodeCount--
+		}
 		delete(h.idToUint32, id)
 		delete(h.uint32ToID, internalID)
 	}
@@ -185,6 +188,10 @@ func (h *HNSW) addNoLock(id string, vec []float32) error {
 	// Persist the node to the store before modifying the graph.
 	if err := h.persistNode(node); err != nil {
 		return err
+	}
+	h.ensureNodeCapacity(internalID)
+	if h.nodes[internalID] == nil {
+		h.nodeCount++
 	}
 	h.nodes[internalID] = node
 

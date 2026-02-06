@@ -16,8 +16,10 @@ import (
 )
 
 const (
-	apiKeyPrefix = "vectron/apikeys/"
-	userPrefix   = "vectron/users/"
+	apiKeyPrefix       = "vectron/apikeys/"
+	apiKeyByUserPrefix = "vectron/apikeys_by_user/"
+	userPrefix         = "vectron/users/"
+	userIDPrefix       = "vectron/users_by_id/"
 )
 
 // CachedAPIKeyEntry holds cached API key validation results
@@ -121,6 +123,13 @@ type APIKeyData struct {
 	KeyPrefix string      `json:"key_prefix"`
 }
 
+type apiKeyListEntry struct {
+	KeyPrefix string `json:"key_prefix"`
+	UserID    string `json:"user_id"`
+	CreatedAt int64  `json:"created_at"`
+	Name      string `json:"name"`
+}
+
 // NewClient creates a new etcd client with caching.
 func NewClient(endpoints []string, timeout time.Duration) (*Client, error) {
 	cli, err := clientv3.New(clientv3.Config{
@@ -165,8 +174,16 @@ func (c *Client) CreateUser(ctx context.Context, email, password string) (*UserD
 	}
 
 	etcdKey := fmt.Sprintf("%s%s", userPrefix, userData.Email)
-	_, err = c.Put(ctx, etcdKey, string(data))
-	return userData, err
+	idKey := fmt.Sprintf("%s%s", userIDPrefix, userData.ID)
+
+	txn := c.Txn(ctx).Then(
+		clientv3.OpPut(etcdKey, string(data)),
+		clientv3.OpPut(idKey, userData.Email),
+	)
+	if _, err := txn.Commit(); err != nil {
+		return nil, err
+	}
+	return userData, nil
 }
 
 // GetUserByEmail retrieves a user by their email.
@@ -189,8 +206,16 @@ func (c *Client) GetUserByEmail(ctx context.Context, email string) (*UserData, e
 
 // GetUserByID retrieves a user by their ID.
 func (c *Client) GetUserByID(ctx context.Context, userID string) (*UserData, error) {
-	// This is inefficient. In a real DB, you'd have an index on ID.
-	// For etcd, we have to scan.
+	// Fast path: index lookup by ID.
+	idKey := fmt.Sprintf("%s%s", userIDPrefix, userID)
+	if resp, err := c.Get(ctx, idKey); err == nil && len(resp.Kvs) > 0 {
+		email := string(resp.Kvs[0].Value)
+		if email != "" {
+			return c.GetUserByEmail(ctx, email)
+		}
+	}
+
+	// Fallback: full scan (legacy data).
 	resp, err := c.Get(ctx, userPrefix, clientv3.WithPrefix())
 	if err != nil {
 		return nil, err
@@ -261,8 +286,23 @@ func (c *Client) CreateAPIKey(ctx context.Context, userID, name string) (string,
 	}
 
 	etcdKey := fmt.Sprintf("%s%s", apiKeyPrefix, keyInfo.KeyPrefix)
-	_, err = c.Put(ctx, etcdKey, string(data))
+	indexKey := fmt.Sprintf("%s%s/%s", apiKeyByUserPrefix, userID, keyInfo.KeyPrefix)
+	indexEntry := apiKeyListEntry{
+		KeyPrefix: keyInfo.KeyPrefix,
+		UserID:    userID,
+		CreatedAt: keyInfo.CreatedAt,
+		Name:      keyInfo.Name,
+	}
+	indexData, err := json.Marshal(indexEntry)
 	if err != nil {
+		return "", nil, err
+	}
+
+	txn := c.Txn(ctx).Then(
+		clientv3.OpPut(etcdKey, string(data)),
+		clientv3.OpPut(indexKey, string(indexData)),
+	)
+	if _, err := txn.Commit(); err != nil {
 		return "", nil, err
 	}
 
@@ -310,6 +350,25 @@ func (c *Client) ValidateAPIKey(ctx context.Context, fullKey string) (*APIKeyDat
 
 // ListAPIKeys retrieves all keys for a given user ID.
 func (c *Client) ListAPIKeys(ctx context.Context, userID string) ([]*authpb.APIKey, error) {
+	// Fast path: list by user index.
+	indexPrefix := fmt.Sprintf("%s%s/", apiKeyByUserPrefix, userID)
+	if resp, err := c.Get(ctx, indexPrefix, clientv3.WithPrefix()); err == nil && len(resp.Kvs) > 0 {
+		keys := make([]*authpb.APIKey, 0, len(resp.Kvs))
+		for _, kv := range resp.Kvs {
+			var entry apiKeyListEntry
+			if err := json.Unmarshal(kv.Value, &entry); err == nil {
+				keys = append(keys, &authpb.APIKey{
+					KeyPrefix: entry.KeyPrefix,
+					UserId:    entry.UserID,
+					CreatedAt: entry.CreatedAt,
+					Name:      entry.Name,
+				})
+			}
+		}
+		return keys, nil
+	}
+
+	// Fallback: full scan (legacy data).
 	resp, err := c.Get(ctx, apiKeyPrefix, clientv3.WithPrefix())
 	if err != nil {
 		return nil, err
@@ -353,12 +412,18 @@ func (c *Client) DeleteAPIKey(ctx context.Context, keyPrefixToDelete, userID str
 		return false, errors.New("user does not have permission to delete this key")
 	}
 
+	indexKey := fmt.Sprintf("%s%s/%s", apiKeyByUserPrefix, userID, keyPrefixToDelete)
+
 	// Invalidate cache before deleting
 	// We construct the full key to invalidate the cache entry
 	fullKey := keyPrefixToDelete + keyData.HashedKey[:10] // Approximation for cache invalidation
 	c.apiKeyCache.Invalidate(fullKey)
 
-	_, err = c.Delete(ctx, etcdKey)
+	txn := c.Txn(ctx).Then(
+		clientv3.OpDelete(etcdKey),
+		clientv3.OpDelete(indexKey),
+	)
+	_, err = txn.Commit()
 	return err == nil, err
 }
 
@@ -392,10 +457,15 @@ func (c *Client) DeleteUser(ctx context.Context, userID string) error {
 
 	// Delete user from etcd
 	userKey := fmt.Sprintf("%s%s", userPrefix, userData.Email)
+	idKey := fmt.Sprintf("%s%s", userIDPrefix, userID)
 	_, err = c.Delete(ctx, userKey)
 	if err != nil {
 		return fmt.Errorf("failed to delete user: %w", err)
 	}
+	_, _ = c.Delete(ctx, idKey)
+
+	// Best-effort cleanup of API key index entries
+	_, _ = c.Delete(ctx, fmt.Sprintf("%s%s/", apiKeyByUserPrefix, userID), clientv3.WithPrefix())
 
 	// Delete all API keys associated with this user
 	keys, err := c.ListAPIKeys(ctx, userID)

@@ -6,7 +6,7 @@ package middleware
 
 import (
 	"context"
-	"fmt"
+	
 	"log"
 	"net/http"
 	"time"
@@ -19,7 +19,6 @@ import (
 // LoggingInterceptor is a gRPC unary interceptor that logs information about each request.
 // It logs the start and end of a request, including the gRPC method, user ID, client IP, and total duration.
 func LoggingInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	fmt.Println("logger started")
 	start := time.Now()
 
 	// Attempt to get user and client details from the context.

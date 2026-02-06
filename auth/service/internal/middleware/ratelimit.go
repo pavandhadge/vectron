@@ -18,8 +18,8 @@ import (
 
 // RateLimiter provides rate limiting for gRPC endpoints
 type RateLimiter struct {
-	// requests tracks client -> endpoint -> request timestamps
-	requests map[string]map[string][]time.Time
+	// requests tracks client -> endpoint -> fixed-window counters
+	requests map[string]map[string]*rateCounter
 	mu       sync.RWMutex
 	// limits defines rate limits per endpoint (requests per window)
 	limits map[string]RateLimit
@@ -33,10 +33,15 @@ type RateLimit struct {
 	Window   time.Duration // Time window for the limit
 }
 
+type rateCounter struct {
+	count      int
+	windowFrom time.Time
+}
+
 // NewRateLimiter creates a new rate limiter with default limits
 func NewRateLimiter() *RateLimiter {
 	return &RateLimiter{
-		requests: make(map[string]map[string][]time.Time),
+		requests: make(map[string]map[string]*rateCounter),
 		limits:   make(map[string]RateLimit),
 		defaultLimit: RateLimit{
 			Requests: 100,
@@ -107,7 +112,7 @@ func (rl *RateLimiter) allowRequest(clientID, endpoint string) bool {
 
 	// Get or create client map
 	if rl.requests[clientID] == nil {
-		rl.requests[clientID] = make(map[string][]time.Time)
+		rl.requests[clientID] = make(map[string]*rateCounter)
 	}
 
 	// Get limit for this endpoint
@@ -116,24 +121,24 @@ func (rl *RateLimiter) allowRequest(clientID, endpoint string) bool {
 		limit = l
 	}
 
-	// Clean old requests outside the window
-	requests := rl.requests[clientID][endpoint]
-	var validRequests []time.Time
-	windowStart := now.Add(-limit.Window)
-	for _, t := range requests {
-		if t.After(windowStart) {
-			validRequests = append(validRequests, t)
-		}
+	counter, ok := rl.requests[clientID][endpoint]
+	if !ok {
+		counter = &rateCounter{count: 0, windowFrom: now}
+		rl.requests[clientID][endpoint] = counter
+	}
+
+	if now.Sub(counter.windowFrom) >= limit.Window {
+		counter.windowFrom = now
+		counter.count = 0
 	}
 
 	// Check if under limit
-	if len(validRequests) >= limit.Requests {
+	if counter.count >= limit.Requests {
 		return false
 	}
 
 	// Add current request
-	validRequests = append(validRequests, now)
-	rl.requests[clientID][endpoint] = validRequests
+	counter.count++
 
 	return true
 }
@@ -153,17 +158,9 @@ func (rl *RateLimiter) Cleanup(interval time.Duration) {
 		cutoff := now.Add(-maxWindow * 2)
 
 		for clientID, endpoints := range rl.requests {
-			for endpoint, requests := range endpoints {
-				var valid []time.Time
-				for _, t := range requests {
-					if t.After(cutoff) {
-						valid = append(valid, t)
-					}
-				}
-				if len(valid) == 0 {
+			for endpoint, counter := range endpoints {
+				if counter.windowFrom.Before(cutoff) {
 					delete(rl.requests[clientID], endpoint)
-				} else {
-					rl.requests[clientID][endpoint] = valid
 				}
 			}
 			if len(rl.requests[clientID]) == 0 {
@@ -263,27 +260,27 @@ func (rl *RateLimiter) allowHTTPRequest(clientID, path string, limit RateLimit) 
 
 	// Get or create client map
 	if rl.requests[clientID] == nil {
-		rl.requests[clientID] = make(map[string][]time.Time)
+		rl.requests[clientID] = make(map[string]*rateCounter)
 	}
 
-	// Clean old requests
-	requests := rl.requests[clientID][path]
-	var validRequests []time.Time
-	windowStart := now.Add(-limit.Window)
-	for _, t := range requests {
-		if t.After(windowStart) {
-			validRequests = append(validRequests, t)
-		}
+	counter, ok := rl.requests[clientID][path]
+	if !ok {
+		counter = &rateCounter{count: 0, windowFrom: now}
+		rl.requests[clientID][path] = counter
+	}
+
+	if now.Sub(counter.windowFrom) >= limit.Window {
+		counter.windowFrom = now
+		counter.count = 0
 	}
 
 	// Check if under limit
-	if len(validRequests) >= limit.Requests {
+	if counter.count >= limit.Requests {
 		return false
 	}
 
 	// Add current request
-	validRequests = append(validRequests, now)
-	rl.requests[clientID][path] = validRequests
+	counter.count++
 
 	return true
 }

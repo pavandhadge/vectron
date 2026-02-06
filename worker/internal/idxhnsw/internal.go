@@ -246,12 +246,32 @@ func sumSquares(a []float32) float32 {
 // Node Management
 // ======================================================================================
 
+func (h *HNSW) ensureNodeCapacity(id uint32) {
+	if int(id) < len(h.nodes) {
+		return
+	}
+	newSize := len(h.nodes)
+	if newSize < 1 {
+		newSize = 1
+	}
+	for newSize <= int(id) {
+		newSize *= 2
+	}
+	tmp := make([]*Node, newSize)
+	copy(tmp, h.nodes)
+	h.nodes = tmp
+}
+
 // getNode retrieves a node by its internal ID, ensuring it's not marked as deleted.
 func (h *HNSW) getNode(id uint32) *Node {
-	if n, ok := h.nodes[id]; ok && (n.Vec != nil || n.QVec != nil) {
+	if int(id) >= len(h.nodes) {
+		return nil
+	}
+	n := h.nodes[id]
+	if n != nil && (n.Vec != nil || n.QVec != nil) {
 		return n
 	}
-	return nil // Return nil if the node doesn't exist or is marked as deleted.
+	return nil
 }
 
 // persistNode serializes a node and saves it to the underlying key-value store.
@@ -281,8 +301,11 @@ func (h *HNSW) deleteNoLock(id string) error {
 		return nil // ID not found, nothing to delete.
 	}
 
-	node, exists := h.nodes[internalID]
-	if !exists || (node.Vec == nil && node.QVec == nil) {
+	if int(internalID) >= len(h.nodes) {
+		return nil
+	}
+	node := h.nodes[internalID]
+	if node == nil || (node.Vec == nil && node.QVec == nil) {
 		return nil // Node already deleted.
 	}
 
@@ -300,6 +323,9 @@ func (h *HNSW) item(id string) ([]float32, bool) {
 	defer h.mu.RUnlock()
 	internalID, ok := h.idToUint32[id]
 	if !ok {
+		return nil, false
+	}
+	if int(internalID) >= len(h.nodes) {
 		return nil, false
 	}
 	node := h.nodes[internalID]
@@ -373,13 +399,17 @@ func (h *HNSW) performCleanup(batchSize int) {
 	affected := make(map[uint32]bool) // Set of nodes that might have links to deleted nodes.
 
 	// Phase 1: Identify deleted nodes and their neighbors.
-	for id, node := range h.nodes {
+	for idx, node := range h.nodes {
 		if removed >= batchSize {
 			break
+		}
+		if idx == 0 {
+			continue
 		}
 		if node.Vec != nil || node.QVec != nil { // Skip live nodes.
 			continue
 		}
+		id := uint32(idx)
 
 		// Mark all of the deleted node's neighbors as "affected".
 		for _, layerNeighbors := range node.Neighbors {
@@ -389,7 +419,8 @@ func (h *HNSW) performCleanup(batchSize int) {
 		}
 
 		// Fully remove the deleted node from the main map.
-		delete(h.nodes, id)
+		h.nodes[id] = nil
+		h.nodeCount--
 		externalID := h.uint32ToID[id]
 		delete(h.idToUint32, externalID)
 		delete(h.uint32ToID, id)
@@ -399,6 +430,9 @@ func (h *HNSW) performCleanup(batchSize int) {
 
 	// Phase 2: Clean the connection lists of only the affected nodes.
 	for affectedID := range affected {
+		if int(affectedID) >= len(h.nodes) {
+			continue
+		}
 		node := h.nodes[affectedID]
 		if node == nil || (node.Vec == nil && node.QVec == nil) {
 			continue // This node might have been deleted in the same batch.
@@ -442,6 +476,9 @@ func (h *HNSW) maybeUpdateEntryPoint() {
 	// Find a new entry point, preferably at the highest layer.
 	for l := h.maxLayer; l >= 0; l-- {
 		for _, node := range h.nodes {
+			if node == nil {
+				continue
+			}
 			if (node.Vec != nil || node.QVec != nil) && node.Layer == l {
 				h.entry = node.ID
 				h.maxLayer = l

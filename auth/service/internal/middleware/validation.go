@@ -21,6 +21,7 @@ var (
 // Email validation regex (simplified but effective)
 // This regex checks for basic email format: local@domain.tld
 var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+var apiKeyNameRegex = regexp.MustCompile(`^[a-zA-Z0-9\s\-_]+$`)
 
 // Common validation constants
 const (
@@ -166,8 +167,7 @@ func ValidateAPIKeyName(name string) error {
 	}
 
 	// API key names should only contain alphanumeric characters, spaces, hyphens, and underscores
-	validNameRegex := regexp.MustCompile(`^[a-zA-Z0-9\s\-_]+$`)
-	if !validNameRegex.MatchString(name) {
+	if !apiKeyNameRegex.MatchString(name) {
 		return status.Error(codes.InvalidArgument, "API key name can only contain letters, numbers, spaces, hyphens, and underscores")
 	}
 

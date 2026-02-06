@@ -402,20 +402,18 @@ func encodeVectorWithMeta(vector []float32, metadata []byte, compress bool) ([]b
 		return nil, fmt.Errorf("invalid vector length")
 	}
 	if !compress {
-		buf := new(bytes.Buffer)
-		vecLen32 := int32(vecLen)
-		if err := binary.Write(buf, binary.LittleEndian, vecLen32); err != nil {
-			return nil, err
-		}
-		if err := binary.Write(buf, binary.LittleEndian, vector); err != nil {
-			return nil, err
+		totalLen := 4 + vecLen*4 + len(metadata)
+		buf := make([]byte, totalLen)
+		binary.LittleEndian.PutUint32(buf[:4], uint32(vecLen))
+		offset := 4
+		for _, v := range vector {
+			binary.LittleEndian.PutUint32(buf[offset:offset+4], math.Float32bits(v))
+			offset += 4
 		}
 		if len(metadata) > 0 {
-			if _, err := buf.Write(metadata); err != nil {
-				return nil, err
-			}
+			copy(buf[offset:], metadata)
 		}
-		return buf.Bytes(), nil
+		return buf, nil
 	}
 
 	if vecLen > int(^vectorCompressionFlag) {

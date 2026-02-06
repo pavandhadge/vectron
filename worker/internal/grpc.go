@@ -291,19 +291,58 @@ func (s *GrpcServer) BatchSearch(ctx context.Context, req *worker.BatchSearchReq
 	if req == nil || len(req.GetRequests()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "batch search requests are empty")
 	}
-	responses := make([]*worker.SearchResponse, 0, len(req.GetRequests()))
-	for _, r := range req.GetRequests() {
+	requests := req.GetRequests()
+	for _, r := range requests {
 		if r == nil || len(r.GetVector()) == 0 {
 			return nil, status.Error(codes.InvalidArgument, "search vector is empty")
 		}
-		if err := s.validateShardLease(r.GetShardId(), r.GetShardEpoch(), r.GetLeaseExpiryUnixMs()); err != nil {
-			return nil, err
-		}
-		resp, err := s.searchCore(ctx, r)
-		if err != nil {
-			return nil, err
-		}
-		responses = append(responses, resp)
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	responses := make([]*worker.SearchResponse, len(requests))
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		firstErr error
+		sem      = make(chan struct{}, adaptiveConcurrency(2, 32))
+	)
+
+	for i, r := range requests {
+		i := i
+		r := r
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			if err := s.validateShardLease(r.GetShardId(), r.GetShardEpoch(), r.GetLeaseExpiryUnixMs()); err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+					cancel()
+				}
+				mu.Unlock()
+				return
+			}
+			resp, err := s.searchCore(ctx, r)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+					cancel()
+				}
+				mu.Unlock()
+				return
+			}
+			responses[i] = resp
+		}()
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
 	}
 	return &worker.BatchSearchResponse{Responses: responses}, nil
 }
@@ -353,11 +392,8 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 	// If ShardId is 0, it's a broadcast search. Search all shards on this worker.
 	if req.GetShardId() == 0 {
 		var (
-			wg       sync.WaitGroup
-			mu       sync.Mutex
-			topKHeap = &searchMinHeap{}
+			wg sync.WaitGroup
 		)
-		heap.Init(topKHeap)
 
 		searchSem := make(chan struct{}, adaptiveConcurrency(2, 32))
 		var shardIDs []uint64
@@ -366,6 +402,7 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 		} else {
 			shardIDs = s.shardManager.GetShards()
 		}
+		resultsCh := make(chan []searchHeapItem, len(shardIDs))
 		for _, shardID := range shardIDs {
 			wg.Add(1)
 			go func(id uint64) {
@@ -390,29 +427,54 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 					return
 				}
 
-				mu.Lock()
 				limit := int(req.GetK())
 				if limit <= 0 {
 					limit = 10
 				}
+				localHeap := &searchMinHeap{}
+				heap.Init(localHeap)
 				for i, resultID := range searchResult.IDs {
 					if i >= len(searchResult.Scores) {
 						break
 					}
 					score := searchResult.Scores[i]
-					if topKHeap.Len() < limit {
-						heap.Push(topKHeap, searchHeapItem{id: resultID, score: score})
+					if localHeap.Len() < limit {
+						heap.Push(localHeap, searchHeapItem{id: resultID, score: score})
 						continue
 					}
-					if topKHeap.Len() > 0 && score > (*topKHeap)[0].score {
-						(*topKHeap)[0] = searchHeapItem{id: resultID, score: score}
-						heap.Fix(topKHeap, 0)
+					if localHeap.Len() > 0 && score > (*localHeap)[0].score {
+						(*localHeap)[0] = searchHeapItem{id: resultID, score: score}
+						heap.Fix(localHeap, 0)
 					}
 				}
-				mu.Unlock()
+				if localHeap.Len() > 0 {
+					localResults := append([]searchHeapItem(nil), (*localHeap)...)
+					resultsCh <- localResults
+				}
 			}(shardID)
 		}
 		wg.Wait()
+
+		close(resultsCh)
+
+		limit := int(req.GetK())
+		if limit <= 0 {
+			limit = 10
+		}
+		topKHeap := &searchMinHeap{}
+		heap.Init(topKHeap)
+		for local := range resultsCh {
+			for _, item := range local {
+				if topKHeap.Len() < limit {
+					heap.Push(topKHeap, item)
+					continue
+				}
+				if topKHeap.Len() > 0 && item.score > (*topKHeap)[0].score {
+					(*topKHeap)[0] = item
+					heap.Fix(topKHeap, 0)
+				}
+			}
+		}
 
 		resultCount := topKHeap.Len()
 		ids := make([]string, resultCount)

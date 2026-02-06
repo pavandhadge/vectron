@@ -7,7 +7,7 @@ package middleware
 
 import (
 	"context"
-	"fmt"
+	
 	"hash/fnv"
 	"sync"
 	"time"
@@ -106,7 +106,6 @@ func RateLimitInterceptor(rps int) func(ctx context.Context, req interface{}, in
 		if exceeded {
 			return nil, status.Errorf(codes.ResourceExhausted, "rate limit of %d RPS exceeded", rps)
 		}
-		fmt.Println("ratelimiter ended")
 
 		return handler(ctx, req)
 	}

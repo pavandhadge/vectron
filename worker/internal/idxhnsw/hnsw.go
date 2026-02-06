@@ -65,15 +65,16 @@ type HNSWConfig struct {
 
 // HNSW represents the HNSW index.
 type HNSW struct {
-	config   HNSWConfig
-	dim      int    // The dimension of the vectors.
-	entry    uint32 // The internal ID of the entry point node.
-	maxLayer int    // The highest layer currently in the graph.
-	nodes    map[uint32]*Node
-	store    NodeStore
-	mu       sync.RWMutex
-	mmapStore *vectorMmap
-	pruneMu        sync.Mutex
+	config          HNSWConfig
+	dim             int    // The dimension of the vectors.
+	entry           uint32 // The internal ID of the entry point node.
+	maxLayer        int    // The highest layer currently in the graph.
+	nodes           []*Node
+	nodeCount       int64
+	store           NodeStore
+	mu              sync.RWMutex
+	mmapStore       *vectorMmap
+	pruneMu         sync.Mutex
 	pruneCandidates map[uint32]struct{}
 
 	// Deletion-related fields
@@ -111,16 +112,17 @@ func NewHNSW(store NodeStore, dim int, config HNSWConfig) *HNSW {
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	h := &HNSW{
-		config:       config,
-		dim:          dim,
-		store:        store,
-		nodes:        make(map[uint32]*Node),
-		entry:        0, // No entry point initially.
-		maxLayer:     0,
-		deletedCount: 0,
-		idToUint32:   make(map[string]uint32),
-		uint32ToID:   make(map[uint32]string),
-		nextID:       1, // Start internal IDs from 1.
+		config:          config,
+		dim:             dim,
+		store:           store,
+		nodes:           make([]*Node, 1),
+		nodeCount:       0,
+		entry:           0, // No entry point initially.
+		maxLayer:        0,
+		deletedCount:    0,
+		idToUint32:      make(map[string]uint32),
+		uint32ToID:      make(map[uint32]string),
+		nextID:          1, // Start internal IDs from 1.
 		pruneCandidates: make(map[uint32]struct{}),
 	}
 	// Start the background cleanup process for marked-for-deletion nodes.
@@ -195,7 +197,7 @@ func (h *HNSW) Delete(id string) error { return h.delete(id) }
 func (h *HNSW) Size() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return len(h.nodes) - int(h.deletedCount)
+	return int(h.nodeCount) - int(h.deletedCount)
 }
 
 // Item retrieves a vector by its ID.
@@ -206,7 +208,7 @@ func (h *HNSW) Stats() HNSWStats {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return HNSWStats{
-		TotalNodes:   int64(len(h.nodes)),
+		TotalNodes:   h.nodeCount,
 		DeletedNodes: h.deletedCount,
 	}
 }
@@ -216,8 +218,8 @@ func (h *HNSW) Rebuild() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	liveIDs := make([]string, 0, len(h.nodes))
-	liveVecs := make([][]float32, 0, len(h.nodes))
+	liveIDs := make([]string, 0, h.nodeCount)
+	liveVecs := make([][]float32, 0, h.nodeCount)
 	for _, node := range h.nodes {
 		if node == nil || (node.Vec == nil && node.QVec == nil) {
 			continue
@@ -231,7 +233,8 @@ func (h *HNSW) Rebuild() error {
 	}
 
 	// Reset internal state.
-	h.nodes = make(map[uint32]*Node, len(liveIDs))
+	h.nodes = make([]*Node, 1)
+	h.nodeCount = 0
 	h.idToUint32 = make(map[string]uint32, len(liveIDs))
 	h.uint32ToID = make(map[uint32]string, len(liveIDs))
 	h.entry = 0
@@ -313,10 +316,19 @@ func (h *HNSW) Save(w io.Writer) error {
 		return err
 	}
 
-	if err := writeUint32(bw, uint32(len(h.nodes))); err != nil {
+	var nodeCount uint32
+	for _, node := range h.nodes {
+		if node != nil {
+			nodeCount++
+		}
+	}
+	if err := writeUint32(bw, nodeCount); err != nil {
 		return err
 	}
 	for _, node := range h.nodes {
+		if node == nil {
+			continue
+		}
 		if err := writeUint32(bw, node.ID); err != nil {
 			return err
 		}
@@ -464,7 +476,7 @@ func (h *HNSW) Load(r io.Reader) error {
 		if err != nil {
 			return err
 		}
-		nodes := make(map[uint32]*Node, nodeCount32)
+		nodes := make([]*Node, int(nextID)+1)
 		for i := uint32(0); i < nodeCount32; i++ {
 			id, err := readUint32(br)
 			if err != nil {
@@ -549,6 +561,12 @@ func (h *HNSW) Load(r io.Reader) error {
 				}
 				neighbors[l] = layerNeighbors
 			}
+			if int(id) >= len(nodes) {
+				newSize := int(id) + 1
+				tmp := make([]*Node, newSize)
+				copy(tmp, nodes)
+				nodes = tmp
+			}
 			nodes[id] = &Node{
 				ID:        id,
 				Vec:       vec,
@@ -583,6 +601,7 @@ func (h *HNSW) Load(r io.Reader) error {
 		h.entry = entry
 		h.maxLayer = maxLayer
 		h.nodes = nodes
+		h.nodeCount = int64(nodeCount32)
 		h.idToUint32 = idToUint32
 		h.uint32ToID = uint32ToID
 		h.nextID = nextID
@@ -609,7 +628,17 @@ func (h *HNSW) Load(r io.Reader) error {
 	h.dim = data.Dim
 	h.entry = data.Entry
 	h.maxLayer = data.MaxLayer
-	h.nodes = data.Nodes
+	h.nodes = make([]*Node, int(data.NextID)+1)
+	for id, node := range data.Nodes {
+		if int(id) >= len(h.nodes) {
+			newSize := int(id) + 1
+			tmp := make([]*Node, newSize)
+			copy(tmp, h.nodes)
+			h.nodes = tmp
+		}
+		h.nodes[id] = node
+	}
+	h.nodeCount = int64(len(data.Nodes))
 	h.idToUint32 = data.IDToUint32
 	h.uint32ToID = data.Uint32ToID
 	h.nextID = data.NextID

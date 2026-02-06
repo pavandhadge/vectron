@@ -57,9 +57,14 @@ func (pq *maxPriorityQueue) Pop() interface{} {
 	return item
 }
 
+type visitTracker struct {
+	marks []uint32
+	epoch uint32
+}
+
 var visitedPool = sync.Pool{
 	New: func() interface{} {
-		return make(map[uint32]struct{}, 1024)
+		return &visitTracker{marks: make([]uint32, 0)}
 	},
 }
 
@@ -250,11 +255,22 @@ func (h *HNSW) searchLayerSingle(vec []float32, qvec []int8, start *Node, layer 
 // searchLayer performs an expanded search within a single layer using a priority queue.
 // It explores neighbors of neighbors up to `ef` (efConstruction or efSearch) candidates.
 func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer int) []candidate {
-	visited := visitedPool.Get().(map[uint32]struct{})
-	for key := range visited {
-		delete(visited, key)
+	tracker := visitedPool.Get().(*visitTracker)
+	maxID := int(h.nextID)
+	if maxID < 0 {
+		maxID = 0
 	}
-	defer visitedPool.Put(visited)
+	if len(tracker.marks) <= maxID {
+		tracker.marks = make([]uint32, maxID+1)
+	}
+	tracker.epoch++
+	if tracker.epoch == 0 {
+		for i := range tracker.marks {
+			tracker.marks[i] = 0
+		}
+		tracker.epoch = 1
+	}
+	defer visitedPool.Put(tracker)
 
 	// Candidate queue (min-heap) to explore promising nodes.
 	candidateSlice := candidateSlicePool.Get().([]candidate)
@@ -270,7 +286,9 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 	heap.Init(&results)
 	heap.Push(&results, candidate{id: start.ID, dist: h.distanceToNode(vec, qvec, start), node: start})
 
-	visited[start.ID] = struct{}{}
+	if int(start.ID) < len(tracker.marks) {
+		tracker.marks[start.ID] = tracker.epoch
+	}
 
 	for candidates.Len() > 0 {
 		// Get the closest candidate from the min-heap to explore next.
@@ -290,10 +308,12 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 		nodes := make([]*Node, 0, len(neighbors))
 		ids := make([]uint32, 0, len(neighbors))
 		for _, nid := range neighbors {
-			if _, ok := visited[nid]; ok {
+			if int(nid) < len(tracker.marks) && tracker.marks[nid] == tracker.epoch {
 				continue
 			}
-			visited[nid] = struct{}{}
+			if int(nid) < len(tracker.marks) {
+				tracker.marks[nid] = tracker.epoch
+			}
 			n := h.getNode(nid)
 			if n == nil {
 				continue
