@@ -1,4 +1,4 @@
-//go:build amd64
+//go:build amd64 && !avx512
 
 package idxhnsw
 

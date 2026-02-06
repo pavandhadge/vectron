@@ -59,6 +59,8 @@ type HNSWConfig struct {
 	QuantizeVectors   bool   // Whether to store vectors in int8 form (cosine+normalized only).
 	SearchParallelism int    // Parallelism for search distance computations.
 	HotIndex          bool   // If true, this index is a hot in-memory tier.
+	PruneEnabled      bool   // If true, periodically prune redundant edges.
+	PruneMaxNodes     int    // Max nodes to prune per maintenance tick.
 }
 
 // HNSW represents the HNSW index.
@@ -70,6 +72,9 @@ type HNSW struct {
 	nodes    map[uint32]*Node
 	store    NodeStore
 	mu       sync.RWMutex
+	mmapStore *vectorMmap
+	pruneMu        sync.Mutex
+	pruneCandidates map[uint32]struct{}
 
 	// Deletion-related fields
 	deletedCount int64
@@ -116,10 +121,51 @@ func NewHNSW(store NodeStore, dim int, config HNSWConfig) *HNSW {
 		idToUint32:   make(map[string]uint32),
 		uint32ToID:   make(map[uint32]string),
 		nextID:       1, // Start internal IDs from 1.
+		pruneCandidates: make(map[uint32]struct{}),
 	}
 	// Start the background cleanup process for marked-for-deletion nodes.
 	h.StartCleanup(DefaultCleanupConfig)
 	return h
+}
+
+// SetSearchParallelism updates runtime search parallelism (not persisted).
+func (h *HNSW) SetSearchParallelism(n int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.config.SearchParallelism = n
+}
+
+// SetPruneConfig updates runtime pruning configuration (not persisted).
+func (h *HNSW) SetPruneConfig(enabled bool, maxNodes int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.config.PruneEnabled = enabled
+	h.config.PruneMaxNodes = maxNodes
+}
+
+// Warmup touches vectors and neighbor lists to warm CPU caches and OS page cache.
+func (h *HNSW) Warmup(maxNodes int) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	visited := 0
+	for _, node := range h.nodes {
+		if node == nil {
+			continue
+		}
+		if node.Vec != nil {
+			_ = node.Vec[0]
+		} else if node.QVec != nil {
+			_ = node.QVec[0]
+		}
+		if len(node.Neighbors) > 0 {
+			_ = node.Neighbors[0]
+		}
+		visited++
+		if maxNodes > 0 && visited >= maxNodes {
+			break
+		}
+	}
+	return visited
 }
 
 // ======================================================================================

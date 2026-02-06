@@ -12,6 +12,7 @@ type Options struct {
 	MaxOpenFiles    int        // The maximum number of open files for the database.
 	WriteBufferSize int        // The size of the in-memory write buffer (memtable).
 	CacheSize       int64      // The size of the block cache.
+	BloomFilterBitsPerKey int  // Bloom filter bits per key (0 disables).
 	HNSWConfig      HNSWConfig // Configuration for the HNSW index.
 }
 
@@ -43,6 +44,13 @@ type HNSWConfig struct {
 	IndexingQueueSize      int           // Max queued index operations.
 	IndexingBatchSize      int           // Max ops per indexer batch.
 	IndexingFlushInterval  time.Duration // Max time to wait before flushing queued ops.
+	PruneEnabled           bool          // If true, periodically prune redundant edges.
+	PruneMaxNodes          int           // Max nodes to prune per maintenance tick.
+	MmapVectorsEnabled     bool          // If true, store vectors in an mmap-backed region.
+	MmapInitialMB          int           // Initial mmap file size in MB (0 = auto).
+	WarmupEnabled          bool          // If true, warm the index after startup.
+	WarmupMaxVectors       int           // Max vectors to touch during warmup.
+	WarmupDelay            time.Duration // Delay before warmup starts.
 	VectorCompressionEnabled bool        // If true, store vectors in compressed int8 form on disk (cosine+normalized only).
 	AdaptiveQualityEnabled bool          // If true, adjust ef based on query quality.
 	LowNormThreshold       float64       // Query norm threshold to consider low quality.

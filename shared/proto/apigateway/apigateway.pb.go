@@ -1395,12 +1395,14 @@ const file_apigateway_apigateway_proto_rawDesc = "" +
 	"\x16SubmitFeedbackResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x1f\n" +
 	"\vfeedback_id\x18\x02 \x01(\tR\n" +
-	"feedbackId2\xc6\t\n" +
+	"feedbackId2\x91\n" +
+	"\n" +
 	"\x0eVectronService\x12y\n" +
 	"\x10CreateCollection\x12#.vectron.v1.CreateCollectionRequest\x1a$.vectron.v1.CreateCollectionResponse\"\x1a\x82\xd3\xe4\x93\x02\x14:\x01*\"\x0f/v1/collections\x12}\n" +
 	"\x10DeleteCollection\x12#.vectron.v1.DeleteCollectionRequest\x1a$.vectron.v1.DeleteCollectionResponse\"\x1e\x82\xd3\xe4\x93\x02\x18*\x16/v1/collections/{name}\x12o\n" +
 	"\x06Upsert\x12\x19.vectron.v1.UpsertRequest\x1a\x1a.vectron.v1.UpsertResponse\".\x82\xd3\xe4\x93\x02(:\x01*\"#/v1/collections/{collection}/points\x12v\n" +
-	"\x06Search\x12\x19.vectron.v1.SearchRequest\x1a\x1a.vectron.v1.SearchResponse\"5\x82\xd3\xe4\x93\x02/:\x01*\"*/v1/collections/{collection}/points/search\x12h\n" +
+	"\x06Search\x12\x19.vectron.v1.SearchRequest\x1a\x1a.vectron.v1.SearchResponse\"5\x82\xd3\xe4\x93\x02/:\x01*\"*/v1/collections/{collection}/points/search\x12I\n" +
+	"\fSearchStream\x12\x19.vectron.v1.SearchRequest\x1a\x1a.vectron.v1.SearchResponse\"\x000\x01\x12h\n" +
 	"\x03Get\x12\x16.vectron.v1.GetRequest\x1a\x17.vectron.v1.GetResponse\"0\x82\xd3\xe4\x93\x02*\x12(/v1/collections/{collection}/points/{id}\x12q\n" +
 	"\x06Delete\x12\x19.vectron.v1.DeleteRequest\x1a\x1a.vectron.v1.DeleteResponse\"0\x82\xd3\xe4\x93\x02**(/v1/collections/{collection}/points/{id}\x12s\n" +
 	"\x0fListCollections\x12\".vectron.v1.ListCollectionsRequest\x1a#.vectron.v1.ListCollectionsResponse\"\x17\x82\xd3\xe4\x93\x02\x11\x12\x0f/v1/collections\x12\x8d\x01\n" +
@@ -1467,24 +1469,26 @@ var file_apigateway_apigateway_proto_depIdxs = []int32{
 	2,  // 11: vectron.v1.VectronService.DeleteCollection:input_type -> vectron.v1.DeleteCollectionRequest
 	4,  // 12: vectron.v1.VectronService.Upsert:input_type -> vectron.v1.UpsertRequest
 	6,  // 13: vectron.v1.VectronService.Search:input_type -> vectron.v1.SearchRequest
-	9,  // 14: vectron.v1.VectronService.Get:input_type -> vectron.v1.GetRequest
-	11, // 15: vectron.v1.VectronService.Delete:input_type -> vectron.v1.DeleteRequest
-	13, // 16: vectron.v1.VectronService.ListCollections:input_type -> vectron.v1.ListCollectionsRequest
-	15, // 17: vectron.v1.VectronService.GetCollectionStatus:input_type -> vectron.v1.GetCollectionStatusRequest
-	19, // 18: vectron.v1.VectronService.UpdateUserProfile:input_type -> vectron.v1.UpdateUserProfileRequest
-	21, // 19: vectron.v1.VectronService.SubmitFeedback:input_type -> vectron.v1.SubmitFeedbackRequest
-	1,  // 20: vectron.v1.VectronService.CreateCollection:output_type -> vectron.v1.CreateCollectionResponse
-	3,  // 21: vectron.v1.VectronService.DeleteCollection:output_type -> vectron.v1.DeleteCollectionResponse
-	5,  // 22: vectron.v1.VectronService.Upsert:output_type -> vectron.v1.UpsertResponse
-	7,  // 23: vectron.v1.VectronService.Search:output_type -> vectron.v1.SearchResponse
-	10, // 24: vectron.v1.VectronService.Get:output_type -> vectron.v1.GetResponse
-	12, // 25: vectron.v1.VectronService.Delete:output_type -> vectron.v1.DeleteResponse
-	14, // 26: vectron.v1.VectronService.ListCollections:output_type -> vectron.v1.ListCollectionsResponse
-	16, // 27: vectron.v1.VectronService.GetCollectionStatus:output_type -> vectron.v1.GetCollectionStatusResponse
-	20, // 28: vectron.v1.VectronService.UpdateUserProfile:output_type -> vectron.v1.UpdateUserProfileResponse
-	23, // 29: vectron.v1.VectronService.SubmitFeedback:output_type -> vectron.v1.SubmitFeedbackResponse
-	20, // [20:30] is the sub-list for method output_type
-	10, // [10:20] is the sub-list for method input_type
+	6,  // 14: vectron.v1.VectronService.SearchStream:input_type -> vectron.v1.SearchRequest
+	9,  // 15: vectron.v1.VectronService.Get:input_type -> vectron.v1.GetRequest
+	11, // 16: vectron.v1.VectronService.Delete:input_type -> vectron.v1.DeleteRequest
+	13, // 17: vectron.v1.VectronService.ListCollections:input_type -> vectron.v1.ListCollectionsRequest
+	15, // 18: vectron.v1.VectronService.GetCollectionStatus:input_type -> vectron.v1.GetCollectionStatusRequest
+	19, // 19: vectron.v1.VectronService.UpdateUserProfile:input_type -> vectron.v1.UpdateUserProfileRequest
+	21, // 20: vectron.v1.VectronService.SubmitFeedback:input_type -> vectron.v1.SubmitFeedbackRequest
+	1,  // 21: vectron.v1.VectronService.CreateCollection:output_type -> vectron.v1.CreateCollectionResponse
+	3,  // 22: vectron.v1.VectronService.DeleteCollection:output_type -> vectron.v1.DeleteCollectionResponse
+	5,  // 23: vectron.v1.VectronService.Upsert:output_type -> vectron.v1.UpsertResponse
+	7,  // 24: vectron.v1.VectronService.Search:output_type -> vectron.v1.SearchResponse
+	7,  // 25: vectron.v1.VectronService.SearchStream:output_type -> vectron.v1.SearchResponse
+	10, // 26: vectron.v1.VectronService.Get:output_type -> vectron.v1.GetResponse
+	12, // 27: vectron.v1.VectronService.Delete:output_type -> vectron.v1.DeleteResponse
+	14, // 28: vectron.v1.VectronService.ListCollections:output_type -> vectron.v1.ListCollectionsResponse
+	16, // 29: vectron.v1.VectronService.GetCollectionStatus:output_type -> vectron.v1.GetCollectionStatusResponse
+	20, // 30: vectron.v1.VectronService.UpdateUserProfile:output_type -> vectron.v1.UpdateUserProfileResponse
+	23, // 31: vectron.v1.VectronService.SubmitFeedback:output_type -> vectron.v1.SubmitFeedbackResponse
+	21, // [21:32] is the sub-list for method output_type
+	10, // [10:21] is the sub-list for method input_type
 	10, // [10:10] is the sub-list for extension type_name
 	10, // [10:10] is the sub-list for extension extendee
 	0,  // [0:10] is the sub-list for field type_name

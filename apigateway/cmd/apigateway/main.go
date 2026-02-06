@@ -375,6 +375,36 @@ func (h *searchResultHeap) Pop() interface{} {
 	return item
 }
 
+func snapshotTopResults(topResults *searchResultHeap, limit int) *pb.SearchResponse {
+	if topResults.Len() == 0 {
+		return &pb.SearchResponse{}
+	}
+	results := make([]*pb.SearchResult, topResults.Len())
+	copy(results, *topResults)
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+	if limit > 0 && len(results) > limit {
+		results = results[:limit]
+	}
+	return &pb.SearchResponse{Results: results}
+}
+
+func equalResultIDs(a, b *pb.SearchResponse) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	if len(a.Results) != len(b.Results) {
+		return false
+	}
+	for i := range a.Results {
+		if a.Results[i].Id != b.Results[i].Id {
+			return false
+		}
+	}
+	return true
+}
+
 // NewSearchCache creates a new search cache with specified TTL and max size
 func NewSearchCache(ttl time.Duration, maxSize int) *SearchCache {
 	cache := &SearchCache{
@@ -686,6 +716,59 @@ type WorkerConnPool struct {
 	maxTotalConns          int
 }
 
+// PDConnPool manages gRPC connections to placement driver nodes.
+type PDConnPool struct {
+	mu                     sync.RWMutex
+	conns                  map[string]*grpc.ClientConn
+	clients                map[string]placementpb.PlacementServiceClient
+	grpcCompressionEnabled bool
+}
+
+func NewPDConnPool(enableCompression bool) *PDConnPool {
+	return &PDConnPool{
+		conns:                  make(map[string]*grpc.ClientConn),
+		clients:                make(map[string]placementpb.PlacementServiceClient),
+		grpcCompressionEnabled: enableCompression,
+	}
+}
+
+func (p *PDConnPool) GetClient(addr string) (placementpb.PlacementServiceClient, *grpc.ClientConn, error) {
+	p.mu.RLock()
+	if client, ok := p.clients[addr]; ok {
+		if conn := p.conns[addr]; conn != nil {
+			state := conn.GetState()
+			if state != connectivity.Shutdown && state != connectivity.TransientFailure {
+				p.mu.RUnlock()
+				return client, conn, nil
+			}
+		}
+	}
+	p.mu.RUnlock()
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if client, ok := p.clients[addr]; ok {
+		if conn := p.conns[addr]; conn != nil {
+			state := conn.GetState()
+			if state != connectivity.Shutdown && state != connectivity.TransientFailure {
+				return client, conn, nil
+			}
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	opts := append(grpcClientOptions(p.grpcCompressionEnabled), grpc.WithBlock())
+	conn, err := grpc.DialContext(ctx, addr, opts...)
+	if err != nil {
+		return nil, nil, err
+	}
+	client := placementpb.NewPlacementServiceClient(conn)
+	p.conns[addr] = conn
+	p.clients[addr] = client
+	return client, conn, nil
+}
+
 // GetClient returns a cached gRPC client for the given worker address.
 // Creates a new connection if one doesn't exist or if the existing one is unhealthy.
 // OPTIMIZATION: Added circuit breaker pattern and connection limits
@@ -862,6 +945,7 @@ type gatewayServer struct {
 	managementMgr          *management.Manager
 	workerPool             *WorkerConnPool // Connection pool for worker gRPC connections
 	workerSearchBatcher    *WorkerSearchBatcher
+	pdPool                 *PDConnPool
 	searchCache            *SearchCache    // Cache for search results
 	workerListCache        *WorkerListCache
 	resolveCache           *WorkerResolveCache
@@ -1271,24 +1355,19 @@ func (s *gatewayServer) updateLeader() (placementpb.PlacementServiceClient, erro
 	s.leaderMu.Lock()
 	defer s.leaderMu.Unlock()
 
-	if s.leader != nil && s.leader.conn != nil {
-		s.leader.conn.Close()
+	if s.pdPool == nil {
+		s.pdPool = NewPDConnPool(s.grpcCompressionEnabled)
 	}
 
 	for _, addr := range s.pdAddrs {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		opts := append(grpcClientOptions(s.grpcCompressionEnabled), grpc.WithBlock())
-		conn, err := grpc.DialContext(ctx, addr, opts...)
-		cancel()
+		client, conn, err := s.pdPool.GetClient(addr)
 		if err != nil {
 			log.Printf("Failed to connect to PD node %s: %v", addr, err)
 			continue
 		}
 
-		client := placementpb.NewPlacementServiceClient(conn)
 		_, err = client.ListCollections(context.Background(), &placementpb.ListCollectionsRequest{})
 		if err != nil {
-			conn.Close()
 			log.Printf("Failed to get leader from PD node %s: %v", addr, err)
 			continue
 		}
@@ -1608,6 +1687,287 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 	resp, err := s.searchUncached(ctx, req, warmupKey, warmupKeySet)
 	s.finishInFlight(flightKey, resp, err)
 	return resp, err
+}
+
+func (s *gatewayServer) SearchStream(req *pb.SearchRequest, stream pb.VectronService_SearchStreamServer) error {
+	if req.Collection == "" {
+		return status.Error(codes.InvalidArgument, "collection name cannot be empty")
+	}
+	if len(req.Vector) == 0 {
+		return status.Error(codes.InvalidArgument, "search vector cannot be empty")
+	}
+	if req.TopK == 0 {
+		req.TopK = 10
+	}
+
+	if cached, found := s.searchCache.Get(req); found {
+		return stream.Send(cached)
+	}
+
+	baseResp, metadataByID, err := s.searchStreamUncached(stream.Context(), req, stream)
+	if err != nil {
+		return err
+	}
+
+	allowAll := len(cfg.RerankCollections) == 0
+	enabledForCollection := allowAll || cfg.RerankCollections[req.Collection]
+	if req.Query == "" || !cfg.RerankEnabled || !enabledForCollection {
+		return nil
+	}
+
+	candidates := make([]*reranker.Candidate, len(baseResp.Results))
+	for i, result := range baseResp.Results {
+		metadata := result.Payload
+		if metadataByID != nil {
+			if m, ok := metadataByID[result.Id]; ok {
+				metadata = m
+			}
+		}
+		candidates[i] = &reranker.Candidate{
+			Id:       result.Id,
+			Score:    result.Score,
+			Metadata: metadata,
+		}
+	}
+
+	rerankTopN := int(req.TopK)
+	if v, ok := cfg.RerankTopNOverrides[req.Collection]; ok && v > 0 {
+		rerankTopN = v
+	}
+	rerankTimeoutMs := cfg.RerankTimeoutMs
+	if v, ok := cfg.RerankTimeoutOverrides[req.Collection]; ok && v > 0 {
+		rerankTimeoutMs = v
+	}
+
+	rerankReq := &reranker.RerankRequest{
+		Query:      req.Query,
+		Candidates: candidates,
+		TopN:       int32(rerankTopN),
+	}
+
+	rerankCtx := stream.Context()
+	var cancel context.CancelFunc
+	if rerankTimeoutMs > 0 {
+		rerankCtx, cancel = context.WithTimeout(stream.Context(), time.Duration(rerankTimeoutMs)*time.Millisecond)
+		defer cancel()
+	}
+	rerankResp, err := s.rerankerClient.Rerank(rerankCtx, rerankReq)
+	if err != nil {
+		// If rerank fails, end after streamed base results.
+		return nil
+	}
+
+	rerankedResults := make([]*pb.SearchResult, len(rerankResp.Results))
+	for i, result := range rerankResp.Results {
+		var payload map[string]string
+		if metadataByID != nil {
+			payload = metadataByID[result.Id]
+		}
+		rerankedResults[i] = &pb.SearchResult{
+			Id:      result.Id,
+			Score:   result.RerankScore,
+			Payload: payload,
+		}
+	}
+
+	finalResp := &pb.SearchResponse{Results: rerankedResults}
+	s.searchCache.Set(req, finalResp)
+	return stream.Send(finalResp)
+}
+
+func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.SearchRequest, stream pb.VectronService_SearchStreamServer) (*pb.SearchResponse, map[string]map[string]string, error) {
+	searchCtx := ctx
+	var searchCancel context.CancelFunc
+	if req.GetTimeoutMs() > 0 {
+		searchCtx, searchCancel = context.WithTimeout(ctx, time.Duration(req.GetTimeoutMs())*time.Millisecond)
+		defer searchCancel()
+	}
+	cancelEarly := func() {}
+	if searchCancel == nil {
+		searchCtx, cancelEarly = context.WithCancel(ctx)
+		defer cancelEarly()
+	} else {
+		cancelEarly = searchCancel
+	}
+	allowPartial := req.GetTimeoutMs() > 0
+
+	workerTopK := int(req.TopK * 2)
+	if workerTopK < int(req.TopK) {
+		workerTopK = int(req.TopK)
+	}
+	capLimit := 100
+	if int(req.TopK) > capLimit {
+		capLimit = int(req.TopK)
+	}
+	if workerTopK > capLimit {
+		workerTopK = capLimit
+	}
+	candidateLimit := int(req.TopK * 2)
+	if candidateLimit > workerTopK {
+		candidateLimit = workerTopK
+	}
+	if len(req.Query) > 0 && len(req.Query) < 3 {
+		shortQueryLimit := int(req.TopK) + int(req.TopK)/2
+		if shortQueryLimit < 1 {
+			shortQueryLimit = 1
+		}
+		if shortQueryLimit < candidateLimit {
+			candidateLimit = shortQueryLimit
+		}
+	}
+
+	placementClient, err := s.getPlacementClient()
+	if err != nil {
+		return nil, nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
+	}
+	var workerAddresses []string
+	if cachedAddresses, ok := s.workerListCache.Get(req.Collection); ok {
+		workerAddresses = cachedAddresses
+	} else {
+		workerListResp, err := placementClient.ListWorkersForCollection(ctx, &placementpb.ListWorkersForCollectionRequest{
+			Collection: req.Collection,
+		})
+		if err != nil {
+			if st, ok := status.FromError(err); ok && (st.Code() == codes.Unavailable || st.Code() == codes.Internal) {
+				placementClient, err = s.updateLeader()
+				if err != nil {
+					return nil, nil, status.Errorf(codes.Internal, "could not update placement driver leader: %v", err)
+				}
+				workerListResp, err = placementClient.ListWorkersForCollection(ctx, &placementpb.ListWorkersForCollectionRequest{
+					Collection: req.Collection,
+				})
+				if err != nil {
+					return nil, nil, status.Errorf(codes.Internal, "could not list workers for collection %q after leader update: %v", req.Collection, err)
+				}
+			} else {
+				return nil, nil, status.Errorf(codes.Internal, "could not list workers for collection %q: %v", req.Collection, err)
+			}
+		}
+		workerAddresses = workerListResp.GetGrpcAddresses()
+		s.workerListCache.Set(req.Collection, workerAddresses)
+	}
+	if len(workerAddresses) == 0 {
+		empty := &pb.SearchResponse{}
+		if err := stream.Send(empty); err != nil {
+			return nil, nil, err
+		}
+		return empty, nil, nil
+	}
+
+	type workerResult struct {
+		resp *workerpb.SearchResponse
+		err  error
+	}
+
+	resultsCh := make(chan workerResult, len(workerAddresses))
+	searchSem := make(chan struct{}, adaptiveConcurrency(2, 32))
+	var wg sync.WaitGroup
+
+	for _, addr := range workerAddresses {
+		wg.Add(1)
+		go func(workerAddr string) {
+			defer wg.Done()
+			searchSem <- struct{}{}
+			defer func() { <-searchSem }()
+
+			workerClient, err := s.workerPool.GetClient(workerAddr)
+			if err != nil {
+				resultsCh <- workerResult{err: fmt.Errorf("worker %s unreachable: %v", workerAddr, err)}
+				return
+			}
+
+			linearizable := cfg.SearchLinearizable
+			if v, ok := cfg.SearchConsistencyOverrides[req.Collection]; ok {
+				linearizable = v
+			}
+			workerReq := translator.ToWorkerSearchRequest(req, 0, linearizable)
+			workerReq.K = int32(workerTopK)
+
+			var res *workerpb.SearchResponse
+			if s.workerSearchBatcher != nil {
+				res, err = s.workerSearchBatcher.Search(searchCtx, workerAddr, workerClient, workerReq)
+			} else {
+				res, err = workerClient.Search(searchCtx, workerReq)
+			}
+			if err != nil {
+				resultsCh <- workerResult{err: fmt.Errorf("worker %s search failed: %v", workerAddr, err)}
+				return
+			}
+			resultsCh <- workerResult{resp: res}
+		}(addr)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultsCh)
+	}()
+
+	topResults := &searchResultHeap{}
+	heap.Init(topResults)
+	var errs []error
+	received := 0
+	stableRounds := 0
+	var lastSnapshot *pb.SearchResponse
+	const earlyStopStableRounds = 3
+	const earlyStopMinWorkers = 2
+
+	for result := range resultsCh {
+		if result.err != nil {
+			errs = append(errs, result.err)
+			continue
+		}
+		received++
+		workerSearchResponse := translator.FromWorkerSearchResponse(result.resp)
+		for _, r := range workerSearchResponse.Results {
+			if candidateLimit <= 0 {
+				continue
+			}
+			if topResults.Len() < candidateLimit {
+				heap.Push(topResults, r)
+				continue
+			}
+			if topResults.Len() > 0 && r.Score > (*topResults)[0].Score {
+				(*topResults)[0] = r
+				heap.Fix(topResults, 0)
+			}
+		}
+
+		snapshot := snapshotTopResults(topResults, int(req.TopK))
+		if err := stream.Send(snapshot); err != nil {
+			return nil, nil, err
+		}
+		if lastSnapshot != nil && equalResultIDs(lastSnapshot, snapshot) {
+			stableRounds++
+		} else {
+			stableRounds = 0
+		}
+		lastSnapshot = snapshot
+		if topResults.Len() >= int(req.TopK) && received >= earlyStopMinWorkers && stableRounds >= earlyStopStableRounds {
+			cancelEarly()
+			break
+		}
+	}
+
+	if topResults.Len() == 0 && len(errs) > 0 {
+		if allowPartial {
+			return nil, nil, status.Errorf(codes.DeadlineExceeded, "search timed out before any results were returned: %v", errs[0])
+		}
+		return nil, nil, status.Errorf(codes.Internal, "failed to search all workers: %v", errs[0])
+	}
+
+	if topResults.Len() > 0 {
+		finalSnapshot := snapshotTopResults(topResults, int(req.TopK))
+		s.searchCache.Set(req, finalSnapshot)
+	}
+
+	finalSnapshot := snapshotTopResults(topResults, int(req.TopK))
+	metadataByID := make(map[string]map[string]string, len(finalSnapshot.Results))
+	for _, result := range finalSnapshot.Results {
+		if result.Payload != nil {
+			metadataByID[result.Id] = result.Payload
+		}
+	}
+	return finalSnapshot, metadataByID, nil
 }
 
 func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchRequest, warmupKey uint64, warmupKeySet bool) (*pb.SearchResponse, error) {
@@ -2107,6 +2467,7 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 		feedbackService:        feedbackService,
 		workerPool:             NewWorkerConnPool(config.GRPCEnableCompression), // Initialize worker connection pool for reuse
 		workerSearchBatcher:    NewWorkerSearchBatcher(2*time.Millisecond, 16),
+		pdPool:                 NewPDConnPool(config.GRPCEnableCompression),
 		searchCache:            NewSearchCache(5*time.Second, 1000),             // Cache search results for 5s, max 1000 entries
 		workerListCache:        NewWorkerListCache(2 * time.Second),
 		resolveCache:           NewWorkerResolveCache(5*time.Second, 10000),

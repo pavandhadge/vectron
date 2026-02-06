@@ -1,6 +1,8 @@
 # Common settings
 BINARY_DIR := ./bin
 GO_BUILD_FLAGS := -trimpath   # optional: cleaner builds
+AVX512_TAGS ?= avx512
+CGO_FLAGS ?= CGO_ENABLED=1
 
 .PHONY: all build clean windows linux test-e2e \
         build-placementdriver build-worker build-apigateway build-auth build-reranker
@@ -12,7 +14,7 @@ build: clean linux
 linux: clean
 	mkdir -p $(BINARY_DIR)
 	GOOS=linux GOARCH=amd64 go build $(GO_BUILD_FLAGS) -o $(BINARY_DIR)/placementdriver ./placementdriver/cmd/placementdriver
-	GOOS=linux GOARCH=amd64 go build $(GO_BUILD_FLAGS) -o $(BINARY_DIR)/worker        ./worker/cmd/worker
+	$(CGO_FLAGS) GOOS=linux GOARCH=amd64 go build $(GO_BUILD_FLAGS) -tags $(AVX512_TAGS) -o $(BINARY_DIR)/worker        ./worker/cmd/worker
 	GOOS=linux GOARCH=amd64 go build $(GO_BUILD_FLAGS) -o $(BINARY_DIR)/apigateway   ./apigateway/cmd/apigateway
 	GOOS=linux GOARCH=amd64 go build $(GO_BUILD_FLAGS) -o $(BINARY_DIR)/authsvc      ./auth/service/cmd/auth
 	GOOS=linux GOARCH=amd64 go build $(GO_BUILD_FLAGS) -o $(BINARY_DIR)/reranker     ./reranker/cmd/reranker
@@ -32,7 +34,7 @@ build-placementdriver:
 
 build-worker:
 	mkdir -p $(BINARY_DIR)
-	go build $(GO_BUILD_FLAGS) -o $(BINARY_DIR)/worker ./worker/cmd/worker
+	$(CGO_FLAGS) go build $(GO_BUILD_FLAGS) -tags $(AVX512_TAGS) -o $(BINARY_DIR)/worker ./worker/cmd/worker
 
 build-apigateway:
 	mkdir -p $(BINARY_DIR)
@@ -59,7 +61,7 @@ build-all: linux windows
 build-both:
 	mkdir -p $(BINARY_DIR)
 	GOOS=linux   GOARCH=amd64 go build $(GO_BUILD_FLAGS) -o $(BINARY_DIR)/placementdriver          ./placementdriver/cmd/placementdriver
-	GOOS=linux   GOARCH=amd64 go build $(GO_BUILD_FLAGS) -o $(BINARY_DIR)/worker                   ./worker/cmd/worker
+	$(CGO_FLAGS) GOOS=linux   GOARCH=amd64 go build $(GO_BUILD_FLAGS) -tags $(AVX512_TAGS) -o $(BINARY_DIR)/worker                   ./worker/cmd/worker
 	GOOS=linux   GOARCH=amd64 go build $(GO_BUILD_FLAGS) -o $(BINARY_DIR)/apigateway              ./apigateway/cmd/apigateway
 	GOOS=linux   GOARCH=amd64 go build $(GO_BUILD_FLAGS) -o $(BINARY_DIR)/authsvc                 ./auth/service/cmd/auth
 	GOOS=linux   GOARCH=amd64 go build $(GO_BUILD_FLAGS) -o $(BINARY_DIR)/reranker                ./reranker/cmd/reranker

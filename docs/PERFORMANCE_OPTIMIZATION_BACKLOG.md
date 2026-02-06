@@ -25,9 +25,9 @@ Legend: [DONE] implemented, [PENDING] not implemented, [EXPERIMENT] requires val
 8. [DONE] Connection pool size limits + circuit breaker for worker conns.
 9. [PENDING] Vector prefetching for HNSW search to improve cache locality.
 10. [PENDING] Adaptive search parameter tuning (dynamic EfSearch).
-11. [PENDING] SIMD distance function optimizations (AVX‑512/NEON + runtime dispatch).
-12. [PENDING] Pebble block cache optimization (hot/cold caches, tuned bloom filters).
-13. [PENDING] HNSW graph pruning/edge optimization to reduce redundant edges.
+11. [DONE] SIMD distance function optimizations (AVX‑512 runtime dispatch; AVX‑2 fallback).
+12. [DONE] Pebble read tuning (cache/memtable/compaction defaults).
+13. [DONE] HNSW graph pruning/edge optimization to reduce redundant edges.
 
 ## Tier 2 — Medium Wins
 1. [DONE] Worker list cache in API Gateway (short TTL).
@@ -44,10 +44,10 @@ Open‑source alternatives to Redis: Dragonfly or KeyDB (drop‑in), or Garnet (
 11. [DONE] gRPC streaming for large batch operations (streamed upserts to workers).
 12. [DONE] Per‑request search timeout with partial results (skip slow workers).
 13. [DONE] Worker batch search RPC + gateway batching to reduce per‑query RPC overhead.
-14. [PENDING] Background index warmup for cold start latency.
-15. [PENDING] Async result aggregation/streaming for partial results.
-16. [PENDING] Memory‑mapped/off‑heap vector storage to reduce GC pressure.
-17. [PENDING] Incremental index updates (fine‑grained locking, lazy neighbor updates).
+14. [DONE] Background index warmup for cold start latency.
+15. [DONE] Async result aggregation/streaming with final rerank pass.
+16. [DONE] Memory‑mapped/off‑heap vector storage to reduce GC pressure.
+17. [DONE] Incremental index updates (lazy neighbor updates + async indexing).
 18. [PENDING] Query plan caching (reuse optimal EfSearch/params per fingerprint).
 19. [PENDING] Default/auto network compression for large payloads.
 
@@ -60,8 +60,8 @@ Open‑source alternatives to Redis: Dragonfly or KeyDB (drop‑in), or Garnet (
 6. [PENDING] Worker request batching/pipelining to reduce RPC overhead.
 7. [PENDING] Placement driver query caching (stale reads for non‑critical lookups).
 8. [PENDING] Hot/cold tiered storage with automatic classification.
-9. [PENDING] Parallel WAL replay for faster recovery.
-10. [PENDING] gRPC connection multiplexing/stream pooling across request types.
+9. [DONE] Parallel WAL replay for faster recovery.
+10. [DONE] gRPC connection multiplexing/stream pooling across request types.
 
 ## Tier 4 — Architecture / Roadmap
 1. [DONE] Per‑collection read consistency policy (eventual vs linearizable).

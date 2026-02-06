@@ -43,6 +43,9 @@ service VectronService {
     };
   }
 
+  // Stream search results progressively as workers respond
+  rpc SearchStream(SearchRequest) returns (stream SearchResponse) {}
+
   // Get point by ID
   rpc Get(GetRequest) returns (GetResponse) {
     option (google.api.http) = {get: "/v1/collections/{collection}/points/{id}"};

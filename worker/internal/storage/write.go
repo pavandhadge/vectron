@@ -74,22 +74,15 @@ func (r *PebbleDB) StoreVector(id string, vector []float32, metadata []byte) err
 	if r.db == nil {
 		return errors.New("db not initialized")
 	}
+	if r.opts != nil && r.opts.HNSWConfig.Dim > 0 && len(vector) != r.opts.HNSWConfig.Dim {
+		return fmt.Errorf("vector dimension %d does not match index dimension %d", len(vector), r.opts.HNSWConfig.Dim)
+	}
 
-	// 1. Add to HNSW index first. This is an in-memory operation.
-	indexVector := vector
-	if r.opts != nil && r.opts.HNSWConfig.DistanceMetric == "cosine" && r.opts.HNSWConfig.NormalizeVectors {
-		indexVector = idxhnsw.NormalizeVector(vector)
-	}
-	if err := r.hnsw.Add(id, indexVector); err != nil {
-		return fmt.Errorf("failed to add vector to HNSW index: %w", err)
-	}
-	r.hotAdd(id, indexVector)
+	asyncIndex := r.opts != nil && r.opts.HNSWConfig.AsyncIndexingEnabled && r.indexerCh != nil
 
 	// 2. If HNSW add is successful, commit the vector and WAL entry to PebbleDB.
 	val, err := encodeVectorWithMeta(vector, metadata)
 	if err != nil {
-		// Attempt to rollback the HNSW add.
-		_ = r.hnsw.Delete(id)
 		return fmt.Errorf("failed to encode vector with meta: %w", err)
 	}
 
@@ -98,7 +91,6 @@ func (r *PebbleDB) StoreVector(id string, vector []float32, metadata []byte) err
 
 	// Add the vector data to the batch.
 	if err := batch.Set(vectorKey(id), val, nil); err != nil {
-		_ = r.hnsw.Delete(id)
 		return fmt.Errorf("failed to set vector in batch: %w", err)
 	}
 
@@ -106,15 +98,31 @@ func (r *PebbleDB) StoreVector(id string, vector []float32, metadata []byte) err
 	if r.opts.HNSWConfig.WALEnabled {
 		walKey := []byte(fmt.Sprintf("%s%d_%s", hnswWALPrefix, time.Now().UnixNano(), id))
 		if err := batch.Set(walKey, val, nil); err != nil {
-			_ = r.hnsw.Delete(id)
 			return fmt.Errorf("failed to set WAL in batch: %w", err)
 		}
 	}
 
 	// Commit the batch atomically.
 	if err := batch.Commit(r.writeOpts); err != nil {
-		_ = r.hnsw.Delete(id)
 		return fmt.Errorf("failed to commit batch for StoreVector: %w", err)
+	}
+
+	if asyncIndex {
+		select {
+		case r.indexerCh <- indexOp{opType: indexOpAdd, id: id, vector: vector}:
+		default:
+			// Queue is full; fall back to synchronous index update.
+			if err := r.hnsw.Add(id, vector); err != nil {
+				return fmt.Errorf("failed to add vector to HNSW index: %w", err)
+			}
+			r.hotAdd(id, vector)
+		}
+	} else {
+		// Synchronous index update.
+		if err := r.hnsw.Add(id, vector); err != nil {
+			return fmt.Errorf("failed to add vector to HNSW index: %w", err)
+		}
+		r.hotAdd(id, vector)
 	}
 
 	r.recordHNSWWrite(1)
@@ -137,59 +145,57 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 	added := make([]string, 0, len(vectors))
 	batch := r.db.NewBatch()
 	defer batch.Close()
+	asyncIndex := r.opts != nil && r.opts.HNSWConfig.AsyncIndexingEnabled && r.indexerCh != nil
 
 	for _, v := range vectors {
 		if v.ID == "" || len(v.Vector) == 0 {
-			for _, id := range added {
-				_ = r.hnsw.Delete(id)
-			}
 			return errors.New("vector id or data missing")
 		}
+		if r.opts != nil && r.opts.HNSWConfig.Dim > 0 && len(v.Vector) != r.opts.HNSWConfig.Dim {
+			return fmt.Errorf("vector dimension %d does not match index dimension %d", len(v.Vector), r.opts.HNSWConfig.Dim)
+		}
 
-		indexVector := v.Vector
-		if r.opts != nil && r.opts.HNSWConfig.DistanceMetric == "cosine" && r.opts.HNSWConfig.NormalizeVectors {
-			indexVector = idxhnsw.NormalizeVector(v.Vector)
-		}
-		if err := r.hnsw.Add(v.ID, indexVector); err != nil {
-			for _, id := range added {
-				_ = r.hnsw.Delete(id)
-			}
-			return fmt.Errorf("failed to add vector to HNSW index: %w", err)
-		}
-		r.hotAdd(v.ID, indexVector)
 		added = append(added, v.ID)
 
 		val, err := encodeVectorWithMeta(v.Vector, v.Metadata)
 		if err != nil {
-			for _, id := range added {
-				_ = r.hnsw.Delete(id)
-			}
 			return fmt.Errorf("failed to encode vector with meta: %w", err)
 		}
 
 		if err := batch.Set(vectorKey(v.ID), val, nil); err != nil {
-			for _, id := range added {
-				_ = r.hnsw.Delete(id)
-			}
 			return fmt.Errorf("failed to set vector in batch: %w", err)
 		}
 
 		if r.opts.HNSWConfig.WALEnabled {
 			walKey := []byte(fmt.Sprintf("%s%d_%s", hnswWALPrefix, time.Now().UnixNano(), v.ID))
 			if err := batch.Set(walKey, val, nil); err != nil {
-				for _, id := range added {
-					_ = r.hnsw.Delete(id)
-				}
 				return fmt.Errorf("failed to set WAL in batch: %w", err)
 			}
 		}
 	}
 
 	if err := batch.Commit(r.writeOpts); err != nil {
-		for _, id := range added {
-			_ = r.hnsw.Delete(id)
-		}
 		return fmt.Errorf("failed to commit batch for StoreVectorBatch: %w", err)
+	}
+
+	if asyncIndex {
+		for _, v := range vectors {
+			select {
+			case r.indexerCh <- indexOp{opType: indexOpAdd, id: v.ID, vector: v.Vector}:
+			default:
+				if err := r.hnsw.Add(v.ID, v.Vector); err != nil {
+					return fmt.Errorf("failed to add vector to HNSW index: %w", err)
+				}
+				r.hotAdd(v.ID, v.Vector)
+			}
+		}
+	} else {
+		for _, v := range vectors {
+			if err := r.hnsw.Add(v.ID, v.Vector); err != nil {
+				return fmt.Errorf("failed to add vector to HNSW index: %w", err)
+			}
+			r.hotAdd(v.ID, v.Vector)
+		}
 	}
 
 	r.recordHNSWWrite(uint64(len(added)))

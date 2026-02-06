@@ -11,7 +11,9 @@ import {
   type ChannelCredentials,
   Client,
   type ClientOptions,
+  type ClientReadableStream,
   type ClientUnaryCall,
+  type handleServerStreamingCall,
   type handleUnaryCall,
   makeGenericClientConstructor,
   type Metadata,
@@ -2414,6 +2416,16 @@ export const VectronServiceService = {
     responseSerialize: (value: SearchResponse): Buffer => Buffer.from(SearchResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): SearchResponse => SearchResponse.decode(value),
   },
+  /** Stream search results progressively as workers respond */
+  searchStream: {
+    path: "/vectron.v1.VectronService/SearchStream",
+    requestStream: false,
+    responseStream: true,
+    requestSerialize: (value: SearchRequest): Buffer => Buffer.from(SearchRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): SearchRequest => SearchRequest.decode(value),
+    responseSerialize: (value: SearchResponse): Buffer => Buffer.from(SearchResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): SearchResponse => SearchResponse.decode(value),
+  },
   /** Get point by ID */
   get: {
     path: "/vectron.v1.VectronService/Get",
@@ -2493,6 +2505,8 @@ export interface VectronServiceServer extends UntypedServiceImplementation {
   upsert: handleUnaryCall<UpsertRequest, UpsertResponse>;
   /** Search vectors */
   search: handleUnaryCall<SearchRequest, SearchResponse>;
+  /** Stream search results progressively as workers respond */
+  searchStream: handleServerStreamingCall<SearchRequest, SearchResponse>;
   /** Get point by ID */
   get: handleUnaryCall<GetRequest, GetResponse>;
   /** Delete point by ID */
@@ -2572,6 +2586,13 @@ export interface VectronServiceClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: SearchResponse) => void,
   ): ClientUnaryCall;
+  /** Stream search results progressively as workers respond */
+  searchStream(request: SearchRequest, options?: Partial<CallOptions>): ClientReadableStream<SearchResponse>;
+  searchStream(
+    request: SearchRequest,
+    metadata?: Metadata,
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<SearchResponse>;
   /** Get point by ID */
   get(request: GetRequest, callback: (error: ServiceError | null, response: GetResponse) => void): ClientUnaryCall;
   get(

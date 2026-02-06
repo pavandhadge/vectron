@@ -113,9 +113,15 @@ func (h *HNSW) add(id string, vec []float32) error {
 	return h.addNoLock(id, vec)
 }
 
-// makeVectorCopy creates a deep copy of a vector using the pool allocator
-// This is used during node creation to reduce GC pressure
-func makeVectorCopy(src []float32) []float32 {
+// makeVectorCopy creates a deep copy of a vector using either mmap storage or the pool allocator.
+// This is used during node creation to reduce GC pressure.
+func makeVectorCopy(src []float32, h *HNSW) []float32 {
+	if h != nil && h.mmapStore != nil {
+		if dst, err := h.mmapStore.allocFloat32(len(src)); err == nil && dst != nil {
+			copy(dst, src)
+			return dst
+		}
+	}
 	// Get a pooled vector with enough capacity
 	pooled := getVectorFromPool()
 	if cap(pooled) < len(src) {
@@ -144,9 +150,9 @@ func (h *HNSW) addNoLock(id string, vec []float32) error {
 	layer := h.randomLayer()
 
 	// 2. Create the new node.
-	// OPTIMIZATION: Use pooled vector allocation instead of new allocation
+	// OPTIMIZATION: Use pooled/mmap vector allocation instead of new allocation
 	searchVec := vec
-	nodeVec := makeVectorCopy(vec) // Uses sync.Pool to reduce GC pressure
+	var nodeVec []float32
 	node := &Node{
 		ID:        internalID,
 		Vec:       nil,
@@ -156,15 +162,17 @@ func (h *HNSW) addNoLock(id string, vec []float32) error {
 	}
 	if h.config.Distance == "cosine" && h.config.NormalizeVectors {
 		searchVec = NormalizeVector(searchVec)
-		nodeVec = NormalizeVector(nodeVec)
+		normalized := NormalizeVector(vec)
 		if h.config.QuantizeVectors {
-			node.QVec = quantizeVector(nodeVec)
+			node.QVec = quantizeVector(normalized)
 			node.Norm = 1
 		} else {
+			nodeVec = makeVectorCopy(normalized, h)
 			node.Vec = nodeVec
 			node.Norm = 1
 		}
 	} else {
+		nodeVec = makeVectorCopy(vec, h)
 		node.Vec = nodeVec
 		if h.config.Distance == "cosine" && h.config.EnableNorms {
 			node.Norm = VectorNorm(node.Vec)
@@ -222,19 +230,9 @@ func (h *HNSW) addNoLock(id string, vec []float32) error {
 			// Add the new node to the neighbor's connection list.
 			neighbor.Neighbors[l] = append(neighbor.Neighbors[l], internalID)
 
-			// Prune the neighbor's connections if they exceed the max (M).
+			// Lazy pruning: defer expensive pruning to the maintenance loop.
 			if len(neighbor.Neighbors[l]) > h.config.M {
-				neighborVec := h.nodeVector(neighbor)
-				if neighborVec == nil {
-					continue
-				}
-				prunedNeighbors := h.selectNeighborsHeuristic(
-					neighborVec,
-					toCandidates(neighbor.Neighbors[l], neighborVec, h),
-					h.config.M,
-				)
-				neighbor.Neighbors[l] = prunedNeighbors
-				h.persistNode(neighbor)
+				h.markForPrune(neighbor.ID)
 			}
 		}
 

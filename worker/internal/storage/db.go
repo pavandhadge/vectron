@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -58,6 +59,13 @@ func (r *PebbleDB) Init(path string, opts *Options) error {
 	// Load the HNSW index from the database or create a new one.
 	if err := r.loadHNSW(opts); err != nil {
 		return fmt.Errorf("failed to load HNSW index: %w", err)
+	}
+
+	if opts != nil && opts.HNSWConfig.WarmupEnabled {
+		delay := opts.HNSWConfig.WarmupDelay
+		maxVectors := opts.HNSWConfig.WarmupMaxVectors
+		r.wg.Add(1)
+		go r.warmupIndex(delay, maxVectors)
 	}
 
 	// If the HNSW WAL is enabled, start the background persistence loop.
@@ -132,6 +140,10 @@ func (r *PebbleDB) Close() error {
 		log.Printf("Warning: failed to save HNSW index on close: %v", err)
 	}
 
+	if r.hnsw != nil {
+		r.hnsw.Close()
+	}
+
 	return r.db.Close()
 }
 
@@ -147,6 +159,8 @@ func (r *PebbleDB) loadHNSW(opts *Options) error {
 		NormalizeVectors:  opts.HNSWConfig.NormalizeVectors,
 		QuantizeVectors:   opts.HNSWConfig.QuantizeVectors,
 		SearchParallelism: opts.HNSWConfig.SearchParallelism,
+		PruneEnabled:      opts.HNSWConfig.PruneEnabled,
+		PruneMaxNodes:     opts.HNSWConfig.PruneMaxNodes,
 	})
 
 	if opts.HNSWConfig.HotIndexEnabled {
@@ -175,6 +189,7 @@ func (r *PebbleDB) loadHNSW(opts *Options) error {
 					return err
 				}
 			}
+			r.applyRuntimeHNSWTuning(opts)
 			return nil
 		}
 		return err
@@ -194,12 +209,21 @@ func (r *PebbleDB) loadHNSW(opts *Options) error {
 			NormalizeVectors:  opts.HNSWConfig.NormalizeVectors,
 			QuantizeVectors:   opts.HNSWConfig.QuantizeVectors,
 			SearchParallelism: opts.HNSWConfig.SearchParallelism,
+			PruneEnabled:      opts.HNSWConfig.PruneEnabled,
+			PruneMaxNodes:     opts.HNSWConfig.PruneMaxNodes,
 		})
 		if opts.HNSWConfig.WALEnabled {
-			return r.replayWALFrom(0)
+			if err := r.replayWALFrom(0); err != nil {
+				return err
+			}
+			r.applyRuntimeHNSWTuning(opts)
+			return nil
 		}
+		r.applyRuntimeHNSWTuning(opts)
 		return nil
 	}
+
+	r.applyRuntimeHNSWTuning(opts)
 
 	r.hnswSnapshotLoaded = true
 	if tsData, closer, err := r.db.Get([]byte(hnswIndexTimestampKey)); err == nil {
@@ -213,10 +237,29 @@ func (r *PebbleDB) loadHNSW(opts *Options) error {
 
 	// If WAL is enabled, replay any operations that occurred after the last snapshot.
 	if opts.HNSWConfig.WALEnabled {
-		return r.replayWAL()
+		if err := r.replayWAL(); err != nil {
+			return err
+		}
+		r.applyRuntimeHNSWTuning(opts)
+		return nil
 	}
 
 	return nil
+}
+
+func (r *PebbleDB) applyRuntimeHNSWTuning(opts *Options) {
+	if r.hnsw == nil || opts == nil {
+		return
+	}
+	r.hnsw.SetSearchParallelism(opts.HNSWConfig.SearchParallelism)
+	r.hnsw.SetPruneConfig(opts.HNSWConfig.PruneEnabled, opts.HNSWConfig.PruneMaxNodes)
+	if opts.HNSWConfig.MmapVectorsEnabled {
+		initial := int64(opts.HNSWConfig.MmapInitialMB) * 1024 * 1024
+		mmapPath := filepath.Join(r.path, "hnsw_vectors.mmap")
+		if err := r.hnsw.EnableMmapVectors(mmapPath, initial); err != nil {
+			log.Printf("Warning: failed to enable mmap vectors: %v", err)
+		}
+	}
 }
 
 // saveHNSW serializes the current HNSW index and writes it to the database.
@@ -361,6 +404,12 @@ func (r *PebbleDB) maintenanceLoop(interval time.Duration) {
 		select {
 		case <-ticker.C:
 			r.maybeRebuildHNSW()
+			if r.hnsw != nil && r.opts != nil && r.opts.HNSWConfig.PruneEnabled {
+				r.hnsw.PruneNeighbors(r.opts.HNSWConfig.PruneMaxNodes)
+			}
+			if r.hnswHot != nil && r.opts != nil && r.opts.HNSWConfig.PruneEnabled {
+				r.hnswHot.PruneNeighbors(r.opts.HNSWConfig.PruneMaxNodes)
+			}
 		case <-r.stop:
 			log.Println("Stopping HNSW maintenance loop.")
 			return
@@ -446,30 +495,101 @@ func (r *PebbleDB) replayWALFrom(ts int64) error {
 	})
 	defer iter.Close()
 
+	type walEntry struct {
+		ts     int64
+		delete bool
+		value  []byte
+	}
+	latest := make(map[string]walEntry)
+
 	for iter.First(); iter.Valid(); iter.Next() {
 		key := string(iter.Key())
-		parts := strings.Split(strings.TrimPrefix(key, hnswWALPrefix), "_")
+		rest := strings.TrimPrefix(key, hnswWALPrefix)
+		isDelete := false
+		if strings.HasSuffix(rest, "_delete") {
+			isDelete = true
+			rest = strings.TrimSuffix(rest, "_delete")
+		}
+		parts := strings.SplitN(rest, "_", 2)
 		if len(parts) < 2 {
 			continue
 		}
-
+		tsVal, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			continue
+		}
 		id := parts[1]
-		if strings.HasSuffix(key, "_delete") {
-			if err := r.hnsw.Delete(id); err != nil {
-				log.Printf("Failed to replay delete from WAL for ID %s: %v", id, err)
+		prev, ok := latest[id]
+		if !ok || tsVal > prev.ts {
+			entry := walEntry{ts: tsVal, delete: isDelete}
+			if !isDelete {
+				entry.value = append([]byte(nil), iter.Value()...)
 			}
-		} else {
-			vector, _, err := decodeVectorWithMeta(iter.Value())
-			if err != nil {
-				log.Printf("Failed to decode vector from WAL for ID %s: %v", id, err)
-				continue
-			}
-			if err := r.hnsw.Add(id, vector); err != nil {
-				log.Printf("Failed to replay add from WAL for ID %s: %v", id, err)
-			}
+			latest[id] = entry
 		}
 	}
-	return iter.Error()
+	if err := iter.Error(); err != nil {
+		return err
+	}
+
+	// Apply latest WAL ops in parallel.
+	workers := runtime.GOMAXPROCS(0)
+	if workers < 2 {
+		workers = 2
+	}
+	ch := make(chan struct {
+		id    string
+		entry walEntry
+	}, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for item := range ch {
+				if item.entry.delete {
+					if err := r.hnsw.Delete(item.id); err != nil {
+						log.Printf("Failed to replay delete from WAL for ID %s: %v", item.id, err)
+					}
+					continue
+				}
+				vector, _, err := decodeVectorWithMeta(item.entry.value)
+				if err != nil {
+					log.Printf("Failed to decode vector from WAL for ID %s: %v", item.id, err)
+					continue
+				}
+				if err := r.hnsw.Add(item.id, vector); err != nil {
+					log.Printf("Failed to replay add from WAL for ID %s: %v", item.id, err)
+				}
+			}
+		}()
+	}
+	for id, entry := range latest {
+		ch <- struct {
+			id    string
+			entry walEntry
+		}{id: id, entry: entry}
+	}
+	close(ch)
+	wg.Wait()
+	return nil
+}
+
+func (r *PebbleDB) warmupIndex(delay time.Duration, maxVectors int) {
+	defer r.wg.Done()
+	if delay > 0 {
+		select {
+		case <-time.After(delay):
+		case <-r.stop:
+			return
+		}
+	}
+	if r.hnsw != nil {
+		r.hnsw.Warmup(maxVectors)
+	}
+	if r.hnswHot != nil {
+		r.hnswHot.Warmup(maxVectors)
+	}
 }
 
 // persistenceLoop is a background goroutine that periodically saves the HNSW index.
@@ -683,6 +803,8 @@ func applyPebbleTuning(dbOpts *pebble.Options, opts *Options) {
 			dbOpts.Cache = pebble.NewCache(int64(cacheMB) * 1024 * 1024)
 		}
 	}
+
+	// Bloom filter tuning omitted in vendored build (no pebble/bloom package).
 }
 
 func envInt(key string, def int) int {

@@ -1,33 +1,38 @@
-//go:build amd64 && !cgo
+//go:build amd64 && avx512asm
 
 #include "textflag.h"
 
-// func dotProductAVX2(a, b *float32, n int) float32
-TEXT ·dotProductAVX2(SB), NOSPLIT, $0-32
+// func dotProductAVX512(a, b *float32, n int) float32
+TEXT ·dotProductAVX512(SB), NOSPLIT, $0-32
 	MOVQ a+0(FP), SI
 	MOVQ b+8(FP), DI
 	MOVQ n+16(FP), CX
 
-	// if n < 8, fall back to scalar loop
-	CMPQ CX, $8
+	// if n < 16, fall back to scalar loop
+	CMPQ CX, $16
 	JL scalar
 
-	// ymm0 = 0
-	VXORPS Y0, Y0, Y0
+	// zmm0 = 0
+	VXORPS Z0, Z0, Z0
 
 vector_loop:
-	CMPQ CX, $8
+	CMPQ CX, $16
 	JL vector_done
-	VMOVUPS (SI), Y1
-	VMOVUPS (DI), Y2
-	VMULPS Y2, Y1, Y1
-	VADDPS Y1, Y0, Y0
-	ADDQ $32, SI
-	ADDQ $32, DI
-	SUBQ $8, CX
+	VMOVUPS (SI), Z1
+	VMOVUPS (DI), Z2
+	VMULPS Z2, Z1, Z1
+	VADDPS Z1, Z0, Z0
+	ADDQ $64, SI
+	ADDQ $64, DI
+	SUBQ $16, CX
 	JMP vector_loop
 
 vector_done:
+	// Reduce zmm0 -> ymm0
+	VEXTRACTF32x8 $1, Z0, Y1
+	VEXTRACTF32x8 $0, Z0, Y0
+	VADDPS Y1, Y0, Y0
+
 	// horizontal sum ymm0 into xmm0
 	VEXTRACTF128 $0, Y0, X0
 	VEXTRACTF128 $1, Y0, X1

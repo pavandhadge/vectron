@@ -58,6 +58,11 @@ class VectronServiceStub(object):
                 request_serializer=apigateway_dot_apigateway__pb2.SearchRequest.SerializeToString,
                 response_deserializer=apigateway_dot_apigateway__pb2.SearchResponse.FromString,
                 _registered_method=True)
+        self.SearchStream = channel.unary_stream(
+                '/vectron.v1.VectronService/SearchStream',
+                request_serializer=apigateway_dot_apigateway__pb2.SearchRequest.SerializeToString,
+                response_deserializer=apigateway_dot_apigateway__pb2.SearchResponse.FromString,
+                _registered_method=True)
         self.Get = channel.unary_unary(
                 '/vectron.v1.VectronService/Get',
                 request_serializer=apigateway_dot_apigateway__pb2.GetRequest.SerializeToString,
@@ -125,6 +130,13 @@ class VectronServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def SearchStream(self, request, context):
+        """Stream search results progressively as workers respond
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def Get(self, request, context):
         """Get point by ID
         """
@@ -187,6 +199,11 @@ def add_VectronServiceServicer_to_server(servicer, server):
             ),
             'Search': grpc.unary_unary_rpc_method_handler(
                     servicer.Search,
+                    request_deserializer=apigateway_dot_apigateway__pb2.SearchRequest.FromString,
+                    response_serializer=apigateway_dot_apigateway__pb2.SearchResponse.SerializeToString,
+            ),
+            'SearchStream': grpc.unary_stream_rpc_method_handler(
+                    servicer.SearchStream,
                     request_deserializer=apigateway_dot_apigateway__pb2.SearchRequest.FromString,
                     response_serializer=apigateway_dot_apigateway__pb2.SearchResponse.SerializeToString,
             ),
@@ -331,6 +348,33 @@ class VectronService(object):
             request,
             target,
             '/vectron.v1.VectronService/Search',
+            apigateway_dot_apigateway__pb2.SearchRequest.SerializeToString,
+            apigateway_dot_apigateway__pb2.SearchResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SearchStream(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/vectron.v1.VectronService/SearchStream',
             apigateway_dot_apigateway__pb2.SearchRequest.SerializeToString,
             apigateway_dot_apigateway__pb2.SearchResponse.FromString,
             options,

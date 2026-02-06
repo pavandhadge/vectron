@@ -12,6 +12,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"time"
 
 	sm "github.com/lni/dragonboat/v3/statemachine"
 	"github.com/pavandhadge/vectron/worker/internal/storage"
@@ -284,6 +285,18 @@ func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dime
 			EfSearch:         100, // check what it controlls then tunr it
 			DistanceMetric:   distance,
 			NormalizeVectors: distance == "cosine",
+			MaintenanceEnabled: true,
+			MaintenanceInterval: 30 * time.Minute,
+			PruneEnabled:      true,
+			PruneMaxNodes:     2000,
+			MmapVectorsEnabled: true,
+			AsyncIndexingEnabled:  true,
+			IndexingQueueSize:     20000,
+			IndexingBatchSize:     512,
+			IndexingFlushInterval: 5 * time.Millisecond,
+			WarmupEnabled:         true,
+			WarmupMaxVectors:      10000,
+			WarmupDelay:           5 * time.Second,
 		},
 	}
 
