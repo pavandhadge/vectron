@@ -177,6 +177,7 @@ func TestE2E_FullSystem_WithAuth(t *testing.T) {
 		fmt.Sprintf("FEEDBACK_DB_PATH=%s/feedback.db", gatewayDataDir), // Use temp directory for feedback DB
 		fmt.Sprintf("JWT_SECRET=%s", e2eJwtSecret),
 	}
+	gatewayEnv = appendDistributedCacheEnv(gatewayEnv)
 	gateway, err := StartService(ctx, "apigateway",
 		gatewayEnv,
 		gatewayBin, // Binary path

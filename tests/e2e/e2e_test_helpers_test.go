@@ -78,6 +78,86 @@ func BinPath(name string) (string, error) {
 	return filepath.Join(root, "bin", name), nil
 }
 
+func appendDistributedCacheEnv(env []string) []string {
+	addr := os.Getenv("DISTRIBUTED_CACHE_ADDR")
+	if addr == "" {
+		return env
+	}
+	env = append(env, "DISTRIBUTED_CACHE_ADDR="+addr)
+	if v := os.Getenv("DISTRIBUTED_CACHE_PASSWORD"); v != "" {
+		env = append(env, "DISTRIBUTED_CACHE_PASSWORD="+v)
+	}
+	if v := os.Getenv("DISTRIBUTED_CACHE_DB"); v != "" {
+		env = append(env, "DISTRIBUTED_CACHE_DB="+v)
+	}
+	if v := os.Getenv("DISTRIBUTED_CACHE_TTL_MS"); v != "" {
+		env = append(env, "DISTRIBUTED_CACHE_TTL_MS="+v)
+	}
+	if v := os.Getenv("DISTRIBUTED_CACHE_TIMEOUT_MS"); v != "" {
+		env = append(env, "DISTRIBUTED_CACHE_TIMEOUT_MS="+v)
+	}
+	return env
+}
+
+func startValkeyForTests() func() {
+	if os.Getenv("DISTRIBUTED_CACHE_ADDR") != "" {
+		return func() {}
+	}
+	if _, err := exec.LookPath("podman"); err != nil {
+		log.Printf("podman not found; distributed cache disabled for tests")
+		return func() {}
+	}
+
+	const container = "vectron-valkey-test"
+	const addr = "127.0.0.1:6379"
+
+	isRunning := func() bool {
+		out, err := exec.Command("podman", "ps", "--format", "{{.Names}}").Output()
+		if err != nil {
+			return false
+		}
+		for _, line := range strings.Split(string(out), "\n") {
+			if strings.TrimSpace(line) == container {
+				return true
+			}
+		}
+		return false
+	}
+
+	if isRunning() {
+		_ = os.Setenv("DISTRIBUTED_CACHE_ADDR", addr)
+		return func() {}
+	}
+
+	exists := exec.Command("podman", "container", "exists", container).Run() == nil
+	if exists {
+		if err := exec.Command("podman", "start", container).Run(); err == nil {
+			_ = os.Setenv("DISTRIBUTED_CACHE_ADDR", addr)
+			return func() { _ = exec.Command("podman", "stop", container).Run() }
+		}
+		log.Printf("failed to start existing Valkey container; continuing without distributed cache")
+		return func() {}
+	}
+
+	if err := exec.Command(
+		"podman", "run", "-d",
+		"--name", container,
+		"-p", "6379:6379",
+		"valkey/valkey:latest",
+		"valkey-server",
+		"--save", "",
+		"--appendonly", "no",
+		"--maxmemory", "1gb",
+		"--maxmemory-policy", "allkeys-lru",
+	).Run(); err != nil {
+		log.Printf("failed to start Valkey container; continuing without distributed cache: %v", err)
+		return func() {}
+	}
+
+	_ = os.Setenv("DISTRIBUTED_CACHE_ADDR", addr)
+	return func() { _ = exec.Command("podman", "stop", container).Run() }
+}
+
 // StartEmbeddedEtcd starts a temporary embedded etcd server.
 func StartEmbeddedEtcd(ctx context.Context) (*EtcdProcess, error) {
 	base, err := repoTempBase()

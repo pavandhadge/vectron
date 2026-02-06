@@ -93,7 +93,10 @@ func TestMain(m *testing.M) {
 		fmt.Printf("Working directory: %s\n", repoRoot)
 		os.Exit(1)
 	}
-	os.Exit(m.Run())
+	stopValkey := startValkeyForTests()
+	code := m.Run()
+	stopValkey()
+	os.Exit(code)
 }
 
 func TestE2E_FullLifecycle(t *testing.T) {
@@ -271,14 +274,17 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	gatewayBin, err := BinPath("apigateway")
 	require.NoError(t, err)
 	gatewayCmd := exec.Command(gatewayBin)
-	gatewayCmd.Env = os.Environ()
-	gatewayCmd.Env = append(gatewayCmd.Env, fmt.Sprintf("GRPC_ADDR=%s", apiGrpcAddr))
-	gatewayCmd.Env = append(gatewayCmd.Env, fmt.Sprintf("HTTP_ADDR=%s", apiHttpAddr))
-	gatewayCmd.Env = append(gatewayCmd.Env, fmt.Sprintf("PLACEMENT_DRIVER=%s", allPdGrpcAddrs))
-	gatewayCmd.Env = append(gatewayCmd.Env, fmt.Sprintf("JWT_SECRET=%s", jwtTestSecret))
-	gatewayCmd.Env = append(gatewayCmd.Env, fmt.Sprintf("AUTH_SERVICE_ADDR=%s", authSvcAddr))
-	gatewayCmd.Env = append(gatewayCmd.Env, fmt.Sprintf("RERANKER_SERVICE_ADDR=%s", rerankerAddr))
-	gatewayCmd.Env = append(gatewayCmd.Env, fmt.Sprintf("FEEDBACK_DB_PATH=%s/feedback.db", gatewayDataDir))
+	gatewayEnv := []string{
+		fmt.Sprintf("GRPC_ADDR=%s", apiGrpcAddr),
+		fmt.Sprintf("HTTP_ADDR=%s", apiHttpAddr),
+		fmt.Sprintf("PLACEMENT_DRIVER=%s", allPdGrpcAddrs),
+		fmt.Sprintf("JWT_SECRET=%s", jwtTestSecret),
+		fmt.Sprintf("AUTH_SERVICE_ADDR=%s", authSvcAddr),
+		fmt.Sprintf("RERANKER_SERVICE_ADDR=%s", rerankerAddr),
+		fmt.Sprintf("FEEDBACK_DB_PATH=%s/feedback.db", gatewayDataDir),
+	}
+	gatewayEnv = appendDistributedCacheEnv(gatewayEnv)
+	gatewayCmd.Env = append(os.Environ(), gatewayEnv...)
 	gatewayCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	var gatewayOut bytes.Buffer
 	gatewayCmd.Stdout = &gatewayOut

@@ -308,6 +308,7 @@ func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dime
 			EfSearch:         100, // check what it controlls then tunr it
 			DistanceMetric:   distance,
 			NormalizeVectors: distance == "cosine",
+			QuantizeVectors:  distance == "cosine",
 			MaintenanceEnabled: true,
 			MaintenanceInterval: 30 * time.Minute,
 			PruneEnabled:      true,

@@ -1633,7 +1633,7 @@ func (s *UltimateE2ETest) startAPIGateway() {
 		s.t.Fatalf("Failed to resolve apigateway binary: %v", err)
 	}
 	cmd := exec.CommandContext(s.ctx, gatewayBin)
-	cmd.Env = append(os.Environ(),
+	gatewayEnv := []string{
 		"GRPC_ADDR=127.0.0.1:10010",
 		"HTTP_ADDR=127.0.0.1:10012",
 		"PLACEMENT_DRIVER=127.0.0.1:10001,127.0.0.1:10002,127.0.0.1:10003",
@@ -1642,7 +1642,9 @@ func (s *UltimateE2ETest) startAPIGateway() {
 		"FEEDBACK_DB_PATH="+dataDir+"/feedback.db",
 		"JWT_SECRET=test-jwt-secret-for-testing-only-do-not-use-in-production",
 		"RATE_LIMIT_RPS=10000",
-	)
+	}
+	gatewayEnv = appendDistributedCacheEnv(gatewayEnv)
+	cmd.Env = append(os.Environ(), gatewayEnv...)
 
 	// Capture output for debugging
 	if f, err := os.OpenFile(filepath.Join(logTempDir, "vectron-apigw-test.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {

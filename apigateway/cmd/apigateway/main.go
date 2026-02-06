@@ -9,6 +9,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	runtime "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"hash/fnv"
@@ -20,6 +21,7 @@ import (
 	"os"
 	stdruntime "runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +30,7 @@ import (
 	"github.com/pavandhadge/vectron/apigateway/internal/management"
 	"github.com/pavandhadge/vectron/apigateway/internal/middleware"
 	"github.com/pavandhadge/vectron/apigateway/internal/translator"
+	"github.com/redis/go-redis/v9"
 	pb "github.com/pavandhadge/vectron/shared/proto/apigateway"
 	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
 	placementpb "github.com/pavandhadge/vectron/shared/proto/placementdriver"
@@ -41,6 +44,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 var cfg = LoadConfig()
@@ -64,6 +68,108 @@ func adaptiveConcurrency(multiplier, maxCap int) int {
 		limit = 1
 	}
 	return limit
+}
+
+func totalMemoryBytes() uint64 {
+	data, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return 0
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "MemTotal:") {
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				return 0
+			}
+			kb, err := strconv.ParseUint(fields[1], 10, 64)
+			if err != nil {
+				return 0
+			}
+			return kb * 1024
+		}
+	}
+	return 0
+}
+
+func defaultSearchCacheConfig() (time.Duration, int) {
+	if mem := totalMemoryBytes(); mem > 0 {
+		switch {
+		case mem >= 64<<30:
+			return 15 * time.Second, 100000
+		case mem >= 32<<30:
+			return 12 * time.Second, 50000
+		case mem >= 16<<30:
+			return 10 * time.Second, 20000
+		case mem >= 8<<30:
+			return 8 * time.Second, 10000
+		case mem >= 4<<30:
+			return 6 * time.Second, 5000
+		default:
+			return 5 * time.Second, 2000
+		}
+	}
+	procs := stdruntime.GOMAXPROCS(0)
+	switch {
+	case procs >= 32:
+		return 12 * time.Second, 50000
+	case procs >= 16:
+		return 10 * time.Second, 20000
+	case procs >= 8:
+		return 8 * time.Second, 10000
+	case procs >= 4:
+		return 6 * time.Second, 5000
+	default:
+		return 5 * time.Second, 2000
+	}
+}
+
+func defaultResolveCacheSize() int {
+	if mem := totalMemoryBytes(); mem > 0 {
+		switch {
+		case mem >= 64<<30:
+			return 40000
+		case mem >= 32<<30:
+			return 25000
+		case mem >= 16<<30:
+			return 15000
+		case mem >= 8<<30:
+			return 10000
+		case mem >= 4<<30:
+			return 6000
+		default:
+			return 3000
+		}
+	}
+	procs := stdruntime.GOMAXPROCS(0)
+	switch {
+	case procs >= 32:
+		return 20000
+	case procs >= 16:
+		return 15000
+	case procs >= 8:
+		return 10000
+	case procs >= 4:
+		return 6000
+	default:
+		return 3000
+	}
+}
+
+func defaultDistributedCacheTimeout() time.Duration {
+	procs := stdruntime.GOMAXPROCS(0)
+	switch {
+	case procs >= 32:
+		return 12 * time.Millisecond
+	case procs >= 16:
+		return 10 * time.Millisecond
+	case procs >= 8:
+		return 8 * time.Millisecond
+	case procs >= 4:
+		return 6 * time.Millisecond
+	default:
+		return 5 * time.Millisecond
+	}
 }
 
 const (
@@ -127,6 +233,31 @@ type SearchCache struct {
 	entries map[uint64]*SearchCacheEntry
 	ttl     time.Duration
 	maxSize int
+}
+
+type DistributedCache struct {
+	client  *redis.Client
+	ttl     time.Duration
+	timeout time.Duration
+}
+
+type routingShardCacheEntry struct {
+	ShardID      uint64   `json:"shard_id"`
+	Start        uint64   `json:"start"`
+	End          uint64   `json:"end"`
+	ShardEpoch   uint64   `json:"shard_epoch"`
+	LeaderAddr   string   `json:"leader_addr"`
+	ReplicaAddrs []string `json:"replica_addrs"`
+}
+
+type collectionRoutingCacheEntry struct {
+	Shards []routingShardCacheEntry `json:"shards"`
+}
+
+type resolveCacheEntry struct {
+	Addr      string `json:"addr"`
+	ShardID   uint64 `json:"shard_id"`
+	ShardEpoch uint64 `json:"shard_epoch"`
 }
 
 type RerankWarmupCache struct {
@@ -193,6 +324,168 @@ func NewCollectionRoutingCache(ttl time.Duration) *CollectionRoutingCache {
 		entries: make(map[string]*collectionRoutingEntry),
 		ttl:     ttl,
 	}
+}
+
+func NewDistributedCache(addr, password string, db int, ttl, timeout time.Duration) *DistributedCache {
+	if addr == "" {
+		return nil
+	}
+	client := redis.NewClient(&redis.Options{
+		Addr:     addr,
+		Password: password,
+		DB:       db,
+		PoolSize: adaptiveConcurrency(4, 64),
+	})
+	return &DistributedCache{
+		client:  client,
+		ttl:     ttl,
+		timeout: timeout,
+	}
+}
+
+func (c *DistributedCache) key(prefix, key string) string {
+	return "vectron:" + prefix + ":" + key
+}
+
+func (c *DistributedCache) GetBytes(ctx context.Context, prefix, key string) ([]byte, bool) {
+	if c == nil || c.client == nil {
+		return nil, false
+	}
+	cacheCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	data, err := c.client.Get(cacheCtx, c.key(prefix, key)).Bytes()
+	if err != nil {
+		return nil, false
+	}
+	return data, true
+}
+
+func (c *DistributedCache) SetBytes(ctx context.Context, prefix, key string, data []byte, ttl time.Duration) {
+	if c == nil || c.client == nil || len(data) == 0 {
+		return
+	}
+	if ttl <= 0 {
+		ttl = c.ttl
+	}
+	cacheCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	_ = c.client.Set(cacheCtx, c.key(prefix, key), data, ttl).Err()
+}
+
+func (c *DistributedCache) GetSearch(ctx context.Context, key uint64) (*pb.SearchResponse, bool) {
+	data, ok := c.GetBytes(ctx, "search", fmt.Sprintf("%x", key))
+	if !ok {
+		return nil, false
+	}
+	resp := &pb.SearchResponse{}
+	if err := proto.Unmarshal(data, resp); err != nil {
+		return nil, false
+	}
+	return resp, true
+}
+
+func (c *DistributedCache) SetSearch(ctx context.Context, key uint64, resp *pb.SearchResponse, ttl time.Duration) {
+	if resp == nil {
+		return
+	}
+	data, err := proto.Marshal(resp)
+	if err != nil {
+		return
+	}
+	c.SetBytes(ctx, "search", fmt.Sprintf("%x", key), data, ttl)
+}
+
+func (c *DistributedCache) GetWorkerList(ctx context.Context, collection string) ([]string, bool) {
+	data, ok := c.GetBytes(ctx, "workers", collection)
+	if !ok {
+		return nil, false
+	}
+	var addrs []string
+	if err := json.Unmarshal(data, &addrs); err != nil {
+		return nil, false
+	}
+	return addrs, true
+}
+
+func (c *DistributedCache) SetWorkerList(ctx context.Context, collection string, addrs []string, ttl time.Duration) {
+	if len(addrs) == 0 {
+		return
+	}
+	data, err := json.Marshal(addrs)
+	if err != nil {
+		return
+	}
+	c.SetBytes(ctx, "workers", collection, data, ttl)
+}
+
+func (c *DistributedCache) GetRouting(ctx context.Context, collection string) (*collectionRoutingEntry, bool) {
+	data, ok := c.GetBytes(ctx, "routing", collection)
+	if !ok {
+		return nil, false
+	}
+	var cached collectionRoutingCacheEntry
+	if err := json.Unmarshal(data, &cached); err != nil {
+		return nil, false
+	}
+	entry := &collectionRoutingEntry{
+		shards:  make([]routingShard, 0, len(cached.Shards)),
+		expires: time.Now().Add(2 * time.Second),
+	}
+	for _, shard := range cached.Shards {
+		entry.shards = append(entry.shards, routingShard{
+			shardID:      shard.ShardID,
+			start:        shard.Start,
+			end:          shard.End,
+			shardEpoch:   shard.ShardEpoch,
+			leaderAddr:   shard.LeaderAddr,
+			replicaAddrs: shard.ReplicaAddrs,
+		})
+	}
+	return entry, true
+}
+
+func (c *DistributedCache) SetRouting(ctx context.Context, collection string, entry *collectionRoutingEntry, ttl time.Duration) {
+	if entry == nil {
+		return
+	}
+	cached := collectionRoutingCacheEntry{
+		Shards: make([]routingShardCacheEntry, 0, len(entry.shards)),
+	}
+	for _, shard := range entry.shards {
+		cached.Shards = append(cached.Shards, routingShardCacheEntry{
+			ShardID:      shard.shardID,
+			Start:        shard.start,
+			End:          shard.end,
+			ShardEpoch:   shard.shardEpoch,
+			LeaderAddr:   shard.leaderAddr,
+			ReplicaAddrs: shard.replicaAddrs,
+		})
+	}
+	data, err := json.Marshal(cached)
+	if err != nil {
+		return
+	}
+	c.SetBytes(ctx, "routing", collection, data, ttl)
+}
+
+func (c *DistributedCache) GetResolve(ctx context.Context, key string) (resolveCacheEntry, bool) {
+	data, ok := c.GetBytes(ctx, "resolve", key)
+	if !ok {
+		return resolveCacheEntry{}, false
+	}
+	var entry resolveCacheEntry
+	if err := json.Unmarshal(data, &entry); err != nil {
+		return resolveCacheEntry{}, false
+	}
+	return entry, true
+}
+
+func (c *DistributedCache) SetResolve(ctx context.Context, key string, entry resolveCacheEntry, ttl time.Duration) {
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return
+	}
+	c.SetBytes(ctx, "resolve", key, data, ttl)
 }
 
 func (c *CollectionRoutingCache) Get(collection string) (*collectionRoutingEntry, bool) {
@@ -503,6 +796,32 @@ func computeSearchCacheKey(req *pb.SearchRequest) uint64 {
 	binary.LittleEndian.PutUint32(buf[:], uint32(req.TopK))
 	h.Write(buf[:])
 	return h.Sum64()
+}
+
+func (s *gatewayServer) getSearchCache(ctx context.Context, req *pb.SearchRequest) (*pb.SearchResponse, bool) {
+	if cached, found := s.searchCache.Get(req); found {
+		return cached, true
+	}
+	if s.distributedCache == nil {
+		return nil, false
+	}
+	key := computeSearchCacheKey(req)
+	if cached, found := s.distributedCache.GetSearch(ctx, key); found {
+		s.searchCache.Set(req, cached)
+		return cached, true
+	}
+	return nil, false
+}
+
+func (s *gatewayServer) setSearchCache(ctx context.Context, req *pb.SearchRequest, resp *pb.SearchResponse) {
+	if resp == nil {
+		return
+	}
+	s.searchCache.Set(req, resp)
+	if s.distributedCache != nil {
+		key := computeSearchCacheKey(req)
+		s.distributedCache.SetSearch(ctx, key, resp, 0)
+	}
 }
 
 // Get retrieves cached results if available and not expired
@@ -1011,6 +1330,7 @@ type gatewayServer struct {
 	workerListCache        *WorkerListCache
 	resolveCache           *WorkerResolveCache
 	routingCache           *CollectionRoutingCache
+	distributedCache       *DistributedCache
 	grpcCompressionEnabled bool
 	rerankWarmupCache      *RerankWarmupCache
 	rerankWarmupSem        chan struct{}
@@ -1299,6 +1619,19 @@ func (s *gatewayServer) getCollectionRouting(ctx context.Context, collection str
 			return entry, nil
 		}
 	}
+	if !forceRefresh && s.distributedCache != nil {
+		if entry, ok := s.distributedCache.GetRouting(ctx, collection); ok {
+			ttl := 2 * time.Second
+			if s.routingCache != nil && s.routingCache.ttl > 0 {
+				ttl = s.routingCache.ttl
+			}
+			entry.expires = time.Now().Add(ttl)
+			if s.routingCache != nil {
+				s.routingCache.Set(collection, entry)
+			}
+			return entry, nil
+		}
+	}
 
 	placementClient, err := s.getPlacementClient()
 	if err != nil {
@@ -1350,6 +1683,13 @@ func (s *gatewayServer) getCollectionRouting(ctx context.Context, collection str
 	if s.routingCache != nil {
 		s.routingCache.Set(collection, entry)
 	}
+	if s.distributedCache != nil {
+		ttl := 2 * time.Second
+		if s.routingCache != nil && s.routingCache.ttl > 0 {
+			ttl = s.routingCache.ttl
+		}
+		s.distributedCache.SetRouting(ctx, collection, entry, ttl)
+	}
 	return entry, nil
 }
 
@@ -1386,10 +1726,89 @@ func pickShardAddress(shard *routingShard) string {
 	return ""
 }
 
+func pickShardSearchAddress(shard *routingShard, linearizable bool, key uint64) string {
+	if shard == nil {
+		return ""
+	}
+	if linearizable {
+		return pickShardAddress(shard)
+	}
+	candidates := make([]string, 0, len(shard.replicaAddrs)+1)
+	for _, addr := range shard.replicaAddrs {
+		if addr != "" {
+			candidates = append(candidates, addr)
+		}
+	}
+	if shard.leaderAddr != "" {
+		candidates = append(candidates, shard.leaderAddr)
+	}
+	if len(candidates) == 0 {
+		return ""
+	}
+	idx := int((key ^ shard.shardID) % uint64(len(candidates)))
+	return candidates[idx]
+}
+
+func workerAddressesForSearch(entry *collectionRoutingEntry, linearizable bool, key uint64) []string {
+	if entry == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	addrs := make([]string, 0)
+	for i := range entry.shards {
+		shard := &entry.shards[i]
+		addr := pickShardSearchAddress(shard, linearizable, key)
+		if addr == "" {
+			continue
+		}
+		if _, ok := seen[addr]; ok {
+			continue
+		}
+		seen[addr] = struct{}{}
+		addrs = append(addrs, addr)
+	}
+	return addrs
+}
+
+func workerAddressesFromRouting(entry *collectionRoutingEntry) []string {
+	if entry == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	addrs := make([]string, 0)
+	for _, shard := range entry.shards {
+		if shard.leaderAddr != "" {
+			if _, ok := seen[shard.leaderAddr]; !ok {
+				seen[shard.leaderAddr] = struct{}{}
+				addrs = append(addrs, shard.leaderAddr)
+			}
+		}
+		for _, addr := range shard.replicaAddrs {
+			if addr == "" {
+				continue
+			}
+			if _, ok := seen[addr]; !ok {
+				seen[addr] = struct{}{}
+				addrs = append(addrs, addr)
+			}
+		}
+	}
+	return addrs
+}
+
 func (s *gatewayServer) resolveWorker(ctx context.Context, collection string, vectorID string, forceRefresh bool) (string, uint64, uint64, int64, error) {
 	if vectorID != "" && !forceRefresh {
 		if addr, shardID, shardEpoch, leaseExpiry, ok := s.resolveCache.Get(collection, vectorID); ok {
 			return addr, shardID, shardEpoch, leaseExpiry, nil
+		}
+		if s.distributedCache != nil {
+			if entry, ok := s.distributedCache.GetResolve(ctx, collection+"|"+vectorID); ok {
+				leaseExpiry := time.Now().Add(routingLeaseTTL).UnixMilli()
+				if entry.Addr != "" && entry.ShardID != 0 {
+					s.resolveCache.Set(collection, vectorID, entry.Addr, entry.ShardID, entry.ShardEpoch, leaseExpiry)
+					return entry.Addr, entry.ShardID, entry.ShardEpoch, leaseExpiry, nil
+				}
+			}
 		}
 	}
 
@@ -1401,6 +1820,13 @@ func (s *gatewayServer) resolveWorker(ctx context.Context, collection string, ve
 				if addr != "" {
 					leaseExpiry := time.Now().Add(routingLeaseTTL).UnixMilli()
 					s.resolveCache.Set(collection, vectorID, addr, route.shardID, route.shardEpoch, leaseExpiry)
+					if s.distributedCache != nil {
+						s.distributedCache.SetResolve(ctx, collection+"|"+vectorID, resolveCacheEntry{
+							Addr:      addr,
+							ShardID:   route.shardID,
+							ShardEpoch: route.shardEpoch,
+						}, s.resolveCache.ttl)
+					}
 					return addr, route.shardID, route.shardEpoch, leaseExpiry, nil
 				}
 			}
@@ -1442,6 +1868,13 @@ func (s *gatewayServer) resolveWorker(ctx context.Context, collection string, ve
 	leaseExpiry := resp.GetLeaseExpiryUnixMs()
 	if vectorID != "" {
 		s.resolveCache.Set(collection, vectorID, addr, shardID, shardEpoch, leaseExpiry)
+		if s.distributedCache != nil {
+			s.distributedCache.SetResolve(ctx, collection+"|"+vectorID, resolveCacheEntry{
+				Addr:      addr,
+				ShardID:   shardID,
+				ShardEpoch: shardEpoch,
+			}, s.resolveCache.ttl)
+		}
 	}
 	return addr, shardID, shardEpoch, leaseExpiry, nil
 }
@@ -1988,13 +2421,13 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 		warmupKey = computeSearchCacheKey(req)
 		warmupKeySet = true
 		if cached, found := s.rerankWarmupCache.Get(warmupKey); found {
-			s.searchCache.Set(req, cached)
+			s.setSearchCache(ctx, req, cached)
 			return cached, nil
 		}
 	}
 
 	// Check cache for identical queries to avoid redundant computation
-	if cached, found := s.searchCache.Get(req); found {
+	if cached, found := s.getSearchCache(ctx, req); found {
 		return cached, nil
 	}
 
@@ -2018,7 +2451,7 @@ func (s *gatewayServer) SearchStream(req *pb.SearchRequest, stream pb.VectronSer
 		req.TopK = 10
 	}
 
-	if cached, found := s.searchCache.Get(req); found {
+	if cached, found := s.getSearchCache(stream.Context(), req); found {
 		return stream.Send(cached)
 	}
 
@@ -2089,7 +2522,7 @@ func (s *gatewayServer) SearchStream(req *pb.SearchRequest, stream pb.VectronSer
 	}
 
 	finalResp := &pb.SearchResponse{Results: rerankedResults}
-	s.searchCache.Set(req, finalResp)
+	s.setSearchCache(stream.Context(), req, finalResp)
 	return stream.Send(finalResp)
 }
 
@@ -2134,14 +2567,32 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 		}
 	}
 
-	placementClient, err := s.getPlacementClient()
-	if err != nil {
-		return nil, nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
+	linearizable := cfg.SearchLinearizable
+	if v, ok := cfg.SearchConsistencyOverrides[req.Collection]; ok {
+		linearizable = v
 	}
+	routeKey := computeSearchCacheKey(req)
+
 	var workerAddresses []string
+	if routingEntry, err := s.getCollectionRouting(ctx, req.Collection, false); err == nil {
+		workerAddresses = workerAddressesForSearch(routingEntry, linearizable, routeKey)
+	}
 	if cachedAddresses, ok := s.workerListCache.Get(req.Collection); ok {
-		workerAddresses = cachedAddresses
-	} else {
+		if len(workerAddresses) == 0 {
+			workerAddresses = cachedAddresses
+		}
+	}
+	if len(workerAddresses) == 0 && s.distributedCache != nil {
+		if cachedAddresses, ok := s.distributedCache.GetWorkerList(ctx, req.Collection); ok {
+			workerAddresses = cachedAddresses
+			s.workerListCache.Set(req.Collection, cachedAddresses)
+		}
+	}
+	if len(workerAddresses) == 0 {
+		placementClient, err := s.getPlacementClient()
+		if err != nil {
+			return nil, nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
+		}
 		workerListResp, err := placementClient.ListWorkersForCollection(ctx, &placementpb.ListWorkersForCollectionRequest{
 			Collection: req.Collection,
 		})
@@ -2163,6 +2614,9 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 		}
 		workerAddresses = workerListResp.GetGrpcAddresses()
 		s.workerListCache.Set(req.Collection, workerAddresses)
+		if s.distributedCache != nil {
+			s.distributedCache.SetWorkerList(ctx, req.Collection, workerAddresses, s.workerListCache.ttl)
+		}
 	}
 	if len(workerAddresses) == 0 {
 		empty := &pb.SearchResponse{}
@@ -2172,6 +2626,56 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 		return empty, nil, nil
 	}
 
+	if len(workerAddresses) == 1 {
+		workerAddr := workerAddresses[0]
+		workerClient, err := s.workerPool.GetClient(workerAddr)
+		if err != nil {
+			return nil, nil, status.Errorf(codes.Internal, "worker %s unreachable: %v", workerAddr, err)
+		}
+
+		workerReq := translator.ToWorkerSearchRequest(req, 0, 0, 0, linearizable)
+		workerReq.K = int32(workerTopK)
+
+		res, err := workerClient.Search(searchCtx, workerReq)
+		if err != nil {
+			if allowPartial {
+				return nil, nil, status.Errorf(codes.DeadlineExceeded, "search timed out before any results were returned: %v", err)
+			}
+			return nil, nil, status.Errorf(codes.Internal, "worker %s search failed: %v", workerAddr, err)
+		}
+
+		topResults := &searchResultHeap{}
+		heap.Init(topResults)
+		workerSearchResponse := translator.FromWorkerSearchResponse(res)
+		for _, r := range workerSearchResponse.Results {
+			if candidateLimit <= 0 {
+				continue
+			}
+			if topResults.Len() < candidateLimit {
+				heap.Push(topResults, r)
+				continue
+			}
+			if topResults.Len() > 0 && r.Score > (*topResults)[0].Score {
+				(*topResults)[0] = r
+				heap.Fix(topResults, 0)
+			}
+		}
+
+		finalSnapshot := snapshotTopResults(topResults, int(req.TopK))
+		if err := stream.Send(finalSnapshot); err != nil {
+			return nil, nil, err
+		}
+		s.setSearchCache(ctx, req, finalSnapshot)
+
+		metadataByID := make(map[string]map[string]string, len(finalSnapshot.Results))
+		for _, result := range finalSnapshot.Results {
+			if result.Payload != nil {
+				metadataByID[result.Id] = result.Payload
+			}
+		}
+		return finalSnapshot, metadataByID, nil
+	}
+
 	type workerResult struct {
 		resp *workerpb.SearchResponse
 		err  error
@@ -2179,6 +2683,7 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 
 	resultsCh := make(chan workerResult, len(workerAddresses))
 	searchSem := make(chan struct{}, adaptiveConcurrency(2, 32))
+	useBatcher := s.workerSearchBatcher != nil && len(workerAddresses) > 1
 	var wg sync.WaitGroup
 
 	for _, addr := range workerAddresses {
@@ -2194,15 +2699,11 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 				return
 			}
 
-			linearizable := cfg.SearchLinearizable
-			if v, ok := cfg.SearchConsistencyOverrides[req.Collection]; ok {
-				linearizable = v
-			}
 			workerReq := translator.ToWorkerSearchRequest(req, 0, 0, 0, linearizable)
 			workerReq.K = int32(workerTopK)
 
 			var res *workerpb.SearchResponse
-			if s.workerSearchBatcher != nil {
+			if useBatcher {
 				res, err = s.workerSearchBatcher.Search(searchCtx, workerAddr, workerClient, workerReq)
 			} else {
 				res, err = workerClient.Search(searchCtx, workerReq)
@@ -2275,7 +2776,7 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 
 	if topResults.Len() > 0 {
 		finalSnapshot := snapshotTopResults(topResults, int(req.TopK))
-		s.searchCache.Set(req, finalSnapshot)
+		s.setSearchCache(ctx, req, finalSnapshot)
 	}
 
 	finalSnapshot := snapshotTopResults(topResults, int(req.TopK))
@@ -2329,14 +2830,35 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		candidateLimit = workerTopK
 	}
 
-	placementClient, err := s.getPlacementClient()
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
+	linearizable := cfg.SearchLinearizable
+	if v, ok := cfg.SearchConsistencyOverrides[req.Collection]; ok {
+		linearizable = v
 	}
+	routeKey := warmupKey
+	if !warmupKeySet {
+		routeKey = computeSearchCacheKey(req)
+	}
+
 	var workerAddresses []string
+	if routingEntry, err := s.getCollectionRouting(ctx, req.Collection, false); err == nil {
+		workerAddresses = workerAddressesForSearch(routingEntry, linearizable, routeKey)
+	}
 	if cachedAddresses, ok := s.workerListCache.Get(req.Collection); ok {
-		workerAddresses = cachedAddresses
-	} else {
+		if len(workerAddresses) == 0 {
+			workerAddresses = cachedAddresses
+		}
+	}
+	if len(workerAddresses) == 0 && s.distributedCache != nil {
+		if cachedAddresses, ok := s.distributedCache.GetWorkerList(ctx, req.Collection); ok {
+			workerAddresses = cachedAddresses
+			s.workerListCache.Set(req.Collection, cachedAddresses)
+		}
+	}
+	if len(workerAddresses) == 0 {
+		placementClient, err := s.getPlacementClient()
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "could not get placement driver client: %v", err)
+		}
 		workerListResp, err := placementClient.ListWorkersForCollection(ctx, &placementpb.ListWorkersForCollectionRequest{
 			Collection: req.Collection,
 		})
@@ -2359,9 +2881,178 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		}
 		workerAddresses = workerListResp.GetGrpcAddresses()
 		s.workerListCache.Set(req.Collection, workerAddresses)
+		if s.distributedCache != nil {
+			s.distributedCache.SetWorkerList(ctx, req.Collection, workerAddresses, s.workerListCache.ttl)
+		}
 	}
 	if len(workerAddresses) == 0 {
 		return &pb.SearchResponse{}, nil // No workers, no results
+	}
+
+	var searchResponse *pb.SearchResponse
+	var results []*pb.SearchResult
+
+	if len(workerAddresses) == 1 {
+		workerAddr := workerAddresses[0]
+		workerClient, err := s.workerPool.GetClient(workerAddr)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "worker %s unreachable: %v", workerAddr, err)
+		}
+
+		workerReq := translator.ToWorkerSearchRequest(req, 0, 0, 0, linearizable) // ShardID 0 for broadcast search
+		workerReq.K = int32(workerTopK)
+
+		res, err := workerClient.Search(searchCtx, workerReq)
+		if err != nil {
+			if !allowPartial {
+				return nil, status.Errorf(codes.Internal, "worker %s search failed: %v", workerAddr, err)
+			}
+			return nil, status.Errorf(codes.DeadlineExceeded, "search timed out before any results were returned: %v", err)
+		}
+
+		topResults := &searchResultHeap{}
+		heap.Init(topResults)
+		workerSearchResponse := translator.FromWorkerSearchResponse(res)
+		for _, result := range workerSearchResponse.Results {
+			if candidateLimit <= 0 {
+				continue
+			}
+			if topResults.Len() < candidateLimit {
+				heap.Push(topResults, result)
+				continue
+			}
+			if topResults.Len() > 0 && result.Score > (*topResults)[0].Score {
+				(*topResults)[0] = result
+				heap.Fix(topResults, 0)
+			}
+		}
+
+		results = searchResultSlicePool.Get().([]*pb.SearchResult)
+		results = results[:topResults.Len()]
+		for i := len(results) - 1; i >= 0; i-- {
+			results[i] = heap.Pop(topResults).(*pb.SearchResult)
+		}
+		searchResponse = &pb.SearchResponse{Results: results}
+
+		if len(searchResponse.Results) == 0 {
+			searchResultSlicePool.Put(results[:0])
+			return searchResponse, nil
+		}
+
+		// Inline finalize block to avoid goto across declarations.
+		if candidateLimit > 0 && len(searchResponse.Results) > candidateLimit {
+			sort.Slice(searchResponse.Results, func(i, j int) bool {
+				return searchResponse.Results[i].Score > searchResponse.Results[j].Score
+			})
+			searchResponse.Results = searchResponse.Results[:candidateLimit]
+		}
+
+		allowAll = len(cfg.RerankCollections) == 0
+		enabledForCollection = allowAll || cfg.RerankCollections[req.Collection]
+		if req.Query == "" || !cfg.RerankEnabled || !enabledForCollection {
+			sort.Slice(searchResponse.Results, func(i, j int) bool {
+				return searchResponse.Results[i].Score > searchResponse.Results[j].Score
+			})
+			if len(searchResponse.Results) > int(req.TopK) {
+				searchResponse.Results = searchResponse.Results[:req.TopK]
+			}
+			s.setSearchCache(ctx, req, searchResponse)
+			searchResultSlicePool.Put(results[:0])
+			return searchResponse, nil
+		}
+
+		candidates := make([]*reranker.Candidate, len(searchResponse.Results))
+		var metadataByID map[string]map[string]string
+		for i, result := range searchResponse.Results {
+			metadata := result.Payload
+			if metadata != nil {
+				if metadataByID == nil {
+					metadataByID = make(map[string]map[string]string, len(searchResponse.Results))
+				}
+				metadataByID[result.Id] = metadata
+			}
+
+			candidates[i] = &reranker.Candidate{
+				Id:       result.Id,
+				Score:    result.Score,
+				Metadata: metadata,
+			}
+		}
+
+		rerankTopN := int(req.TopK)
+		if v, ok := cfg.RerankTopNOverrides[req.Collection]; ok && v > 0 {
+			rerankTopN = v
+		}
+
+		rerankTimeoutMs := cfg.RerankTimeoutMs
+		if v, ok := cfg.RerankTimeoutOverrides[req.Collection]; ok && v > 0 {
+			rerankTimeoutMs = v
+		}
+
+		if cfg.RerankWarmupEnabled && s.rerankWarmupCache != nil {
+			if !warmupKeySet {
+				warmupKey = computeSearchCacheKey(req)
+				warmupKeySet = true
+			}
+			s.startRerankWarmup(warmupKey, req, candidates, metadataByID, rerankTopN, rerankTimeoutMs)
+
+			sort.Slice(searchResponse.Results, func(i, j int) bool {
+				return searchResponse.Results[i].Score > searchResponse.Results[j].Score
+			})
+			if len(searchResponse.Results) > int(req.TopK) {
+				searchResponse.Results = searchResponse.Results[:req.TopK]
+			}
+			s.setSearchCache(ctx, req, searchResponse)
+			searchResultSlicePool.Put(results[:0])
+			return searchResponse, nil
+		}
+
+		rerankReq := &reranker.RerankRequest{
+			Query:      req.Query,
+			Candidates: candidates,
+			TopN:       int32(rerankTopN),
+		}
+
+		rerankCtx := ctx
+		var cancel context.CancelFunc
+		if rerankTimeoutMs > 0 {
+			rerankCtx, cancel = context.WithTimeout(ctx, time.Duration(rerankTimeoutMs)*time.Millisecond)
+			defer cancel()
+		}
+		rerankResp, err := s.rerankerClient.Rerank(rerankCtx, rerankReq)
+		if err != nil {
+			log.Println("Reranking failed, returning original results:", err)
+			sort.Slice(searchResponse.Results, func(i, j int) bool {
+				return searchResponse.Results[i].Score > searchResponse.Results[j].Score
+			})
+			if len(searchResponse.Results) > int(req.TopK) {
+				searchResponse.Results = searchResponse.Results[:req.TopK]
+			}
+			s.setSearchCache(ctx, req, searchResponse)
+			searchResultSlicePool.Put(results[:0])
+			return searchResponse, nil
+		}
+
+		rerankedResults := make([]*pb.SearchResult, len(rerankResp.Results))
+		for i, result := range rerankResp.Results {
+			var payload map[string]string
+			if metadataByID != nil {
+				payload = metadataByID[result.Id]
+			}
+
+			rerankedResults[i] = &pb.SearchResult{
+				Id:      result.Id,
+				Score:   result.RerankScore,
+				Payload: payload,
+			}
+		}
+
+		finalResponse := &pb.SearchResponse{
+			Results: rerankedResults,
+		}
+		s.setSearchCache(ctx, req, finalResponse)
+		searchResultSlicePool.Put(results[:0])
+		return finalResponse, nil
 	}
 
 	var (
@@ -2373,6 +3064,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 	heap.Init(topResults)
 
 	searchSem := make(chan struct{}, adaptiveConcurrency(2, 32))
+	useBatcher := s.workerSearchBatcher != nil && len(workerAddresses) > 1
 	for _, addr := range workerAddresses {
 		wg.Add(1)
 		go func(workerAddr string) {
@@ -2389,15 +3081,11 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 				return
 			}
 
-			linearizable := cfg.SearchLinearizable
-			if v, ok := cfg.SearchConsistencyOverrides[req.Collection]; ok {
-				linearizable = v
-			}
 			workerReq := translator.ToWorkerSearchRequest(req, 0, 0, 0, linearizable) // ShardID 0 for broadcast search
 			workerReq.K = int32(workerTopK)
 
 			var res *workerpb.SearchResponse
-			if s.workerSearchBatcher != nil {
+			if useBatcher {
 				res, err = s.workerSearchBatcher.Search(searchCtx, workerAddr, workerClient, workerReq)
 			} else {
 				res, err = workerClient.Search(searchCtx, workerReq)
@@ -2441,12 +3129,12 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		return nil, status.Errorf(codes.Internal, "failed to search all workers: %v", errs[0])
 	}
 
-	results := searchResultSlicePool.Get().([]*pb.SearchResult)
+	results = searchResultSlicePool.Get().([]*pb.SearchResult)
 	results = results[:topResults.Len()]
 	for i := len(results) - 1; i >= 0; i-- {
 		results[i] = heap.Pop(topResults).(*pb.SearchResult)
 	}
-	searchResponse := &pb.SearchResponse{Results: results}
+	searchResponse = &pb.SearchResponse{Results: results}
 
 	if len(searchResponse.Results) == 0 {
 		searchResultSlicePool.Put(results[:0])
@@ -2473,7 +3161,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		if len(searchResponse.Results) > int(req.TopK) {
 			searchResponse.Results = searchResponse.Results[:req.TopK]
 		}
-		s.searchCache.Set(req, searchResponse)
+		s.setSearchCache(ctx, req, searchResponse)
 		searchResultSlicePool.Put(results[:0])
 		return searchResponse, nil
 	}
@@ -2519,7 +3207,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		if len(searchResponse.Results) > int(req.TopK) {
 			searchResponse.Results = searchResponse.Results[:req.TopK]
 		}
-		s.searchCache.Set(req, searchResponse)
+		s.setSearchCache(ctx, req, searchResponse)
 		searchResultSlicePool.Put(results[:0])
 		return searchResponse, nil
 	}
@@ -2548,7 +3236,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 			searchResponse.Results = searchResponse.Results[:req.TopK]
 		}
 		// Cache the results before returning
-		s.searchCache.Set(req, searchResponse)
+		s.setSearchCache(ctx, req, searchResponse)
 		searchResultSlicePool.Put(results[:0])
 		return searchResponse, nil
 	}
@@ -2571,7 +3259,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		Results: rerankedResults,
 	}
 	// Cache the results before returning
-	s.searchCache.Set(req, finalResponse)
+	s.setSearchCache(ctx, req, finalResponse)
 	searchResultSlicePool.Put(results[:0])
 	return finalResponse, nil
 }
@@ -2777,6 +3465,24 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 		log.Fatalf("Failed to initialize feedback service: %v", err)
 	}
 
+	searchCacheTTL, searchCacheMax := defaultSearchCacheConfig()
+	if config.SearchCacheTTLms > 0 {
+		searchCacheTTL = time.Duration(config.SearchCacheTTLms) * time.Millisecond
+	}
+	if config.SearchCacheMaxSize > 0 {
+		searchCacheMax = config.SearchCacheMaxSize
+	}
+
+	distCacheTTL := time.Duration(config.DistributedCacheTTLms) * time.Millisecond
+	if distCacheTTL <= 0 {
+		distCacheTTL = 5 * time.Second
+	}
+	distCacheTimeout := time.Duration(config.DistributedCacheTimeoutMs) * time.Millisecond
+	if distCacheTimeout <= 0 {
+		distCacheTimeout = defaultDistributedCacheTimeout()
+	}
+	distributedCache := NewDistributedCache(config.DistributedCacheAddr, config.DistributedCachePassword, config.DistributedCacheDB, distCacheTTL, distCacheTimeout)
+
 	// Create the gateway server with the list of PD addresses
 	server := &gatewayServer{
 		pdAddrs:                strings.Split(config.PlacementDriver, ","),
@@ -2786,10 +3492,11 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 		workerPool:             NewWorkerConnPool(config.GRPCEnableCompression), // Initialize worker connection pool for reuse
 		workerSearchBatcher:    NewWorkerSearchBatcher(2*time.Millisecond, 16),
 		pdPool:                 NewPDConnPool(config.GRPCEnableCompression),
-		searchCache:            NewSearchCache(5*time.Second, 1000),             // Cache search results for 5s, max 1000 entries
-		workerListCache:        NewWorkerListCache(2 * time.Second),
-		resolveCache:           NewWorkerResolveCache(5*time.Second, 10000),
+		searchCache:            NewSearchCache(searchCacheTTL, searchCacheMax),   // Cache search results
+		workerListCache:        NewWorkerListCache(5 * time.Second),
+		resolveCache:           NewWorkerResolveCache(5*time.Second, defaultResolveCacheSize()),
 		routingCache:           NewCollectionRoutingCache(5 * time.Second),
+		distributedCache:       distributedCache,
 		grpcCompressionEnabled: config.GRPCEnableCompression,
 		rerankWarmupInFlight:   make(map[uint64]struct{}),
 		inFlightSearches:       make(map[uint64]*inFlightSearch),

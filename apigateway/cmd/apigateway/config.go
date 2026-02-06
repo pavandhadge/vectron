@@ -32,6 +32,13 @@ type Config struct {
 	RerankWarmupMaxSize        int             // Max entries for warmup rerank cache.
 	RerankWarmupConcurrency    int             // Max concurrent warmup rerank calls.
 	SearchConsistencyOverrides map[string]bool // Per-collection read consistency (true = linearizable).
+	SearchCacheTTLms           int             // TTL for in-memory search cache (milliseconds).
+	SearchCacheMaxSize         int             // Max entries for in-memory search cache.
+	DistributedCacheAddr       string          // Valkey/Redis address for distributed cache.
+	DistributedCachePassword   string          // Password for distributed cache.
+	DistributedCacheDB         int             // DB index for distributed cache.
+	DistributedCacheTTLms      int             // TTL for distributed cache (milliseconds).
+	DistributedCacheTimeoutMs  int             // Timeout for distributed cache ops (milliseconds).
 }
 
 // LoadConfig loads the configuration from environment variables with default fallbacks.
@@ -57,6 +64,13 @@ func LoadConfig() Config {
 		RerankWarmupMaxSize:        getEnvAsInt("RERANK_WARMUP_MAX_SIZE", 2000),
 		RerankWarmupConcurrency:    getEnvAsInt("RERANK_WARMUP_CONCURRENCY", 2),
 		SearchConsistencyOverrides: parseConsistencyOverrides(getEnv("SEARCH_CONSISTENCY_OVERRIDES", "")),
+		SearchCacheTTLms:           getEnvAsInt("SEARCH_CACHE_TTL_MS", 0),
+		SearchCacheMaxSize:         getEnvAsInt("SEARCH_CACHE_MAX_SIZE", 0),
+		DistributedCacheAddr:       getEnv("DISTRIBUTED_CACHE_ADDR", ""),
+		DistributedCachePassword:   getEnv("DISTRIBUTED_CACHE_PASSWORD", ""),
+		DistributedCacheDB:         getEnvAsInt("DISTRIBUTED_CACHE_DB", 0),
+		DistributedCacheTTLms:      getEnvAsInt("DISTRIBUTED_CACHE_TTL_MS", 5000),
+		DistributedCacheTimeoutMs:  getEnvAsInt("DISTRIBUTED_CACHE_TIMEOUT_MS", 8),
 	}
 }
 

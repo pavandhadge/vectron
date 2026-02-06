@@ -15,6 +15,9 @@ cleanup() {
     if podman container exists etcd; then
         podman stop etcd > /dev/null 2>&1
     fi
+    if podman container exists vectron-valkey; then
+        podman stop vectron-valkey > /dev/null 2>&1
+    fi
 
     # Clean temp dirs
     rm -rf /tmp/pd_dev_*
@@ -47,6 +50,7 @@ export APIGATEWAY_GRPC=10010
 export FRONTEND_PORT=10011
 export RERANKER_PORT=10013
 export FEEDBACK_DB_PATH="/tmp/vectron/feedback.db"
+export DISTRIBUTED_CACHE_ADDR="127.0.0.1:6379"
 
 # Endpoints
 export ETCD_ENDPOINTS="127.0.0.1:2379"
@@ -100,6 +104,20 @@ else
 fi
 
 sleep 5
+
+# 1b. Start Valkey (Podman)
+echo "▶️  Starting Valkey (Podman)..."
+if podman container exists vectron-valkey; then
+    podman start vectron-valkey > /dev/null
+else
+    podman run -d \
+        --name vectron-valkey \
+        -p 6379:6379 \
+        valkey/valkey:latest \
+        valkey-server --save "" --appendonly no --maxmemory 2gb --maxmemory-policy allkeys-lru
+fi
+
+sleep 2
 
 # 2. Start Placement Driver Cluster
 echo "▶️  Starting 3-node Placement Driver cluster..."
@@ -183,6 +201,7 @@ run_bg /tmp/vectron-apigw.log \
   PLACEMENT_DRIVER="${PD_ADDRS}" \
   AUTH_SERVICE_ADDR="${AUTH_SERVICE_ADDR}" \
   RERANKER_SERVICE_ADDR="127.0.0.1:${RERANKER_PORT}" \
+  DISTRIBUTED_CACHE_ADDR="${DISTRIBUTED_CACHE_ADDR}" \
   ./bin/apigateway
 sleep 2
 
