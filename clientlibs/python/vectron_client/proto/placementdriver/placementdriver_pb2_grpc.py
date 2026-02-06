@@ -59,6 +59,16 @@ class PlacementServiceStub(object):
                 request_serializer=placementdriver_dot_placementdriver__pb2.ListWorkersForCollectionRequest.SerializeToString,
                 response_deserializer=placementdriver_dot_placementdriver__pb2.ListWorkersForCollectionResponse.FromString,
                 _registered_method=True)
+        self.DrainWorker = channel.unary_unary(
+                '/vectron.placementdriver.v1.PlacementService/DrainWorker',
+                request_serializer=placementdriver_dot_placementdriver__pb2.DrainWorkerRequest.SerializeToString,
+                response_deserializer=placementdriver_dot_placementdriver__pb2.DrainWorkerResponse.FromString,
+                _registered_method=True)
+        self.RemoveWorker = channel.unary_unary(
+                '/vectron.placementdriver.v1.PlacementService/RemoveWorker',
+                request_serializer=placementdriver_dot_placementdriver__pb2.RemoveWorkerRequest.SerializeToString,
+                response_deserializer=placementdriver_dot_placementdriver__pb2.RemoveWorkerResponse.FromString,
+                _registered_method=True)
         self.Rebalance = channel.unary_unary(
                 '/vectron.placementdriver.v1.PlacementService/Rebalance',
                 request_serializer=placementdriver_dot_placementdriver__pb2.RebalanceRequest.SerializeToString,
@@ -128,6 +138,20 @@ class PlacementServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def DrainWorker(self, request, context):
+        """Admin: drain a worker (move shards away, stop new assignments)
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RemoveWorker(self, request, context):
+        """Admin: remove a worker (only when it has no shards)
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def Rebalance(self, request, context):
         """Admin: force rebalance (future)
         """
@@ -193,6 +217,16 @@ def add_PlacementServiceServicer_to_server(servicer, server):
                     servicer.ListWorkersForCollection,
                     request_deserializer=placementdriver_dot_placementdriver__pb2.ListWorkersForCollectionRequest.FromString,
                     response_serializer=placementdriver_dot_placementdriver__pb2.ListWorkersForCollectionResponse.SerializeToString,
+            ),
+            'DrainWorker': grpc.unary_unary_rpc_method_handler(
+                    servicer.DrainWorker,
+                    request_deserializer=placementdriver_dot_placementdriver__pb2.DrainWorkerRequest.FromString,
+                    response_serializer=placementdriver_dot_placementdriver__pb2.DrainWorkerResponse.SerializeToString,
+            ),
+            'RemoveWorker': grpc.unary_unary_rpc_method_handler(
+                    servicer.RemoveWorker,
+                    request_deserializer=placementdriver_dot_placementdriver__pb2.RemoveWorkerRequest.FromString,
+                    response_serializer=placementdriver_dot_placementdriver__pb2.RemoveWorkerResponse.SerializeToString,
             ),
             'Rebalance': grpc.unary_unary_rpc_method_handler(
                     servicer.Rebalance,
@@ -360,6 +394,60 @@ class PlacementService(object):
             '/vectron.placementdriver.v1.PlacementService/ListWorkersForCollection',
             placementdriver_dot_placementdriver__pb2.ListWorkersForCollectionRequest.SerializeToString,
             placementdriver_dot_placementdriver__pb2.ListWorkersForCollectionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DrainWorker(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vectron.placementdriver.v1.PlacementService/DrainWorker',
+            placementdriver_dot_placementdriver__pb2.DrainWorkerRequest.SerializeToString,
+            placementdriver_dot_placementdriver__pb2.DrainWorkerResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RemoveWorker(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vectron.placementdriver.v1.PlacementService/RemoveWorker',
+            placementdriver_dot_placementdriver__pb2.RemoveWorkerRequest.SerializeToString,
+            placementdriver_dot_placementdriver__pb2.RemoveWorkerResponse.FromString,
             options,
             channel_credentials,
             insecure,

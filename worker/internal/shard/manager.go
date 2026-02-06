@@ -6,8 +6,13 @@
 package shard
 
 import (
+	"context"
+	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/lni/dragonboat/v3"
 	"github.com/lni/dragonboat/v3/config"
@@ -25,6 +30,7 @@ type Manager struct {
 	mu               sync.RWMutex
 	runningReplicas  map[uint64]bool // A set of shard IDs for replicas currently running on this node.
 	shardCollections map[uint64]string
+	membershipReportedAt map[uint64]time.Time
 }
 
 // NewManager creates a new instance of the ShardManager.
@@ -35,6 +41,7 @@ func NewManager(nh *dragonboat.NodeHost, workerDataDir string, nodeID uint64) *M
 		nodeID:           nodeID,
 		runningReplicas:  make(map[uint64]bool),
 		shardCollections: make(map[uint64]string),
+		membershipReportedAt: make(map[uint64]time.Time),
 	}
 }
 
@@ -49,9 +56,6 @@ func (m *Manager) SetNodeID(nodeID uint64) {
 // assignments from the placement driver with the currently running replicas
 // and starts or stops replicas as needed.
 func (m *Manager) SyncShards(assignments []*pd.ShardAssignment) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	log.Printf("ShardManager: Syncing %d assignments.", len(assignments))
 
 	desiredShards := make(map[uint64]*pd.ShardAssignment)
@@ -59,10 +63,17 @@ func (m *Manager) SyncShards(assignments []*pd.ShardAssignment) {
 		desiredShards[assignment.ShardInfo.ShardID] = assignment
 	}
 
+	m.mu.RLock()
+	runningSnapshot := make(map[uint64]bool, len(m.runningReplicas))
+	for shardID := range m.runningReplicas {
+		runningSnapshot[shardID] = true
+	}
+	m.mu.RUnlock()
+
 	// Phase 1: Identify shards to stop.
 	// These are replicas that are running locally but are no longer in the desired state from the PD.
 	shardsToStop := []uint64{}
-	for shardID := range m.runningReplicas {
+	for shardID := range runningSnapshot {
 		if _, exists := desiredShards[shardID]; !exists {
 			shardsToStop = append(shardsToStop, shardID)
 		}
@@ -72,7 +83,7 @@ func (m *Manager) SyncShards(assignments []*pd.ShardAssignment) {
 	// These are replicas that are in the desired state but not currently running locally.
 	shardsToStart := []*pd.ShardAssignment{}
 	for shardID, assignment := range desiredShards {
-		if _, running := m.runningReplicas[shardID]; !running {
+		if _, running := runningSnapshot[shardID]; !running {
 			shardsToStart = append(shardsToStart, assignment)
 		}
 	}
@@ -86,14 +97,34 @@ func (m *Manager) SyncShards(assignments []*pd.ShardAssignment) {
 			log.Printf("ShardManager: Failed to stop replica for shard %d: %v", shardID, err)
 			// Continue even if stopping fails.
 		}
-		delete(m.runningReplicas, shardID)
-		delete(m.shardCollections, shardID)
 	}
+
+	started := make(map[uint64]*pd.ShardAssignment)
 
 	// Start new replicas.
 	for _, assignment := range shardsToStart {
 		shardID := assignment.ShardInfo.ShardID
-		log.Printf("ShardManager: Starting replica for shard %d with initial members %v", shardID, assignment.InitialMembers)
+
+		initialMembers := assignment.InitialMembers
+		hasData := m.hasLocalShardData(shardID)
+		join := false
+
+		if assignment.Bootstrap {
+			join = false
+			if len(initialMembers) == 0 {
+				log.Printf("ShardManager: Missing initial members for bootstrap shard %d. Skipping start.", shardID)
+				continue
+			}
+		} else if hasData {
+			initialMembers = nil
+			join = false
+		} else {
+			// Join existing cluster when no local data is present.
+			initialMembers = nil
+			join = true
+		}
+
+		log.Printf("ShardManager: Starting replica for shard %d (join=%v, bootstrapped=%v, bootstrap=%v)", shardID, join, assignment.ShardInfo.Bootstrapped, assignment.Bootstrap)
 
 		// Configure the new Raft cluster for the shard.
 		rc := config.Config{
@@ -117,14 +148,146 @@ func (m *Manager) SyncShards(assignments []*pd.ShardAssignment) {
 		}
 
 		// Start the new Raft cluster.
-		if err := m.nodeHost.StartOnDiskCluster(assignment.InitialMembers, false, createFSM, rc); err != nil {
+		if err := m.nodeHost.StartOnDiskCluster(initialMembers, join, createFSM, rc); err != nil {
 			log.Printf("ShardManager: Failed to start replica for shard %d: %v", shardID, err)
 			continue
 		}
 
+		started[shardID] = assignment
+	}
+
+	m.mu.Lock()
+	for _, shardID := range shardsToStop {
+		delete(m.runningReplicas, shardID)
+		delete(m.shardCollections, shardID)
+	}
+	for shardID, assignment := range started {
 		m.runningReplicas[shardID] = true
 		m.shardCollections[shardID] = assignment.ShardInfo.Collection
 	}
+	m.mu.Unlock()
+
+	// Phase 4: Reconcile membership for running shards (leader-only).
+	for _, assignment := range assignments {
+		if m.isShardRunning(assignment.ShardInfo.ShardID) {
+			m.reconcileMembership(assignment)
+		}
+	}
+}
+
+func (m *Manager) hasLocalShardData(shardID uint64) bool {
+	shardDir := filepath.Join(m.workerDataDir, fmt.Sprintf("shard-%d", shardID))
+	if _, err := os.Stat(filepath.Join(shardDir, "CURRENT")); err == nil {
+		return true
+	}
+	if _, err := os.Stat(shardDir); err == nil {
+		return true
+	}
+	return false
+}
+
+func (m *Manager) isShardRunning(shardID uint64) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.runningReplicas[shardID]
+}
+
+func (m *Manager) reconcileMembership(assignment *pd.ShardAssignment) {
+	shardID := assignment.ShardInfo.ShardID
+	leaderID, valid, err := m.nodeHost.GetLeaderID(shardID)
+	if err != nil || !valid {
+		return
+	}
+	if leaderID != m.nodeID {
+		return
+	}
+
+	desired := make(map[uint64]struct{}, len(assignment.ShardInfo.Replicas))
+	for _, replicaID := range assignment.ShardInfo.Replicas {
+		desired[replicaID] = struct{}{}
+	}
+	if len(desired) == 0 {
+		return
+	}
+
+	membership, err := m.getMembership(shardID)
+	if err != nil {
+		log.Printf("ShardManager: Failed to get membership for shard %d: %v", shardID, err)
+		return
+	}
+
+	if _, ok := desired[m.nodeID]; !ok {
+		target := pickLeaderTransferTarget(desired, membership, m.nodeID)
+		if target != 0 {
+			if err := m.nodeHost.RequestLeaderTransfer(shardID, target); err != nil {
+				log.Printf("ShardManager: Leader transfer request failed for shard %d: %v", shardID, err)
+			}
+		}
+		return
+	}
+
+	for nodeID := range desired {
+		if _, ok := membership.Nodes[nodeID]; ok {
+			continue
+		}
+		addr := assignment.InitialMembers[nodeID]
+		if addr == "" {
+			log.Printf("ShardManager: Missing raft address for node %d in shard %d, skipping add", nodeID, shardID)
+			continue
+		}
+		if err := m.requestAddNode(shardID, nodeID, addr, membership.ConfigChangeID); err != nil {
+			log.Printf("ShardManager: Failed to add node %d to shard %d: %v", nodeID, shardID, err)
+			return
+		}
+		if membership, err = m.getMembership(shardID); err != nil {
+			log.Printf("ShardManager: Failed to refresh membership for shard %d: %v", shardID, err)
+			return
+		}
+	}
+
+	for nodeID := range membership.Nodes {
+		if _, ok := desired[nodeID]; ok {
+			continue
+		}
+		if err := m.requestDeleteNode(shardID, nodeID, membership.ConfigChangeID); err != nil {
+			log.Printf("ShardManager: Failed to remove node %d from shard %d: %v", nodeID, shardID, err)
+			return
+		}
+		if membership, err = m.getMembership(shardID); err != nil {
+			log.Printf("ShardManager: Failed to refresh membership for shard %d: %v", shardID, err)
+			return
+		}
+	}
+}
+
+func (m *Manager) getMembership(shardID uint64) (*dragonboat.Membership, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return m.nodeHost.SyncGetClusterMembership(ctx, shardID)
+}
+
+func (m *Manager) requestAddNode(shardID uint64, nodeID uint64, addr string, cfgChangeID uint64) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return m.nodeHost.SyncRequestAddNode(ctx, shardID, nodeID, addr, cfgChangeID)
+}
+
+func (m *Manager) requestDeleteNode(shardID uint64, nodeID uint64, cfgChangeID uint64) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return m.nodeHost.SyncRequestDeleteNode(ctx, shardID, nodeID, cfgChangeID)
+}
+
+func pickLeaderTransferTarget(desired map[uint64]struct{}, membership *dragonboat.Membership, self uint64) uint64 {
+	for nodeID := range desired {
+		if nodeID == self {
+			continue
+		}
+		if _, ok := membership.Nodes[nodeID]; ok {
+			return nodeID
+		}
+	}
+	return 0
 }
 
 // IsShardReady checks if a specific shard is ready to be used on this node.
@@ -197,4 +360,51 @@ func (m *Manager) GetShardsForCollection(collection string) []uint64 {
 		}
 	}
 	return ids
+}
+
+// GetShardMembershipInfo returns membership info for shards where this node is leader.
+func (m *Manager) GetShardMembershipInfo() []*placementdriver.ShardMembershipInfo {
+	shardIDs := m.GetShards()
+	now := time.Now()
+	infos := make([]*placementdriver.ShardMembershipInfo, 0)
+
+	for _, shardID := range shardIDs {
+		leaderID, valid, err := m.nodeHost.GetLeaderID(shardID)
+		if err != nil || !valid || leaderID != m.nodeID {
+			continue
+		}
+		if !m.shouldReportMembership(shardID, now) {
+			continue
+		}
+		membership, err := m.getMembership(shardID)
+		if err != nil {
+			log.Printf("ShardManager: Failed to get membership for shard %d: %v", shardID, err)
+			continue
+		}
+		nodeIDs := make([]uint64, 0, len(membership.Nodes))
+		for nodeID := range membership.Nodes {
+			nodeIDs = append(nodeIDs, nodeID)
+		}
+		infos = append(infos, &placementdriver.ShardMembershipInfo{
+			ShardId:        shardID,
+			ConfigChangeId: membership.ConfigChangeID,
+			NodeIds:        nodeIDs,
+		})
+	}
+
+	return infos
+}
+
+const membershipReportInterval = 15 * time.Second
+
+func (m *Manager) shouldReportMembership(shardID uint64, now time.Time) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	last := m.membershipReportedAt[shardID]
+	if !last.IsZero() && now.Sub(last) < membershipReportInterval {
+		return false
+	}
+	m.membershipReportedAt[shardID] = now
+	return true
 }

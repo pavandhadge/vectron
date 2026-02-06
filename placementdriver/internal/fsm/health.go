@@ -47,6 +47,9 @@ func (f *FSM) IsWorkerHealthy(workerID uint64) bool {
 		return false
 	}
 
+	if worker.State != WorkerStateReady {
+		return false
+	}
 	return time.Since(worker.LastHeartbeat) < WorkerTimeout
 }
 
@@ -57,11 +60,25 @@ func (f *FSM) GetHealthyWorkers() []WorkerInfo {
 
 	var healthy []WorkerInfo
 	for _, worker := range f.Workers {
-		if time.Since(worker.LastHeartbeat) < WorkerTimeout {
+		if worker.State == WorkerStateReady && time.Since(worker.LastHeartbeat) < WorkerTimeout {
 			healthy = append(healthy, worker)
 		}
 	}
 	return healthy
+}
+
+// GetDrainingWorkers returns workers marked as draining.
+func (f *FSM) GetDrainingWorkers() []WorkerInfo {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	var draining []WorkerInfo
+	for _, worker := range f.Workers {
+		if worker.State == WorkerStateDraining {
+			draining = append(draining, worker)
+		}
+	}
+	return draining
 }
 
 // GetUnhealthyWorkers returns a list of workers that have timed out
@@ -124,6 +141,23 @@ func (f *FSM) GetShardsOnWorker(workerID uint64) []*ShardInfo {
 	return shards
 }
 
+// IsShardRunningOnWorker checks if a worker reports a shard as running.
+func (f *FSM) IsShardRunningOnWorker(workerID uint64, shardID uint64) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	worker, ok := f.Workers[workerID]
+	if !ok {
+		return false
+	}
+	for _, runningID := range worker.RunningShards {
+		if runningID == shardID {
+			return true
+		}
+	}
+	return false
+}
+
 // GetUnderReplicatedShards returns shards that have fewer healthy replicas than required
 func (f *FSM) GetUnderReplicatedShards() []*ShardInfo {
 	f.mu.RLock()
@@ -135,17 +169,14 @@ func (f *FSM) GetUnderReplicatedShards() []*ShardInfo {
 			healthyCount := 0
 			for _, replicaID := range shard.Replicas {
 				if worker, ok := f.Workers[replicaID]; ok {
-					if time.Since(worker.LastHeartbeat) < WorkerTimeout {
+					if worker.State == WorkerStateReady && time.Since(worker.LastHeartbeat) < WorkerTimeout {
 						healthyCount++
 					}
 				}
 			}
 
-			// Consider under-replicated if less than min(DefaultReplicationFactor, original count)
+			// Consider under-replicated if below the default replication factor
 			targetReplicas := DefaultReplicationFactor
-			if len(shard.Replicas) < targetReplicas {
-				targetReplicas = len(shard.Replicas)
-			}
 
 			if healthyCount < targetReplicas {
 				underReplicated = append(underReplicated, shard)
@@ -165,7 +196,7 @@ func (f *FSM) CountHealthyReplicas(shardID uint64) int {
 			healthyCount := 0
 			for _, replicaID := range shard.Replicas {
 				if worker, ok := f.Workers[replicaID]; ok {
-					if time.Since(worker.LastHeartbeat) < WorkerTimeout {
+					if worker.State == WorkerStateReady && time.Since(worker.LastHeartbeat) < WorkerTimeout {
 						healthyCount++
 					}
 				}
@@ -221,7 +252,7 @@ func (f *FSM) GetHealthReport() *HealthReport {
 
 	// Count worker health
 	for _, worker := range f.Workers {
-		if time.Since(worker.LastHeartbeat) < WorkerTimeout {
+		if worker.State == WorkerStateReady && time.Since(worker.LastHeartbeat) < WorkerTimeout {
 			report.HealthyWorkers++
 		} else {
 			report.UnhealthyWorkers++
@@ -240,7 +271,7 @@ func (f *FSM) GetHealthReport() *HealthReport {
 			healthyCount := 0
 			for _, replicaID := range shard.Replicas {
 				if worker, ok := f.Workers[replicaID]; ok {
-					if time.Since(worker.LastHeartbeat) < WorkerTimeout {
+					if worker.State == WorkerStateReady && time.Since(worker.LastHeartbeat) < WorkerTimeout {
 						healthyCount++
 					}
 				}
@@ -251,9 +282,6 @@ func (f *FSM) GetHealthReport() *HealthReport {
 			}
 
 			targetReplicas := DefaultReplicationFactor
-			if len(shard.Replicas) < targetReplicas {
-				targetReplicas = len(shard.Replicas)
-			}
 
 			if healthyCount < targetReplicas {
 				report.UnderReplicatedShards = append(report.UnderReplicatedShards, shard)

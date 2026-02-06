@@ -1792,12 +1792,27 @@ func (s *UltimateE2ETest) killProcessOnPort(port int) {
 }
 
 func (s *UltimateE2ETest) ensureTestCollection() {
-	// Try to create collection (ignore if exists)
-	s.apigwClient.CreateCollection(s.ctx, &apigatewaypb.CreateCollectionRequest{
-		Name:      testCollectionName,
-		Dimension: vectorDimension,
-		Distance:  "cosine",
-	})
+	s.ensureAuthenticated(s.t)
+	ctx := s.getAuthenticatedContext()
+	deadline := time.Now().Add(30 * time.Second)
+
+	for time.Now().Before(deadline) {
+		_, _ = s.apigwClient.CreateCollection(ctx, &apigatewaypb.CreateCollectionRequest{
+			Name:      testCollectionName,
+			Dimension: vectorDimension,
+			Distance:  "cosine",
+		})
+
+		resp, err := s.apigwClient.ListCollections(ctx, &apigatewaypb.ListCollectionsRequest{})
+		if err == nil {
+			for _, name := range resp.Collections {
+				if name == testCollectionName {
+					return
+				}
+			}
+		}
+		time.Sleep(1 * time.Second)
+	}
 }
 
 func (s *UltimateE2ETest) getWorkersFromPD() ([]*placementpb.WorkerInfo, error) {

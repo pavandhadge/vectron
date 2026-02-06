@@ -106,12 +106,17 @@ func (r *Reconciler) reconcile() {
 		r.repairUnderReplicatedShards(healthReport.UnderReplicatedShards)
 	}
 
-	// Step 2: Clean up dead workers
+	// Step 2: Remove dead replicas when safe (after repair)
+	if r.config.EnableDeadWorkerCleanup && len(healthReport.DeadWorkers) > 0 {
+		r.cleanupDeadReplicas(healthReport.DeadWorkers)
+	}
+
+	// Step 3: Clean up dead workers
 	if r.config.EnableDeadWorkerCleanup && len(healthReport.DeadWorkers) > 0 {
 		r.cleanupDeadWorkers(healthReport.DeadWorkers)
 	}
 
-	// Step 3: Check for leaderless shards and trigger re-election
+	// Step 4: Check for leaderless shards and trigger re-election
 	r.checkLeaderlessShards()
 
 	// Step 4: Log background rebalancing status (if enabled)
@@ -150,13 +155,19 @@ func (r *Reconciler) repairUnderReplicatedShards(shards []*fsm.ShardInfo) {
 
 		// Calculate how many new replicas we need
 		targetReplicas := fsm.DefaultReplicationFactor
-		if len(shard.Replicas) < targetReplicas {
-			targetReplicas = len(shard.Replicas)
-		}
 
 		needed := targetReplicas - len(existingHealthyReplicas)
 		if needed <= 0 {
 			continue
+		}
+
+		availableSlots := fsm.MaxReplicationFactor - len(shard.Replicas)
+		if availableSlots <= 0 {
+			fmt.Printf("  ⚠️  Shard %d at max replicas (%d), skipping repair\n", shard.ShardID, fsm.MaxReplicationFactor)
+			continue
+		}
+		if needed > availableSlots {
+			needed = availableSlots
 		}
 
 		fmt.Printf("  📦 Shard %d: %d healthy of %d target, need %d new replicas\n",
@@ -210,35 +221,44 @@ func (r *Reconciler) repairUnderReplicatedShards(shards []*fsm.ShardInfo) {
 
 // addShardReplicas proposes adding new replicas to a shard via Raft
 func (r *Reconciler) addShardReplicas(shardID uint64, newReplicas []uint64) error {
-	// Create a custom command for adding replicas
-	// Note: This requires extending the FSM command types
-
-	payload := struct {
-		ShardID     uint64   `json:"shard_id"`
-		NewReplicas []uint64 `json:"new_replicas"`
-	}{
-		ShardID:     shardID,
-		NewReplicas: newReplicas,
+	for _, replicaID := range newReplicas {
+		payload := fsm.AddShardReplicaPayload{
+			ShardID:   shardID,
+			ReplicaID: replicaID,
+		}
+		payloadBytes, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("failed to marshal add replica payload: %w", err)
+		}
+		cmd := fsm.Command{Type: fsm.AddShardReplica, Payload: payloadBytes}
+		cmdBytes, err := json.Marshal(cmd)
+		if err != nil {
+			return fmt.Errorf("failed to marshal add replica command: %w", err)
+		}
+		if _, err := r.server.raft.Propose(cmdBytes, raftTimeout); err != nil {
+			return fmt.Errorf("failed to propose add replica for shard %d: %w", shardID, err)
+		}
 	}
+	return nil
+}
 
+func (r *Reconciler) removeShardReplica(shardID uint64, replicaID uint64) error {
+	payload := fsm.RemoveShardReplicaPayload{
+		ShardID:   shardID,
+		ReplicaID: replicaID,
+	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("failed to marshal payload: %w", err)
+		return fmt.Errorf("failed to marshal remove replica payload: %w", err)
 	}
-
-	// Use UpdateShardLeader command type but with different payload
-	// In production, you'd add a dedicated AddShardReplica command type
-	cmd := fsm.Command{Type: fsm.UpdateShardLeader, Payload: payloadBytes}
+	cmd := fsm.Command{Type: fsm.RemoveShardReplica, Payload: payloadBytes}
 	cmdBytes, err := json.Marshal(cmd)
 	if err != nil {
-		return fmt.Errorf("failed to marshal command: %w", err)
+		return fmt.Errorf("failed to marshal remove replica command: %w", err)
 	}
-
-	_, err = r.server.raft.Propose(cmdBytes, raftTimeout)
-	if err != nil {
-		return fmt.Errorf("failed to propose command: %w", err)
+	if _, err := r.server.raft.Propose(cmdBytes, raftTimeout); err != nil {
+		return fmt.Errorf("failed to propose remove replica for shard %d: %w", shardID, err)
 	}
-
 	return nil
 }
 
@@ -264,11 +284,44 @@ func (r *Reconciler) cleanupDeadWorkers(deadWorkers []fsm.WorkerInfo) {
 	}
 }
 
+// cleanupDeadReplicas removes dead worker replicas when we already have enough healthy replicas.
+func (r *Reconciler) cleanupDeadReplicas(deadWorkers []fsm.WorkerInfo) {
+	fmt.Printf("🧹 Cleaning up replicas from %d dead workers...\n", len(deadWorkers))
+
+	for _, worker := range deadWorkers {
+		shards := r.server.fsm.GetShardsOnWorker(worker.ID)
+		for _, shard := range shards {
+			if len(shard.Replicas) <= fsm.DefaultReplicationFactor {
+				continue
+			}
+			if r.server.fsm.CountHealthyReplicas(shard.ShardID) < fsm.DefaultReplicationFactor {
+				continue
+			}
+			if err := r.removeShardReplica(shard.ShardID, worker.ID); err != nil {
+				fmt.Printf("  ❌ Failed to remove dead replica %d from shard %d: %v\n",
+					worker.ID, shard.ShardID, err)
+			} else {
+				fmt.Printf("  ✅ Removed dead replica %d from shard %d\n", worker.ID, shard.ShardID)
+			}
+		}
+	}
+}
+
 // removeWorker proposes removing a worker from the cluster
 func (r *Reconciler) removeWorker(workerID uint64) error {
-	// Note: This requires adding a RemoveWorker command type to the FSM
-	// For now, we just log it
-	fmt.Printf("  📝 Worker %d removal would be proposed here (command type not implemented)\n", workerID)
+	payload := fsm.RemoveWorkerPayload{WorkerID: workerID}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal remove worker payload: %w", err)
+	}
+	cmd := fsm.Command{Type: fsm.RemoveWorker, Payload: payloadBytes}
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to marshal remove worker command: %w", err)
+	}
+	if _, err := r.server.raft.Propose(cmdBytes, raftTimeout); err != nil {
+		return fmt.Errorf("failed to propose remove worker command: %w", err)
+	}
 	return nil
 }
 
@@ -443,12 +496,39 @@ type RebalanceManager struct {
 	movesInProgress     int
 	movesCompletedToday int
 	totalBytesMoved     int64
+	inflightMoves       map[uint64]*inflightMove
 
 	// Compaction detection
 	recentMoveLatencies  []time.Duration
 	compactionDetected   bool
 	compactionBackoffEnd time.Time
 }
+
+type inflightMove struct {
+	move      RebalanceMove
+	startedAt time.Time
+	lastProgress time.Time
+	nextAttempt time.Time
+	attempts  int
+	addedByMove bool
+	phase     movePhase
+}
+
+type movePhase int
+
+const (
+	movePhaseAdd movePhase = iota
+	movePhaseWaitTarget
+	movePhaseRemove
+	movePhaseWaitRemoval
+)
+
+const (
+	moveRetryBase       = 2 * time.Second
+	moveRetryMax        = 30 * time.Second
+	moveOverallTimeout  = 30 * time.Minute
+	moveProgressTimeout = 10 * time.Minute
+)
 
 // NewRebalanceManager creates a new rebalancing manager
 func NewRebalanceManager(s *Server, config *RebalanceConfig) *RebalanceManager {
@@ -461,6 +541,7 @@ func NewRebalanceManager(s *Server, config *RebalanceConfig) *RebalanceManager {
 		config:              config,
 		stopCh:              make(chan struct{}),
 		recentMoveLatencies: make([]time.Duration, 0, 10),
+		inflightMoves:       make(map[uint64]*inflightMove),
 	}
 }
 
@@ -510,10 +591,13 @@ func (rm *RebalanceManager) runRebalanceCycle() {
 		fmt.Println("▶️  Compaction backoff ended, resuming rebalancing")
 	}
 
-	// Check if we have capacity for more moves
-	if rm.movesInProgress >= rm.config.MaxConcurrentMoves {
+	// Advance any inflight moves (add replica -> wait -> remove source)
+	rm.advanceMovesLocked()
+
+	availableSlots := rm.config.MaxConcurrentMoves - len(rm.inflightMoves)
+	if availableSlots <= 0 {
 		fmt.Printf("⏸️  Rebalancing skipped: %d moves already in progress (max: %d)\n",
-			rm.movesInProgress, rm.config.MaxConcurrentMoves)
+			len(rm.inflightMoves), rm.config.MaxConcurrentMoves)
 		return
 	}
 
@@ -528,25 +612,31 @@ func (rm *RebalanceManager) runRebalanceCycle() {
 	if movesToExecute > len(moves) {
 		movesToExecute = len(moves)
 	}
-	if movesToExecute > rm.config.MaxConcurrentMoves-rm.movesInProgress {
-		movesToExecute = rm.config.MaxConcurrentMoves - rm.movesInProgress
+	if movesToExecute > availableSlots {
+		movesToExecute = availableSlots
 	}
 
-	fmt.Printf("🔄 Executing %d shard moves (identified %d total, %d in progress)\n",
-		movesToExecute, len(moves), rm.movesInProgress)
+	fmt.Printf("🔄 Executing up to %d shard moves (identified %d total, %d in progress)\n",
+		movesToExecute, len(moves), len(rm.inflightMoves))
 
-	for i := 0; i < movesToExecute; i++ {
-		move := moves[i]
-		if err := rm.executeMove(move); err != nil {
-			fmt.Printf("❌ Failed to move shard %d: %v\n", move.ShardID, err)
-		} else {
-			rm.movesInProgress++
-			rm.movesCompletedToday++
-			fmt.Printf("✅ Initiated move: shard %d from worker %d to %d\n",
-				move.ShardID, move.SourceWorkerID, move.TargetWorkerID)
+	started := 0
+	for _, move := range moves {
+		if started >= movesToExecute {
+			break
 		}
+		if _, ok := rm.inflightMoves[move.ShardID]; ok {
+			continue
+		}
+		if err := rm.executeMove(move); err != nil {
+			fmt.Printf("❌ Failed to start move for shard %d: %v\n", move.ShardID, err)
+			continue
+		}
+		started++
+		fmt.Printf("✅ Initiated move: shard %d from worker %d to %d\n",
+			move.ShardID, move.SourceWorkerID, move.TargetWorkerID)
 	}
 
+	rm.movesInProgress = len(rm.inflightMoves)
 	rm.lastRebalanceTime = time.Now()
 }
 
@@ -565,7 +655,6 @@ func (rm *RebalanceManager) identifyRebalanceMoves() []RebalanceMove {
 
 	// Get current distribution
 	workerShardCounts := make(map[uint64]int)
-	workerLoadScores := make(map[uint64]float64)
 	totalShards := 0
 
 	healthyWorkers := rm.server.fsm.GetHealthyWorkers()
@@ -582,6 +671,34 @@ func (rm *RebalanceManager) identifyRebalanceMoves() []RebalanceMove {
 		}
 	}
 
+	// Drain workers: prioritize moving all shards off draining nodes.
+	drainingWorkers := rm.server.fsm.GetDrainingWorkers()
+	if len(drainingWorkers) > 0 {
+		var candidateIDs []uint64
+		for _, worker := range healthyWorkers {
+			candidateIDs = append(candidateIDs, worker.ID)
+		}
+		for _, draining := range drainingWorkers {
+			shards := rm.server.fsm.GetShardsOnWorker(draining.ID)
+			for _, shard := range shards {
+				if _, ok := rm.inflightMoves[shard.ShardID]; ok {
+					continue
+				}
+				targetID := rm.findBestTarget(shard.ShardID, candidateIDs, workerShardCounts)
+				if targetID == 0 || targetID == draining.ID {
+					continue
+				}
+				moves = append(moves, RebalanceMove{
+					ShardID:        shard.ShardID,
+					SourceWorkerID: draining.ID,
+					TargetWorkerID: targetID,
+					Bytes:          0,
+					Reason:         "drain",
+				})
+			}
+		}
+	}
+
 	// Calculate average load
 	avgShards := float64(totalShards*fsm.DefaultReplicationFactor) / float64(len(healthyWorkers))
 	threshold := avgShards * rm.config.ImbalanceThreshold
@@ -590,8 +707,6 @@ func (rm *RebalanceManager) identifyRebalanceMoves() []RebalanceMove {
 	var overloaded, underloaded []uint64
 	for _, worker := range healthyWorkers {
 		count := workerShardCounts[worker.ID]
-		workerLoadScores[worker.ID] = float64(count)
-
 		if float64(count) > threshold {
 			overloaded = append(overloaded, worker.ID)
 		} else if float64(count) < avgShards/rm.config.ImbalanceThreshold {
@@ -614,6 +729,9 @@ func (rm *RebalanceManager) identifyRebalanceMoves() []RebalanceMove {
 		for _, shard := range movableShards {
 			if len(moves) >= rm.config.MaxMovesPerInterval*2 {
 				break // Don't plan too many moves at once
+			}
+			if _, ok := rm.inflightMoves[shard.ShardID]; ok {
+				continue
 			}
 
 			// Find best target (least loaded worker that doesn't already have this shard)
@@ -641,6 +759,9 @@ func (rm *RebalanceManager) identifyRebalanceMoves() []RebalanceMove {
 	if len(healthReport.HotShards) > 0 {
 		fmt.Printf("🔥 Detected %d hot shards, planning targeted moves...\n", len(healthReport.HotShards))
 		for _, hotShard := range healthReport.HotShards {
+			if _, ok := rm.inflightMoves[hotShard.ShardID]; ok {
+				continue
+			}
 			// Find a target worker that doesn't have this shard
 			targetID := rm.findBestTargetForHotShard(hotShard.ShardID, healthyWorkers, workerShardCounts)
 			if targetID != 0 && targetID != hotShard.WorkerID {
@@ -690,7 +811,11 @@ func (rm *RebalanceManager) findBestTargetForHotShard(shardID uint64, healthyWor
 		}
 
 		// Calculate load ratio (current shards / capacity)
-		loadRatio := float64(counts[worker.ID]) / float64(worker.TotalCapacity)
+		capacity := worker.TotalCapacity
+		if capacity <= 0 {
+			capacity = 1
+		}
+		loadRatio := float64(counts[worker.ID]) / float64(capacity)
 		if loadRatio < minLoad {
 			minLoad = loadRatio
 			bestTarget = worker.ID
@@ -767,40 +892,226 @@ func (rm *RebalanceManager) findBestTarget(shardID uint64, candidates []uint64, 
 
 // executeMove proposes a shard move via Raft
 func (rm *RebalanceManager) executeMove(move RebalanceMove) error {
-	payload := fsm.MoveShardPayload{
-		ShardID:        move.ShardID,
-		SourceWorkerID: move.SourceWorkerID,
-		TargetWorkerID: move.TargetWorkerID,
+	if _, ok := rm.inflightMoves[move.ShardID]; ok {
+		return nil
+	}
+	if move.SourceWorkerID == move.TargetWorkerID {
+		return fmt.Errorf("source and target are the same for shard %d", move.ShardID)
+	}
+	if !rm.server.fsm.IsWorkerHealthy(move.TargetWorkerID) {
+		return fmt.Errorf("target worker %d is not healthy", move.TargetWorkerID)
 	}
 
+	shard, ok := rm.getShardByID(move.ShardID)
+	if !ok {
+		return fmt.Errorf("shard %d not found", move.ShardID)
+	}
+
+	addedByMove := !containsReplica(shard.Replicas, move.TargetWorkerID)
+	if addedByMove {
+		if err := rm.addShardReplica(move.ShardID, move.TargetWorkerID); err != nil {
+			return err
+		}
+	}
+
+	phase := movePhaseWaitTarget
+	now := time.Now()
+	rm.inflightMoves[move.ShardID] = &inflightMove{
+		move:         move,
+		startedAt:    now,
+		lastProgress: now,
+		nextAttempt:  now,
+		addedByMove:  addedByMove,
+		phase:        phase,
+	}
+	return nil
+}
+
+func (rm *RebalanceManager) advanceMovesLocked() {
+	now := time.Now()
+	for shardID, inflight := range rm.inflightMoves {
+		shard, ok := rm.getShardByID(shardID)
+		if !ok {
+			delete(rm.inflightMoves, shardID)
+			continue
+		}
+
+		if now.Sub(inflight.startedAt) > moveOverallTimeout {
+			if now.Before(inflight.nextAttempt) {
+				continue
+			}
+			if rm.tryRollbackMove(shard, inflight, now) {
+				delete(rm.inflightMoves, shardID)
+			}
+			continue
+		}
+
+		if now.Before(inflight.nextAttempt) {
+			continue
+		}
+
+		switch inflight.phase {
+		case movePhaseAdd:
+			if containsReplica(shard.Replicas, inflight.move.TargetWorkerID) {
+				rm.advanceMovePhase(inflight, movePhaseWaitTarget, now)
+				continue
+			}
+			if err := rm.addShardReplica(shardID, inflight.move.TargetWorkerID); err != nil {
+				fmt.Printf("❌ Failed to add replica for shard %d: %v\n", shardID, err)
+				rm.scheduleRetry(inflight, now)
+				continue
+			}
+			rm.advanceMovePhase(inflight, movePhaseWaitTarget, now)
+		case movePhaseWaitTarget:
+			if !rm.server.fsm.IsWorkerHealthy(inflight.move.TargetWorkerID) {
+				continue
+			}
+			if !rm.server.fsm.IsShardRunningOnWorker(inflight.move.TargetWorkerID, shardID) {
+				if now.Sub(inflight.lastProgress) > moveProgressTimeout {
+					fmt.Printf("⏳ Move for shard %d waiting on target worker %d to start\n",
+						shardID, inflight.move.TargetWorkerID)
+				}
+				continue
+			}
+			if member, ok := rm.server.isShardMember(shardID, inflight.move.TargetWorkerID); !ok || !member {
+				rm.scheduleRetry(inflight, now)
+				continue
+			}
+			rm.advanceMovePhase(inflight, movePhaseRemove, now)
+		case movePhaseRemove:
+			if !containsReplica(shard.Replicas, inflight.move.SourceWorkerID) {
+				rm.advanceMovePhase(inflight, movePhaseWaitRemoval, now)
+				continue
+			}
+			if err := rm.removeShardReplica(shardID, inflight.move.SourceWorkerID); err != nil {
+				fmt.Printf("❌ Failed to remove replica %d from shard %d: %v\n",
+					inflight.move.SourceWorkerID, shardID, err)
+				rm.scheduleRetry(inflight, now)
+				continue
+			}
+			rm.advanceMovePhase(inflight, movePhaseWaitRemoval, now)
+		case movePhaseWaitRemoval:
+			if member, ok := rm.server.isShardMember(shardID, inflight.move.SourceWorkerID); !ok || member {
+				rm.scheduleRetry(inflight, now)
+				continue
+			}
+			if shard.LeaderID == inflight.move.SourceWorkerID {
+				rm.scheduleRetry(inflight, now)
+				continue
+			}
+			delete(rm.inflightMoves, shardID)
+			rm.movesCompletedToday++
+		}
+	}
+	rm.movesInProgress = len(rm.inflightMoves)
+}
+
+func (rm *RebalanceManager) scheduleRetry(inflight *inflightMove, now time.Time) {
+	if inflight.attempts < 0 {
+		inflight.attempts = 0
+	}
+	backoff := moveRetryBase
+	if inflight.attempts > 0 {
+		shift := inflight.attempts
+		if shift > 10 {
+			shift = 10
+		}
+		backoff = moveRetryBase << shift
+	}
+	if backoff > moveRetryMax {
+		backoff = moveRetryMax
+	}
+	inflight.attempts++
+	inflight.nextAttempt = now.Add(backoff)
+}
+
+func (rm *RebalanceManager) advanceMovePhase(inflight *inflightMove, phase movePhase, now time.Time) {
+	inflight.phase = phase
+	inflight.lastProgress = now
+	inflight.attempts = 0
+	inflight.nextAttempt = now
+}
+
+func (rm *RebalanceManager) tryRollbackMove(shard *fsm.ShardInfo, inflight *inflightMove, now time.Time) bool {
+	if !containsReplica(shard.Replicas, inflight.move.SourceWorkerID) {
+		return true
+	}
+	if !inflight.addedByMove {
+		return true
+	}
+	if !containsReplica(shard.Replicas, inflight.move.TargetWorkerID) {
+		return true
+	}
+	if len(shard.Replicas) <= fsm.DefaultReplicationFactor {
+		return true
+	}
+	if err := rm.removeShardReplica(shard.ShardID, inflight.move.TargetWorkerID); err != nil {
+		fmt.Printf("❌ Failed to rollback move for shard %d: %v\n", shard.ShardID, err)
+		rm.scheduleRetry(inflight, now)
+		return false
+	}
+	return true
+}
+
+func (rm *RebalanceManager) addShardReplica(shardID, replicaID uint64) error {
+	payload := fsm.AddShardReplicaPayload{
+		ShardID:   shardID,
+		ReplicaID: replicaID,
+	}
+	return rm.proposeCommand(fsm.AddShardReplica, payload)
+}
+
+func (rm *RebalanceManager) removeShardReplica(shardID, replicaID uint64) error {
+	payload := fsm.RemoveShardReplicaPayload{
+		ShardID:   shardID,
+		ReplicaID: replicaID,
+	}
+	return rm.proposeCommand(fsm.RemoveShardReplica, payload)
+}
+
+func (rm *RebalanceManager) proposeCommand(cmdType fsm.CommandType, payload interface{}) error {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("failed to marshal move payload: %w", err)
+		return fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
-	cmd := fsm.Command{Type: fsm.MoveShard, Payload: payloadBytes}
+	cmd := fsm.Command{Type: cmdType, Payload: payloadBytes}
 	cmdBytes, err := json.Marshal(cmd)
 	if err != nil {
-		return fmt.Errorf("failed to marshal move command: %w", err)
+		return fmt.Errorf("failed to marshal command: %w", err)
 	}
 
-	// Use a shorter timeout for moves to detect slow operations (possible compaction)
 	start := time.Now()
 	_, err = rm.server.raft.Propose(cmdBytes, 10*time.Second)
 	duration := time.Since(start)
 
 	if err != nil {
-		// Check if this might be due to compaction (slow operation)
 		if duration > 5*time.Second {
 			rm.detectCompaction(duration)
 		}
-		return fmt.Errorf("failed to propose move: %w", err)
+		return fmt.Errorf("failed to propose command: %w", err)
 	}
 
-	// Track latency for compaction detection
 	rm.trackMoveLatency(duration)
-
 	return nil
+}
+
+func (rm *RebalanceManager) getShardByID(shardID uint64) (*fsm.ShardInfo, bool) {
+	for _, collection := range rm.server.fsm.GetCollections() {
+		if shard, ok := collection.Shards[shardID]; ok {
+			return shard, true
+		}
+	}
+	return nil, false
+}
+
+func containsReplica(replicas []uint64, replicaID uint64) bool {
+	for _, id := range replicas {
+		if id == replicaID {
+			return true
+		}
+	}
+	return false
 }
 
 // trackMoveLatency records move latency for compaction detection
@@ -851,9 +1162,7 @@ func (rm *RebalanceManager) MoveCompleted(success bool, bytesMoved int64) {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
-	if rm.movesInProgress > 0 {
-		rm.movesInProgress--
-	}
+	rm.movesInProgress = len(rm.inflightMoves)
 
 	if success {
 		rm.totalBytesMoved += bytesMoved

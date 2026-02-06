@@ -12,6 +12,7 @@ import (
 	"hash/fnv"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/pavandhadge/vectron/placementdriver/internal/fsm"
@@ -33,6 +34,9 @@ type Server struct {
 	pb.UnimplementedPlacementServiceServer
 	raft *raft.Node // The underlying Raft node for proposing state changes.
 	fsm  *fsm.FSM   // A direct reference to the FSM for read-only operations.
+
+	membershipMu   sync.RWMutex
+	shardMembership map[uint64]shardMembershipSnapshot
 }
 
 // NewServer creates a new instance of the placement driver gRPC server.
@@ -40,6 +44,7 @@ func NewServer(r *raft.Node, f *fsm.FSM) *Server {
 	return &Server{
 		raft: r,
 		fsm:  f,
+		shardMembership: make(map[uint64]shardMembershipSnapshot),
 	}
 }
 
@@ -98,7 +103,17 @@ func (s *Server) RegisterWorker(ctx context.Context, req *pb.RegisterWorkerReque
 type ShardAssignment struct {
 	ShardInfo      *fsm.ShardInfo    `json:"shard_info"`
 	InitialMembers map[uint64]string `json:"initial_members"` // map[nodeID]raftAddress
+	Bootstrap      bool              `json:"bootstrap"`       // Whether this replica should bootstrap the shard.
 }
+
+type shardMembershipSnapshot struct {
+	nodeIDs        map[uint64]struct{}
+	configChangeID uint64
+	leaderWorkerID uint64
+	updatedAt      time.Time
+}
+
+const membershipStaleAfter = 30 * time.Second
 
 // Heartbeat is called periodically by workers to signal they are alive.
 // It also serves as the mechanism for the placement driver to send shard assignments to workers.
@@ -118,6 +133,7 @@ func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.H
 		ActiveShards:       req.GetActiveShards(),
 		VectorCount:        req.GetVectorCount(),
 		MemoryBytes:        req.GetMemoryBytes(),
+		RunningShards:      req.GetRunningShards(),
 	}
 	payloadBytes, err := json.Marshal(hbPayload)
 	if err != nil {
@@ -160,8 +176,11 @@ func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.H
 		}
 	}
 
+	leaderMap := make(map[uint64]uint64, len(req.ShardLeaderInfo))
+
 	// Propose commands to update shard leader information.
 	for _, leaderInfo := range req.ShardLeaderInfo {
+		leaderMap[leaderInfo.ShardId] = leaderInfo.LeaderId
 		leaderPayload := fsm.UpdateShardLeaderPayload{
 			ShardID:  leaderInfo.ShardId,
 			LeaderID: leaderInfo.LeaderId,
@@ -181,6 +200,9 @@ func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.H
 			fmt.Printf("Warning: failed to propose leader update for shard %d: %v\n", leaderInfo.ShardId, err)
 		}
 	}
+
+	// Update shard membership info (leader-reported).
+	s.updateShardMembership(workerID, req.GetShardMembership(), leaderMap)
 
 	// Read the current state from the FSM to find all shards assigned to this worker.
 	assignments := make([]*ShardAssignment, 0)
@@ -211,9 +233,20 @@ func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.H
 					}
 				}
 
+				bootstrap := false
+				if !shard.Bootstrapped && len(shard.BootstrapMembers) > 0 {
+					for _, memberID := range shard.BootstrapMembers {
+						if memberID == workerID {
+							bootstrap = true
+							break
+						}
+					}
+				}
+
 				assignments = append(assignments, &ShardAssignment{
 					ShardInfo:      shard,
 					InitialMembers: initialMembers,
+					Bootstrap:      bootstrap,
 				})
 			}
 		}
@@ -226,8 +259,9 @@ func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.H
 	}
 
 	return &pb.HeartbeatResponse{
-		Ok:      true,
-		Message: string(assignmentBytes),
+		Ok:               true,
+		Message:          string(assignmentBytes),
+		AssignmentsEpoch: s.fsm.GetAssignmentsEpoch(),
 	}, nil
 }
 
@@ -279,16 +313,31 @@ func (s *Server) GetWorker(ctx context.Context, req *pb.GetWorkerRequest) (*pb.G
 		return nil, status.Errorf(codes.Internal, "shard '%d' has no replicas", targetShard.ShardID)
 	}
 
-	// TODO: Return the address of the LEADER of the shard's Raft group.
-	// For now, we return the address of the first replica in the list.
-	firstReplicaID := targetShard.Replicas[0]
-	worker, ok := s.fsm.GetWorker(firstReplicaID)
-	if !ok {
-		return nil, status.Errorf(codes.Internal, "worker with ID '%d' not found for shard '%d'", firstReplicaID, targetShard.ShardID)
+	// Prefer the shard leader if known and healthy; otherwise fall back to any healthy replica.
+	var targetWorker *fsm.WorkerInfo
+	if targetShard.LeaderID != 0 {
+		if w, ok := s.fsm.GetWorker(targetShard.LeaderID); ok && s.fsm.IsWorkerHealthy(w.ID) {
+			workerCopy := w
+			targetWorker = &workerCopy
+		}
+	}
+
+	if targetWorker == nil {
+		for _, replicaID := range targetShard.Replicas {
+			if w, ok := s.fsm.GetWorker(replicaID); ok && s.fsm.IsWorkerHealthy(w.ID) {
+				workerCopy := w
+				targetWorker = &workerCopy
+				break
+			}
+		}
+	}
+
+	if targetWorker == nil {
+		return nil, status.Errorf(codes.Unavailable, "no healthy replicas available for shard '%d'", targetShard.ShardID)
 	}
 
 	return &pb.GetWorkerResponse{
-		GrpcAddress: worker.GrpcAddress,
+		GrpcAddress: targetWorker.GrpcAddress,
 		ShardId:     uint32(targetShard.ShardID),
 	}, nil
 }
@@ -309,6 +358,16 @@ func (s *Server) ListWorkers(ctx context.Context, req *pb.ListWorkersRequest) (*
 			collections = append(collections, name)
 		}
 
+		state := pb.WorkerState_WORKER_STATE_UNKNOWN
+		switch w.State {
+		case fsm.WorkerStateJoining:
+			state = pb.WorkerState_WORKER_STATE_JOINING
+		case fsm.WorkerStateReady:
+			state = pb.WorkerState_WORKER_STATE_READY
+		case fsm.WorkerStateDraining:
+			state = pb.WorkerState_WORKER_STATE_DRAINING
+		}
+
 		workerInfos = append(workerInfos, &pb.WorkerInfo{
 			WorkerId:      strconv.FormatUint(w.ID, 10),
 			GrpcAddress:   w.GrpcAddress,
@@ -317,12 +376,64 @@ func (s *Server) ListWorkers(ctx context.Context, req *pb.ListWorkersRequest) (*
 			LastHeartbeat: w.LastHeartbeat.Unix(),
 			Healthy:       s.fsm.IsWorkerHealthy(w.ID),
 			Metadata:      map[string]string{},
+			State:         state,
 		})
 	}
 
 	return &pb.ListWorkersResponse{
 		Workers: workerInfos,
 	}, nil
+}
+
+// DrainWorker marks a worker as draining (no new assignments, move shards away).
+func (s *Server) DrainWorker(ctx context.Context, req *pb.DrainWorkerRequest) (*pb.DrainWorkerResponse, error) {
+	workerID, err := strconv.ParseUint(req.GetWorkerId(), 10, 64)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid worker_id format: %v", err)
+	}
+
+	payload := fsm.UpdateWorkerStatePayload{
+		WorkerID: workerID,
+		State:    fsm.WorkerStateDraining,
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to marshal drain worker payload: %v", err)
+	}
+	cmd := fsm.Command{Type: fsm.UpdateWorkerState, Payload: payloadBytes}
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to marshal drain worker command: %v", err)
+	}
+	if _, err := s.raft.Propose(cmdBytes, raftTimeout); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to propose drain worker: %v", err)
+	}
+
+	return &pb.DrainWorkerResponse{Success: true}, nil
+}
+
+// RemoveWorker removes a worker from the cluster state (must have no shards).
+func (s *Server) RemoveWorker(ctx context.Context, req *pb.RemoveWorkerRequest) (*pb.RemoveWorkerResponse, error) {
+	workerID, err := strconv.ParseUint(req.GetWorkerId(), 10, 64)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid worker_id format: %v", err)
+	}
+
+	payload := fsm.RemoveWorkerPayload{WorkerID: workerID}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to marshal remove worker payload: %v", err)
+	}
+	cmd := fsm.Command{Type: fsm.RemoveWorker, Payload: payloadBytes}
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to marshal remove worker command: %v", err)
+	}
+	if _, err := s.raft.Propose(cmdBytes, raftTimeout); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to propose remove worker: %v", err)
+	}
+
+	return &pb.RemoveWorkerResponse{Success: true}, nil
 }
 
 func (s *Server) ListWorkersForCollection(ctx context.Context, req *pb.ListWorkersForCollectionRequest) (*pb.ListWorkersForCollectionResponse, error) {
@@ -436,4 +547,49 @@ func (s *Server) GetCollectionStatus(ctx context.Context, req *pb.GetCollectionS
 		Distance:  collection.Distance,
 		Shards:    shardStatuses,
 	}, nil
+}
+
+func (s *Server) updateShardMembership(workerID uint64, infos []*pb.ShardMembershipInfo, leaderMap map[uint64]uint64) {
+	if len(infos) == 0 {
+		return
+	}
+
+	s.membershipMu.Lock()
+	defer s.membershipMu.Unlock()
+
+	now := time.Now()
+	for _, info := range infos {
+		if info == nil {
+			continue
+		}
+		leaderID, ok := leaderMap[info.ShardId]
+		if !ok || leaderID != workerID {
+			continue
+		}
+		nodeIDs := make(map[uint64]struct{}, len(info.NodeIds))
+		for _, nodeID := range info.NodeIds {
+			nodeIDs[nodeID] = struct{}{}
+		}
+		s.shardMembership[info.ShardId] = shardMembershipSnapshot{
+			nodeIDs:        nodeIDs,
+			configChangeID: info.ConfigChangeId,
+			leaderWorkerID: workerID,
+			updatedAt:      now,
+		}
+	}
+}
+
+func (s *Server) isShardMember(shardID uint64, nodeID uint64) (bool, bool) {
+	s.membershipMu.RLock()
+	defer s.membershipMu.RUnlock()
+
+	snap, ok := s.shardMembership[shardID]
+	if !ok {
+		return false, false
+	}
+	if time.Since(snap.updatedAt) > membershipStaleAfter {
+		return false, false
+	}
+	_, exists := snap.nodeIDs[nodeID]
+	return exists, true
 }

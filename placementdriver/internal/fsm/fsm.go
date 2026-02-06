@@ -28,12 +28,20 @@ const (
 	CreateCollection
 	// UpdateWorkerHeartbeat updates the last heartbeat timestamp for a worker.
 	UpdateWorkerHeartbeat
+	// UpdateWorkerState updates a worker's lifecycle state.
+	UpdateWorkerState
+	// RemoveWorker removes a worker from the cluster state.
+	RemoveWorker
 	// UpdateShardLeader updates the leader of a shard.
 	UpdateShardLeader
 	// MoveShard initiates a shard migration from one worker to another.
 	MoveShard
 	// UpdateShardMetrics updates per-shard metrics for hot-shard detection.
 	UpdateShardMetrics
+	// AddShardReplica adds a replica to a shard's desired replica set.
+	AddShardReplica
+	// RemoveShardReplica removes a replica from a shard's desired replica set.
+	RemoveShardReplica
 )
 
 // Command is the structure that is serialized and sent to the Raft log.
@@ -64,6 +72,17 @@ type RegisterWorkerPayload struct {
 	Region string `json:"region"`
 }
 
+// UpdateWorkerStatePayload is the data for the UpdateWorkerState command.
+type UpdateWorkerStatePayload struct {
+	WorkerID uint64      `json:"worker_id"`
+	State    WorkerState `json:"state"`
+}
+
+// RemoveWorkerPayload is the data for the RemoveWorker command.
+type RemoveWorkerPayload struct {
+	WorkerID uint64 `json:"worker_id"`
+}
+
 // CreateCollectionPayload is the data for the CreateCollection command.
 type CreateCollectionPayload struct {
 	Name          string `json:"name"`
@@ -82,6 +101,7 @@ type UpdateWorkerHeartbeatPayload struct {
 	ActiveShards       int64   `json:"active_shards"`
 	VectorCount        int64   `json:"vector_count"`
 	MemoryBytes        int64   `json:"memory_bytes"`
+	RunningShards      []uint64 `json:"running_shards"`
 }
 
 // UpdateShardLeaderPayload is the data for the UpdateShardLeader command.
@@ -95,6 +115,18 @@ type MoveShardPayload struct {
 	ShardID        uint64 `json:"shard_id"`
 	SourceWorkerID uint64 `json:"source_worker_id"`
 	TargetWorkerID uint64 `json:"target_worker_id"`
+}
+
+// AddShardReplicaPayload adds a replica to a shard.
+type AddShardReplicaPayload struct {
+	ShardID   uint64 `json:"shard_id"`
+	ReplicaID uint64 `json:"replica_id"`
+}
+
+// RemoveShardReplicaPayload removes a replica from a shard.
+type RemoveShardReplicaPayload struct {
+	ShardID   uint64 `json:"shard_id"`
+	ReplicaID uint64 `json:"replica_id"`
 }
 
 // ShardMetricsPayload contains per-shard metrics for hot-shard detection
@@ -120,6 +152,8 @@ type ShardInfo struct {
 	LeaderID      uint64   `json:"leader_id"` // The current leader of the shard's Raft group.
 	Dimension     int32    `json:"dimension"`
 	Distance      string   `json:"distance"`
+	Bootstrapped  bool     `json:"bootstrapped"` // Whether the raft group has been bootstrapped.
+	BootstrapMembers []uint64 `json:"bootstrap_members"` // Initial members allowed to bootstrap.
 	// Metrics for hot-shard detection
 	QueriesPerSecond float64   `json:"queries_per_second"` // Current query rate
 	TotalQueries     int64     `json:"total_queries"`      // Cumulative query count
@@ -142,12 +176,24 @@ type PeerInfo struct {
 	APIAddr  string `json:"api_addr"`
 }
 
+// WorkerState represents the lifecycle state of a worker.
+type WorkerState int
+
+const (
+	WorkerStateUnknown WorkerState = iota
+	WorkerStateJoining
+	WorkerStateReady
+	WorkerStateDraining
+)
+
 // WorkerInfo holds information about a registered worker node.
 type WorkerInfo struct {
 	ID            uint64    `json:"id"`
 	GrpcAddress   string    `json:"grpc_address"`
 	RaftAddress   string    `json:"raft_address"`
 	LastHeartbeat time.Time `json:"last_heartbeat"`
+	State         WorkerState `json:"state"`
+	RunningShards []uint64  `json:"running_shards"`
 	// Load metrics for load-aware placement
 	CPUUsagePercent    float64 `json:"cpu_usage_percent"`
 	MemoryUsagePercent float64 `json:"memory_usage_percent"`
@@ -181,6 +227,8 @@ type FSM struct {
 	Workers map[uint64]WorkerInfo `json:"workers"`
 	// Collections stores all the collections and their shard information.
 	Collections map[string]*Collection `json:"collections"`
+	// AssignmentsEpoch is a monotonic epoch for shard assignments.
+	AssignmentsEpoch uint64 `json:"assignments_epoch"`
 	// NextShardID is a counter for generating unique shard IDs.
 	NextShardID uint64 `json:"next_shard_id"`
 	// NextWorkerID is a counter for generating unique worker IDs.
@@ -193,6 +241,7 @@ func NewFSM() *FSM {
 		Peers:        make(map[string]PeerInfo),
 		Workers:      make(map[uint64]WorkerInfo),
 		Collections:  make(map[string]*Collection),
+		AssignmentsEpoch: 1,
 		NextShardID:  1,
 		NextWorkerID: 1,
 	}
@@ -250,6 +299,24 @@ func (f *FSM) Update(entries []sm.Entry) ([]sm.Entry, error) {
 			} else {
 				f.applyUpdateWorkerHeartbeat(payload)
 			}
+		case UpdateWorkerState:
+			var payload UpdateWorkerStatePayload
+			if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
+				appErr = fmt.Errorf("failed to unmarshal UpdateWorkerState payload: %w", err)
+			} else {
+				if err := f.applyUpdateWorkerState(payload); err != nil {
+					appErr = err
+				}
+			}
+		case RemoveWorker:
+			var payload RemoveWorkerPayload
+			if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
+				appErr = fmt.Errorf("failed to unmarshal RemoveWorker payload: %w", err)
+			} else {
+				if err := f.applyRemoveWorker(payload); err != nil {
+					appErr = err
+				}
+			}
 		case UpdateShardLeader:
 			var payload UpdateShardLeaderPayload
 			if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
@@ -275,6 +342,24 @@ func (f *FSM) Update(entries []sm.Entry) ([]sm.Entry, error) {
 				appErr = fmt.Errorf("failed to unmarshal ShardMetrics payload: %w", err)
 			} else {
 				f.applyUpdateShardMetrics(payload)
+			}
+		case AddShardReplica:
+			var payload AddShardReplicaPayload
+			if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
+				appErr = fmt.Errorf("failed to unmarshal AddShardReplica payload: %w", err)
+			} else {
+				if err := f.applyAddShardReplica(payload); err != nil {
+					appErr = err
+				}
+			}
+		case RemoveShardReplica:
+			var payload RemoveShardReplicaPayload
+			if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
+				appErr = fmt.Errorf("failed to unmarshal RemoveShardReplica payload: %w", err)
+			} else {
+				if err := f.applyRemoveShardReplica(payload); err != nil {
+					appErr = err
+				}
 			}
 		default:
 			appErr = fmt.Errorf("unknown command type: %d", cmd.Type)
@@ -339,6 +424,7 @@ func (f *FSM) applyRegisterWorker(payload RegisterWorkerPayload) uint64 {
 		GrpcAddress:   payload.GrpcAddress,
 		RaftAddress:   payload.RaftAddress,
 		LastHeartbeat: time.Now().UTC(),
+		State:         WorkerStateJoining,
 		CPUCores:      payload.CPUCores,
 		TotalMemory:   payload.MemoryBytes,
 		TotalDisk:     payload.DiskBytes,
@@ -356,17 +442,29 @@ func (f *FSM) applyCreateCollection(payload CreateCollectionPayload) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	fmt.Printf("Attempting to create collection '%s'. Workers available: %d\n", payload.Name, len(f.Workers))
+	eligibleWorkers := 0
+	for _, worker := range f.Workers {
+		if f.isWorkerEligibleForPlacement(worker) {
+			eligibleWorkers++
+		}
+	}
+	fmt.Printf("Attempting to create collection '%s'. Workers available: %d\n", payload.Name, eligibleWorkers)
 
 	if _, ok := f.Collections[payload.Name]; ok {
 		return fmt.Errorf("collection %s already exists", payload.Name)
 	}
 
-	const replicationFactor = 1 // TODO: Make this configurable per collection.
-	if len(f.Workers) < replicationFactor {
-		err := fmt.Errorf("not enough workers (%d) to meet replication factor (%d)", len(f.Workers), replicationFactor)
+	const replicationFactor = DefaultReplicationFactor // TODO: Make this configurable per collection.
+	if eligibleWorkers == 0 {
+		err := fmt.Errorf("no eligible workers available for collection creation")
 		fmt.Printf("Error creating collection: %v\n", err)
 		return err
+	}
+	actualReplication := replicationFactor
+	if eligibleWorkers < replicationFactor {
+		actualReplication = eligibleWorkers
+		fmt.Printf("Warning: creating collection '%s' with %d replicas (target %d). Under-replication will be repaired when more workers join.\n",
+			payload.Name, actualReplication, replicationFactor)
 	}
 
 	collection := &Collection{
@@ -399,7 +497,7 @@ func (f *FSM) applyCreateCollection(payload CreateCollectionPayload) error {
 		}
 
 		// Select replicas using failure domain-aware placement
-		replicas := f.selectReplicasWithFailureDomain(workerIDs, replicationFactor)
+		replicas := f.selectReplicasWithFailureDomain(workerIDs, actualReplication)
 
 		shard := &ShardInfo{
 			ShardID:       shardID,
@@ -407,6 +505,7 @@ func (f *FSM) applyCreateCollection(payload CreateCollectionPayload) error {
 			KeyRangeStart: startKey,
 			KeyRangeEnd:   endKey,
 			Replicas:      replicas,
+			BootstrapMembers: append([]uint64(nil), replicas...),
 			Dimension:     payload.Dimension,
 			Distance:      payload.Distance,
 		}
@@ -414,6 +513,7 @@ func (f *FSM) applyCreateCollection(payload CreateCollectionPayload) error {
 	}
 
 	f.Collections[collection.Name] = collection
+	f.bumpAssignmentsEpochLocked()
 	fmt.Printf("FSM: Successfully created collection '%s' with %d shards\n", collection.Name, numShards)
 	return nil
 }
@@ -431,11 +531,16 @@ func (f *FSM) getWorkersSortedByLoad() []uint64 {
 	// Calculate total capacity of all workers for proportional allocation
 	var totalCapacity int64
 	for _, worker := range f.Workers {
-		totalCapacity += worker.TotalCapacity
+		if f.isWorkerEligibleForPlacement(worker) {
+			totalCapacity += worker.TotalCapacity
+		}
 	}
 
 	loads := make([]workerLoad, 0, len(f.Workers))
 	for id, worker := range f.Workers {
+		if !f.isWorkerEligibleForPlacement(worker) {
+			continue
+		}
 		rawLoad := calculateLoadScore(worker)
 		// Load ratio = raw load / normalized capacity
 		// This allows bigger nodes to have higher absolute load before being considered "full"
@@ -526,6 +631,13 @@ func calculateLoadScore(worker WorkerInfo) float64 {
 		normalizedShards*shardWeight*100
 
 	return score
+}
+
+func (f *FSM) isWorkerEligibleForPlacement(worker WorkerInfo) bool {
+	if worker.State != WorkerStateReady {
+		return false
+	}
+	return time.Since(worker.LastHeartbeat) < WorkerTimeout
 }
 
 // selectReplicasWithFailureDomain selects replica workers ensuring they are spread across failure domains
@@ -628,6 +740,9 @@ func (f *FSM) applyUpdateWorkerHeartbeat(payload UpdateWorkerHeartbeatPayload) {
 
 	if worker, ok := f.Workers[payload.WorkerID]; ok {
 		worker.LastHeartbeat = time.Now().UTC()
+		if worker.State == WorkerStateJoining || worker.State == WorkerStateUnknown {
+			worker.State = WorkerStateReady
+		}
 
 		// Apply exponential decay to smooth load metrics
 		worker.CPUUsagePercent = worker.CPUUsagePercent*loadMetricDecayFactor + payload.CPUUsagePercent*(1-loadMetricDecayFactor)
@@ -639,9 +754,43 @@ func (f *FSM) applyUpdateWorkerHeartbeat(payload UpdateWorkerHeartbeatPayload) {
 		worker.ActiveShards = payload.ActiveShards
 		worker.VectorCount = payload.VectorCount
 		worker.MemoryBytes = payload.MemoryBytes
+		worker.RunningShards = append([]uint64(nil), payload.RunningShards...)
 
 		f.Workers[payload.WorkerID] = worker
 	}
+}
+
+func (f *FSM) applyUpdateWorkerState(payload UpdateWorkerStatePayload) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	worker, ok := f.Workers[payload.WorkerID]
+	if !ok {
+		return fmt.Errorf("worker %d not found", payload.WorkerID)
+	}
+	worker.State = payload.State
+	f.Workers[payload.WorkerID] = worker
+	return nil
+}
+
+func (f *FSM) applyRemoveWorker(payload RemoveWorkerPayload) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if _, ok := f.Workers[payload.WorkerID]; !ok {
+		return fmt.Errorf("worker %d not found", payload.WorkerID)
+	}
+	for _, collection := range f.Collections {
+		for _, shard := range collection.Shards {
+			for _, replicaID := range shard.Replicas {
+				if replicaID == payload.WorkerID {
+					return fmt.Errorf("worker %d still has shard %d", payload.WorkerID, shard.ShardID)
+				}
+			}
+		}
+	}
+	delete(f.Workers, payload.WorkerID)
+	return nil
 }
 
 func (f *FSM) applyUpdateShardLeader(payload UpdateShardLeaderPayload) {
@@ -651,6 +800,10 @@ func (f *FSM) applyUpdateShardLeader(payload UpdateShardLeaderPayload) {
 	for _, collection := range f.Collections {
 		if shard, ok := collection.Shards[payload.ShardID]; ok {
 			shard.LeaderID = payload.LeaderID
+			if payload.LeaderID > 0 {
+				shard.Bootstrapped = true
+				shard.BootstrapMembers = nil
+			}
 			return
 		}
 	}
@@ -671,6 +824,89 @@ func (f *FSM) applyUpdateShardMetrics(payload ShardMetricsPayload) {
 			return
 		}
 	}
+}
+
+func (f *FSM) applyAddShardReplica(payload AddShardReplicaPayload) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	var targetShard *ShardInfo
+	for _, collection := range f.Collections {
+		if shard, ok := collection.Shards[payload.ShardID]; ok {
+			targetShard = shard
+			break
+		}
+	}
+
+	if targetShard == nil {
+		return fmt.Errorf("shard %d not found", payload.ShardID)
+	}
+
+	worker, ok := f.Workers[payload.ReplicaID]
+	if !ok {
+		return fmt.Errorf("worker %d not found", payload.ReplicaID)
+	}
+	if worker.State != WorkerStateReady {
+		return fmt.Errorf("worker %d is not ready", payload.ReplicaID)
+	}
+	if time.Since(worker.LastHeartbeat) >= WorkerTimeout {
+		return fmt.Errorf("worker %d is unhealthy", payload.ReplicaID)
+	}
+
+	for _, replicaID := range targetShard.Replicas {
+		if replicaID == payload.ReplicaID {
+			return nil // idempotent
+		}
+	}
+
+	if len(targetShard.Replicas) >= MaxReplicationFactor {
+		return fmt.Errorf("shard %d already has max replicas (%d)", payload.ShardID, MaxReplicationFactor)
+	}
+
+	targetShard.Replicas = append(targetShard.Replicas, payload.ReplicaID)
+	f.bumpAssignmentsEpochLocked()
+	return nil
+}
+
+func (f *FSM) applyRemoveShardReplica(payload RemoveShardReplicaPayload) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	var targetShard *ShardInfo
+	for _, collection := range f.Collections {
+		if shard, ok := collection.Shards[payload.ShardID]; ok {
+			targetShard = shard
+			break
+		}
+	}
+
+	if targetShard == nil {
+		return fmt.Errorf("shard %d not found", payload.ShardID)
+	}
+
+	index := -1
+	for i, replicaID := range targetShard.Replicas {
+		if replicaID == payload.ReplicaID {
+			index = i
+			break
+		}
+	}
+	if index == -1 {
+		return fmt.Errorf("replica %d not found in shard %d", payload.ReplicaID, payload.ShardID)
+	}
+
+	minAllowed := DefaultReplicationFactor
+	if len(targetShard.Replicas) < minAllowed {
+		minAllowed = len(targetShard.Replicas)
+	}
+	if len(targetShard.Replicas)-1 < minAllowed {
+		return fmt.Errorf("cannot remove replica %d from shard %d (min required replicas: %d)",
+			payload.ReplicaID, payload.ShardID, minAllowed)
+	}
+
+	targetShard.Replicas = append(targetShard.Replicas[:index], targetShard.Replicas[index+1:]...)
+	f.bumpAssignmentsEpochLocked()
+	return nil
 }
 
 func (f *FSM) applyMoveShard(payload MoveShardPayload) error {
@@ -717,9 +953,17 @@ func (f *FSM) applyMoveShard(payload MoveShardPayload) error {
 		}
 	}
 
+	f.bumpAssignmentsEpochLocked()
 	fmt.Printf("FSM: Moved shard %d from worker %d to worker %d (collection: %s)\n",
 		payload.ShardID, payload.SourceWorkerID, payload.TargetWorkerID, targetCollection)
 	return nil
+}
+
+func (f *FSM) bumpAssignmentsEpochLocked() {
+	f.AssignmentsEpoch++
+	if f.AssignmentsEpoch == 0 {
+		f.AssignmentsEpoch = 1
+	}
 }
 
 // Lookup is used for read-only queries of the FSM's state. It is called by
@@ -735,6 +979,7 @@ func (f *FSM) Lookup(query interface{}) (interface{}, error) {
 		Peers:        f.Peers,
 		Workers:      f.Workers,
 		Collections:  f.Collections,
+		AssignmentsEpoch: f.AssignmentsEpoch,
 		NextShardID:  f.NextShardID,
 		NextWorkerID: f.NextWorkerID,
 	}, nil
@@ -745,6 +990,7 @@ type fsmSnapshot struct {
 	Peers        map[string]PeerInfo    `json:"peers"`
 	Workers      map[uint64]WorkerInfo  `json:"workers"`
 	Collections  map[string]*Collection `json:"collections"`
+	AssignmentsEpoch uint64             `json:"assignments_epoch"`
 	NextShardID  uint64                 `json:"next_shard_id"`
 	NextWorkerID uint64                 `json:"next_worker_id"`
 }
@@ -765,6 +1011,7 @@ func (f *FSM) SaveSnapshot(ctx interface{}, w io.Writer, done <-chan struct{}) e
 		Peers:        f.Peers,
 		Workers:      f.Workers,
 		Collections:  f.Collections,
+		AssignmentsEpoch: f.AssignmentsEpoch,
 		NextShardID:  f.NextShardID,
 		NextWorkerID: f.NextWorkerID,
 	}
@@ -786,8 +1033,12 @@ func (f *FSM) RecoverFromSnapshot(r io.Reader, done <-chan struct{}) error {
 	f.Peers = data.Peers
 	f.Workers = data.Workers
 	f.Collections = data.Collections
+	f.AssignmentsEpoch = data.AssignmentsEpoch
 	f.NextShardID = data.NextShardID
 	f.NextWorkerID = data.NextWorkerID
+	if f.AssignmentsEpoch == 0 {
+		f.AssignmentsEpoch = 1
+	}
 
 	return nil
 }
@@ -816,6 +1067,13 @@ func (f *FSM) GetWorker(id uint64) (WorkerInfo, bool) {
 	defer f.mu.RUnlock()
 	worker, ok := f.Workers[id]
 	return worker, ok
+}
+
+// GetAssignmentsEpoch returns the current assignments epoch.
+func (f *FSM) GetAssignmentsEpoch() uint64 {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.AssignmentsEpoch
 }
 
 // GetWorkers returns a slice of all registered workers.

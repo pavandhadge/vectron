@@ -10,6 +10,7 @@ package pd
 type ShardAssignment struct {
 	ShardInfo      *ShardInfo        `json:"shard_info"`      // The metadata for the shard.
 	InitialMembers map[uint64]string `json:"initial_members"` // A map of node IDs to Raft addresses for all replicas in the shard's Raft group.
+	Bootstrap      bool              `json:"bootstrap"`       // Whether this replica should bootstrap the shard.
 }
 
 // ShardInfo holds the metadata for a single shard.
@@ -22,4 +23,5 @@ type ShardInfo struct {
 	LeaderID      uint64   `json:"leader_id"`       // The ID of the current leader of the shard's Raft group.
 	Dimension     int32    `json:"dimension"`       // The dimension of the vectors in this shard.
 	Distance      string   `json:"distance"`        // The distance metric used for this shard.
+	Bootstrapped  bool     `json:"bootstrapped"`    // Whether the raft group has been bootstrapped.
 }

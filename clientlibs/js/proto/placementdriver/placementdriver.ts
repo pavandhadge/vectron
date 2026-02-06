@@ -23,6 +23,51 @@ export const protobufPackage = "vectron.placementdriver.v1";
 
 /** proto/placement.proto */
 
+export enum WorkerState {
+  WORKER_STATE_UNKNOWN = 0,
+  WORKER_STATE_JOINING = 1,
+  WORKER_STATE_READY = 2,
+  WORKER_STATE_DRAINING = 3,
+  UNRECOGNIZED = -1,
+}
+
+export function workerStateFromJSON(object: any): WorkerState {
+  switch (object) {
+    case 0:
+    case "WORKER_STATE_UNKNOWN":
+      return WorkerState.WORKER_STATE_UNKNOWN;
+    case 1:
+    case "WORKER_STATE_JOINING":
+      return WorkerState.WORKER_STATE_JOINING;
+    case 2:
+    case "WORKER_STATE_READY":
+      return WorkerState.WORKER_STATE_READY;
+    case 3:
+    case "WORKER_STATE_DRAINING":
+      return WorkerState.WORKER_STATE_DRAINING;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return WorkerState.UNRECOGNIZED;
+  }
+}
+
+export function workerStateToJSON(object: WorkerState): string {
+  switch (object) {
+    case WorkerState.WORKER_STATE_UNKNOWN:
+      return "WORKER_STATE_UNKNOWN";
+    case WorkerState.WORKER_STATE_JOINING:
+      return "WORKER_STATE_JOINING";
+    case WorkerState.WORKER_STATE_READY:
+      return "WORKER_STATE_READY";
+    case WorkerState.WORKER_STATE_DRAINING:
+      return "WORKER_STATE_DRAINING";
+    case WorkerState.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 export interface GetLeaderRequest {
 }
 
@@ -78,6 +123,13 @@ export interface ShardLeaderInfo {
   leaderId: string;
 }
 
+/** ShardMembershipInfo contains membership details for a shard. */
+export interface ShardMembershipInfo {
+  shardId: string;
+  configChangeId: string;
+  nodeIds: string[];
+}
+
 /** ShardMetrics contains per-shard performance metrics for hot-shard detection */
 export interface ShardMetrics {
   shardId: string;
@@ -107,6 +159,10 @@ export interface HeartbeatRequest {
   activeShards: string;
   /** Per-shard metrics for hot-shard detection */
   shardMetrics: ShardMetrics[];
+  /** Shard replicas currently running on this worker (used for move orchestration) */
+  runningShards: string[];
+  /** Shard membership info (reported by leaders only) */
+  shardMembership: ShardMembershipInfo[];
 }
 
 export interface HeartbeatResponse {
@@ -114,6 +170,8 @@ export interface HeartbeatResponse {
   ok: boolean;
   /** Optional: config updates */
   message: string;
+  /** Monotonic epoch for shard assignments */
+  assignmentsEpoch: string;
 }
 
 export interface ListWorkersRequest {
@@ -139,11 +197,28 @@ export interface WorkerInfo {
   lastHeartbeat: string;
   healthy: boolean;
   metadata: { [key: string]: string };
+  state: WorkerState;
 }
 
 export interface WorkerInfo_MetadataEntry {
   key: string;
   value: string;
+}
+
+export interface DrainWorkerRequest {
+  workerId: string;
+}
+
+export interface DrainWorkerResponse {
+  success: boolean;
+}
+
+export interface RemoveWorkerRequest {
+  workerId: string;
+}
+
+export interface RemoveWorkerResponse {
+  success: boolean;
 }
 
 /** Future use */
@@ -819,6 +894,110 @@ export const ShardLeaderInfo: MessageFns<ShardLeaderInfo> = {
   },
 };
 
+function createBaseShardMembershipInfo(): ShardMembershipInfo {
+  return { shardId: "0", configChangeId: "0", nodeIds: [] };
+}
+
+export const ShardMembershipInfo: MessageFns<ShardMembershipInfo> = {
+  encode(message: ShardMembershipInfo, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.shardId !== "0") {
+      writer.uint32(8).uint64(message.shardId);
+    }
+    if (message.configChangeId !== "0") {
+      writer.uint32(16).uint64(message.configChangeId);
+    }
+    writer.uint32(26).fork();
+    for (const v of message.nodeIds) {
+      writer.uint64(v);
+    }
+    writer.join();
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ShardMembershipInfo {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseShardMembershipInfo();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.shardId = reader.uint64().toString();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.configChangeId = reader.uint64().toString();
+          continue;
+        }
+        case 3: {
+          if (tag === 24) {
+            message.nodeIds.push(reader.uint64().toString());
+
+            continue;
+          }
+
+          if (tag === 26) {
+            const end2 = reader.uint32() + reader.pos;
+            while (reader.pos < end2) {
+              message.nodeIds.push(reader.uint64().toString());
+            }
+
+            continue;
+          }
+
+          break;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ShardMembershipInfo {
+    return {
+      shardId: isSet(object.shardId) ? globalThis.String(object.shardId) : "0",
+      configChangeId: isSet(object.configChangeId) ? globalThis.String(object.configChangeId) : "0",
+      nodeIds: globalThis.Array.isArray(object?.nodeIds) ? object.nodeIds.map((e: any) => globalThis.String(e)) : [],
+    };
+  },
+
+  toJSON(message: ShardMembershipInfo): unknown {
+    const obj: any = {};
+    if (message.shardId !== "0") {
+      obj.shardId = message.shardId;
+    }
+    if (message.configChangeId !== "0") {
+      obj.configChangeId = message.configChangeId;
+    }
+    if (message.nodeIds?.length) {
+      obj.nodeIds = message.nodeIds;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ShardMembershipInfo>, I>>(base?: I): ShardMembershipInfo {
+    return ShardMembershipInfo.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ShardMembershipInfo>, I>>(object: I): ShardMembershipInfo {
+    const message = createBaseShardMembershipInfo();
+    message.shardId = object.shardId ?? "0";
+    message.configChangeId = object.configChangeId ?? "0";
+    message.nodeIds = object.nodeIds?.map((e) => e) || [];
+    return message;
+  },
+};
+
 function createBaseShardMetrics(): ShardMetrics {
   return { shardId: "0", queriesPerSecond: 0, vectorCount: "0", avgLatencyMs: 0 };
 }
@@ -940,6 +1119,8 @@ function createBaseHeartbeatRequest(): HeartbeatRequest {
     queriesPerSecond: 0,
     activeShards: "0",
     shardMetrics: [],
+    runningShards: [],
+    shardMembership: [],
   };
 }
 
@@ -977,6 +1158,14 @@ export const HeartbeatRequest: MessageFns<HeartbeatRequest> = {
     }
     for (const v of message.shardMetrics) {
       ShardMetrics.encode(v!, writer.uint32(90).fork()).join();
+    }
+    writer.uint32(98).fork();
+    for (const v of message.runningShards) {
+      writer.uint64(v);
+    }
+    writer.join();
+    for (const v of message.shardMembership) {
+      ShardMembershipInfo.encode(v!, writer.uint32(106).fork()).join();
     }
     return writer;
   },
@@ -1076,6 +1265,32 @@ export const HeartbeatRequest: MessageFns<HeartbeatRequest> = {
           message.shardMetrics.push(ShardMetrics.decode(reader, reader.uint32()));
           continue;
         }
+        case 12: {
+          if (tag === 96) {
+            message.runningShards.push(reader.uint64().toString());
+
+            continue;
+          }
+
+          if (tag === 98) {
+            const end2 = reader.uint32() + reader.pos;
+            while (reader.pos < end2) {
+              message.runningShards.push(reader.uint64().toString());
+            }
+
+            continue;
+          }
+
+          break;
+        }
+        case 13: {
+          if (tag !== 106) {
+            break;
+          }
+
+          message.shardMembership.push(ShardMembershipInfo.decode(reader, reader.uint32()));
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1101,6 +1316,12 @@ export const HeartbeatRequest: MessageFns<HeartbeatRequest> = {
       activeShards: isSet(object.activeShards) ? globalThis.String(object.activeShards) : "0",
       shardMetrics: globalThis.Array.isArray(object?.shardMetrics)
         ? object.shardMetrics.map((e: any) => ShardMetrics.fromJSON(e))
+        : [],
+      runningShards: globalThis.Array.isArray(object?.runningShards)
+        ? object.runningShards.map((e: any) => globalThis.String(e))
+        : [],
+      shardMembership: globalThis.Array.isArray(object?.shardMembership)
+        ? object.shardMembership.map((e: any) => ShardMembershipInfo.fromJSON(e))
         : [],
     };
   },
@@ -1140,6 +1361,12 @@ export const HeartbeatRequest: MessageFns<HeartbeatRequest> = {
     if (message.shardMetrics?.length) {
       obj.shardMetrics = message.shardMetrics.map((e) => ShardMetrics.toJSON(e));
     }
+    if (message.runningShards?.length) {
+      obj.runningShards = message.runningShards;
+    }
+    if (message.shardMembership?.length) {
+      obj.shardMembership = message.shardMembership.map((e) => ShardMembershipInfo.toJSON(e));
+    }
     return obj;
   },
 
@@ -1159,12 +1386,14 @@ export const HeartbeatRequest: MessageFns<HeartbeatRequest> = {
     message.queriesPerSecond = object.queriesPerSecond ?? 0;
     message.activeShards = object.activeShards ?? "0";
     message.shardMetrics = object.shardMetrics?.map((e) => ShardMetrics.fromPartial(e)) || [];
+    message.runningShards = object.runningShards?.map((e) => e) || [];
+    message.shardMembership = object.shardMembership?.map((e) => ShardMembershipInfo.fromPartial(e)) || [];
     return message;
   },
 };
 
 function createBaseHeartbeatResponse(): HeartbeatResponse {
-  return { ok: false, message: "" };
+  return { ok: false, message: "", assignmentsEpoch: "0" };
 }
 
 export const HeartbeatResponse: MessageFns<HeartbeatResponse> = {
@@ -1174,6 +1403,9 @@ export const HeartbeatResponse: MessageFns<HeartbeatResponse> = {
     }
     if (message.message !== "") {
       writer.uint32(18).string(message.message);
+    }
+    if (message.assignmentsEpoch !== "0") {
+      writer.uint32(24).uint64(message.assignmentsEpoch);
     }
     return writer;
   },
@@ -1201,6 +1433,14 @@ export const HeartbeatResponse: MessageFns<HeartbeatResponse> = {
           message.message = reader.string();
           continue;
         }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.assignmentsEpoch = reader.uint64().toString();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1214,6 +1454,7 @@ export const HeartbeatResponse: MessageFns<HeartbeatResponse> = {
     return {
       ok: isSet(object.ok) ? globalThis.Boolean(object.ok) : false,
       message: isSet(object.message) ? globalThis.String(object.message) : "",
+      assignmentsEpoch: isSet(object.assignmentsEpoch) ? globalThis.String(object.assignmentsEpoch) : "0",
     };
   },
 
@@ -1225,6 +1466,9 @@ export const HeartbeatResponse: MessageFns<HeartbeatResponse> = {
     if (message.message !== "") {
       obj.message = message.message;
     }
+    if (message.assignmentsEpoch !== "0") {
+      obj.assignmentsEpoch = message.assignmentsEpoch;
+    }
     return obj;
   },
 
@@ -1235,6 +1479,7 @@ export const HeartbeatResponse: MessageFns<HeartbeatResponse> = {
     const message = createBaseHeartbeatResponse();
     message.ok = object.ok ?? false;
     message.message = object.message ?? "";
+    message.assignmentsEpoch = object.assignmentsEpoch ?? "0";
     return message;
   },
 };
@@ -1477,6 +1722,7 @@ function createBaseWorkerInfo(): WorkerInfo {
     lastHeartbeat: "0",
     healthy: false,
     metadata: {},
+    state: 0,
   };
 }
 
@@ -1503,6 +1749,9 @@ export const WorkerInfo: MessageFns<WorkerInfo> = {
     globalThis.Object.entries(message.metadata).forEach(([key, value]: [string, string]) => {
       WorkerInfo_MetadataEntry.encode({ key: key as any, value }, writer.uint32(58).fork()).join();
     });
+    if (message.state !== 0) {
+      writer.uint32(64).int32(message.state);
+    }
     return writer;
   },
 
@@ -1572,6 +1821,14 @@ export const WorkerInfo: MessageFns<WorkerInfo> = {
           }
           continue;
         }
+        case 8: {
+          if (tag !== 64) {
+            break;
+          }
+
+          message.state = reader.int32() as any;
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1600,6 +1857,7 @@ export const WorkerInfo: MessageFns<WorkerInfo> = {
           {},
         )
         : {},
+      state: isSet(object.state) ? workerStateFromJSON(object.state) : 0,
     };
   },
 
@@ -1632,6 +1890,9 @@ export const WorkerInfo: MessageFns<WorkerInfo> = {
         });
       }
     }
+    if (message.state !== 0) {
+      obj.state = workerStateToJSON(message.state);
+    }
     return obj;
   },
 
@@ -1655,6 +1916,7 @@ export const WorkerInfo: MessageFns<WorkerInfo> = {
       },
       {},
     );
+    message.state = object.state ?? 0;
     return message;
   },
 };
@@ -1731,6 +1993,238 @@ export const WorkerInfo_MetadataEntry: MessageFns<WorkerInfo_MetadataEntry> = {
     const message = createBaseWorkerInfo_MetadataEntry();
     message.key = object.key ?? "";
     message.value = object.value ?? "";
+    return message;
+  },
+};
+
+function createBaseDrainWorkerRequest(): DrainWorkerRequest {
+  return { workerId: "" };
+}
+
+export const DrainWorkerRequest: MessageFns<DrainWorkerRequest> = {
+  encode(message: DrainWorkerRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.workerId !== "") {
+      writer.uint32(10).string(message.workerId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): DrainWorkerRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDrainWorkerRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.workerId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DrainWorkerRequest {
+    return { workerId: isSet(object.workerId) ? globalThis.String(object.workerId) : "" };
+  },
+
+  toJSON(message: DrainWorkerRequest): unknown {
+    const obj: any = {};
+    if (message.workerId !== "") {
+      obj.workerId = message.workerId;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<DrainWorkerRequest>, I>>(base?: I): DrainWorkerRequest {
+    return DrainWorkerRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<DrainWorkerRequest>, I>>(object: I): DrainWorkerRequest {
+    const message = createBaseDrainWorkerRequest();
+    message.workerId = object.workerId ?? "";
+    return message;
+  },
+};
+
+function createBaseDrainWorkerResponse(): DrainWorkerResponse {
+  return { success: false };
+}
+
+export const DrainWorkerResponse: MessageFns<DrainWorkerResponse> = {
+  encode(message: DrainWorkerResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): DrainWorkerResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDrainWorkerResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DrainWorkerResponse {
+    return { success: isSet(object.success) ? globalThis.Boolean(object.success) : false };
+  },
+
+  toJSON(message: DrainWorkerResponse): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<DrainWorkerResponse>, I>>(base?: I): DrainWorkerResponse {
+    return DrainWorkerResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<DrainWorkerResponse>, I>>(object: I): DrainWorkerResponse {
+    const message = createBaseDrainWorkerResponse();
+    message.success = object.success ?? false;
+    return message;
+  },
+};
+
+function createBaseRemoveWorkerRequest(): RemoveWorkerRequest {
+  return { workerId: "" };
+}
+
+export const RemoveWorkerRequest: MessageFns<RemoveWorkerRequest> = {
+  encode(message: RemoveWorkerRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.workerId !== "") {
+      writer.uint32(10).string(message.workerId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): RemoveWorkerRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseRemoveWorkerRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.workerId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): RemoveWorkerRequest {
+    return { workerId: isSet(object.workerId) ? globalThis.String(object.workerId) : "" };
+  },
+
+  toJSON(message: RemoveWorkerRequest): unknown {
+    const obj: any = {};
+    if (message.workerId !== "") {
+      obj.workerId = message.workerId;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<RemoveWorkerRequest>, I>>(base?: I): RemoveWorkerRequest {
+    return RemoveWorkerRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<RemoveWorkerRequest>, I>>(object: I): RemoveWorkerRequest {
+    const message = createBaseRemoveWorkerRequest();
+    message.workerId = object.workerId ?? "";
+    return message;
+  },
+};
+
+function createBaseRemoveWorkerResponse(): RemoveWorkerResponse {
+  return { success: false };
+}
+
+export const RemoveWorkerResponse: MessageFns<RemoveWorkerResponse> = {
+  encode(message: RemoveWorkerResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): RemoveWorkerResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseRemoveWorkerResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): RemoveWorkerResponse {
+    return { success: isSet(object.success) ? globalThis.Boolean(object.success) : false };
+  },
+
+  toJSON(message: RemoveWorkerResponse): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<RemoveWorkerResponse>, I>>(base?: I): RemoveWorkerResponse {
+    return RemoveWorkerResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<RemoveWorkerResponse>, I>>(object: I): RemoveWorkerResponse {
+    const message = createBaseRemoveWorkerResponse();
+    message.success = object.success ?? false;
     return message;
   },
 };
@@ -2550,6 +3044,27 @@ export const PlacementServiceService = {
     responseDeserialize: (value: Buffer): ListWorkersForCollectionResponse =>
       ListWorkersForCollectionResponse.decode(value),
   },
+  /** Admin: drain a worker (move shards away, stop new assignments) */
+  drainWorker: {
+    path: "/vectron.placementdriver.v1.PlacementService/DrainWorker",
+    requestStream: false,
+    responseStream: false,
+    requestSerialize: (value: DrainWorkerRequest): Buffer => Buffer.from(DrainWorkerRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): DrainWorkerRequest => DrainWorkerRequest.decode(value),
+    responseSerialize: (value: DrainWorkerResponse): Buffer => Buffer.from(DrainWorkerResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): DrainWorkerResponse => DrainWorkerResponse.decode(value),
+  },
+  /** Admin: remove a worker (only when it has no shards) */
+  removeWorker: {
+    path: "/vectron.placementdriver.v1.PlacementService/RemoveWorker",
+    requestStream: false,
+    responseStream: false,
+    requestSerialize: (value: RemoveWorkerRequest): Buffer => Buffer.from(RemoveWorkerRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): RemoveWorkerRequest => RemoveWorkerRequest.decode(value),
+    responseSerialize: (value: RemoveWorkerResponse): Buffer =>
+      Buffer.from(RemoveWorkerResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): RemoveWorkerResponse => RemoveWorkerResponse.decode(value),
+  },
   /** Admin: force rebalance (future) */
   rebalance: {
     path: "/vectron.placementdriver.v1.PlacementService/Rebalance",
@@ -2626,6 +3141,10 @@ export interface PlacementServiceServer extends UntypedServiceImplementation {
   /** List all workers (for monitoring) */
   listWorkers: handleUnaryCall<ListWorkersRequest, ListWorkersResponse>;
   listWorkersForCollection: handleUnaryCall<ListWorkersForCollectionRequest, ListWorkersForCollectionResponse>;
+  /** Admin: drain a worker (move shards away, stop new assignments) */
+  drainWorker: handleUnaryCall<DrainWorkerRequest, DrainWorkerResponse>;
+  /** Admin: remove a worker (only when it has no shards) */
+  removeWorker: handleUnaryCall<RemoveWorkerRequest, RemoveWorkerResponse>;
   /** Admin: force rebalance (future) */
   rebalance: handleUnaryCall<RebalanceRequest, RebalanceResponse>;
   /** Collection management */
@@ -2715,6 +3234,38 @@ export interface PlacementServiceClient extends Client {
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: ListWorkersForCollectionResponse) => void,
+  ): ClientUnaryCall;
+  /** Admin: drain a worker (move shards away, stop new assignments) */
+  drainWorker(
+    request: DrainWorkerRequest,
+    callback: (error: ServiceError | null, response: DrainWorkerResponse) => void,
+  ): ClientUnaryCall;
+  drainWorker(
+    request: DrainWorkerRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: DrainWorkerResponse) => void,
+  ): ClientUnaryCall;
+  drainWorker(
+    request: DrainWorkerRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: DrainWorkerResponse) => void,
+  ): ClientUnaryCall;
+  /** Admin: remove a worker (only when it has no shards) */
+  removeWorker(
+    request: RemoveWorkerRequest,
+    callback: (error: ServiceError | null, response: RemoveWorkerResponse) => void,
+  ): ClientUnaryCall;
+  removeWorker(
+    request: RemoveWorkerRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: RemoveWorkerResponse) => void,
+  ): ClientUnaryCall;
+  removeWorker(
+    request: RemoveWorkerRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: RemoveWorkerResponse) => void,
   ): ClientUnaryCall;
   /** Admin: force rebalance (future) */
   rebalance(

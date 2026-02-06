@@ -23,6 +23,11 @@ service PlacementService {
 
   rpc ListWorkersForCollection(ListWorkersForCollectionRequest) returns (ListWorkersForCollectionResponse) {}
 
+  // Admin: drain a worker (move shards away, stop new assignments)
+  rpc DrainWorker(DrainWorkerRequest) returns (DrainWorkerResponse) {}
+  // Admin: remove a worker (only when it has no shards)
+  rpc RemoveWorker(RemoveWorkerRequest) returns (RemoveWorkerResponse) {}
+
   // Admin: force rebalance (future)
   rpc Rebalance(RebalanceRequest) returns (RebalanceResponse) {}
   // Collection management
@@ -89,6 +94,13 @@ message ShardLeaderInfo {
   uint64 leader_id = 2;
 }
 
+// ShardMembershipInfo contains membership details for a shard.
+message ShardMembershipInfo {
+  uint64 shard_id = 1;
+  uint64 config_change_id = 2;
+  repeated uint64 node_ids = 3;
+}
+
 // ShardMetrics contains per-shard performance metrics for hot-shard detection
 message ShardMetrics {
   uint64 shard_id = 1;
@@ -124,6 +136,12 @@ message HeartbeatRequest {
 
   // Per-shard metrics for hot-shard detection
   repeated ShardMetrics shard_metrics = 11;
+
+  // Shard replicas currently running on this worker (used for move orchestration)
+  repeated uint64 running_shards = 12;
+
+  // Shard membership info (reported by leaders only)
+  repeated ShardMembershipInfo shard_membership = 13;
 }
 
 message HeartbeatResponse {
@@ -131,6 +149,8 @@ message HeartbeatResponse {
   bool ok = 1;
   // Optional: config updates
   string message = 2;
+  // Monotonic epoch for shard assignments
+  uint64 assignments_epoch = 3;
 }
 
 message ListWorkersRequest {}
@@ -147,6 +167,13 @@ message ListWorkersForCollectionResponse {
   repeated string grpc_addresses = 1;
 }
 
+enum WorkerState {
+  WORKER_STATE_UNKNOWN = 0;
+  WORKER_STATE_JOINING = 1;
+  WORKER_STATE_READY = 2;
+  WORKER_STATE_DRAINING = 3;
+}
+
 message WorkerInfo {
   string worker_id = 1;
   string grpc_address = 2;
@@ -155,6 +182,23 @@ message WorkerInfo {
   int64 last_heartbeat = 5;
   bool healthy = 6;
   map<string, string> metadata = 7;
+  WorkerState state = 8;
+}
+
+message DrainWorkerRequest {
+  string worker_id = 1;
+}
+
+message DrainWorkerResponse {
+  bool success = 1;
+}
+
+message RemoveWorkerRequest {
+  string worker_id = 1;
+}
+
+message RemoveWorkerResponse {
+  bool success = 1;
 }
 
 message RebalanceRequest {

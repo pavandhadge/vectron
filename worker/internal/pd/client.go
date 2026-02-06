@@ -29,6 +29,8 @@ const (
 // ShardManager defines the interface for the shard manager.
 type ShardManager interface {
 	GetShardLeaderInfo() []*pd.ShardLeaderInfo
+	GetShards() []uint64
+	GetShardMembershipInfo() []*pd.ShardMembershipInfo
 }
 
 // LeaderInfo holds the information about the current leader.
@@ -47,6 +49,7 @@ type Client struct {
 	grpcAddr     string // The gRPC address of this worker.
 	raftAddr     string // The Raft address of this worker.
 	shardManager ShardManager
+	lastAssignmentsEpoch uint64
 }
 
 // WorkerID returns the assigned worker ID from the placement driver.
@@ -279,7 +282,7 @@ func collectLoadMetrics(shardManager ShardManager) (cpuPercent, memoryPercent, d
 
 	// Active shards
 	if shardManager != nil {
-		activeShards = int64(len(shardManager.GetShardLeaderInfo()))
+		activeShards = int64(len(shardManager.GetShards()))
 	}
 
 	// CPU usage placeholder - in production, use gopsutil or similar
@@ -298,15 +301,29 @@ func (c *Client) sendHeartbeat(ctx context.Context, shardUpdateChan chan<- []*Sh
 	// Collect load metrics
 	cpuPercent, memoryPercent, diskPercent, qps, activeShards := collectLoadMetrics(c.shardManager)
 
+	runningShards := []uint64(nil)
+	var membershipInfo []*pd.ShardMembershipInfo
+	if c.shardManager != nil {
+		runningShards = c.shardManager.GetShards()
+		membershipInfo = c.shardManager.GetShardMembershipInfo()
+	}
+
+	leaderInfo := []*pd.ShardLeaderInfo(nil)
+	if c.shardManager != nil {
+		leaderInfo = c.shardManager.GetShardLeaderInfo()
+	}
+
 	req := &pd.HeartbeatRequest{
 		WorkerId:           strconv.FormatUint(c.workerID, 10),
-		ShardLeaderInfo:    c.shardManager.GetShardLeaderInfo(),
+		ShardLeaderInfo:    leaderInfo,
 		Timestamp:          time.Now().Unix(),
 		CpuUsagePercent:    cpuPercent,
 		MemoryUsagePercent: memoryPercent,
 		DiskUsagePercent:   diskPercent,
 		QueriesPerSecond:   qps,
 		ActiveShards:       activeShards,
+		RunningShards:      runningShards,
+		ShardMembership:    membershipInfo,
 	}
 
 	leader, err := c.getLeader()
@@ -342,6 +359,14 @@ func (c *Client) sendHeartbeat(ctx context.Context, shardUpdateChan chan<- []*Sh
 	if !res.Ok {
 		log.Printf("Heartbeat response was not OK. PD might consider this worker dead.")
 		return
+	}
+
+	if res.AssignmentsEpoch < c.lastAssignmentsEpoch {
+		log.Printf("Ignoring stale assignments (epoch %d < %d)", res.AssignmentsEpoch, c.lastAssignmentsEpoch)
+		return
+	}
+	if res.AssignmentsEpoch > c.lastAssignmentsEpoch {
+		c.lastAssignmentsEpoch = res.AssignmentsEpoch
 	}
 
 	// The response message contains a JSON-encoded list of shard assignments.
