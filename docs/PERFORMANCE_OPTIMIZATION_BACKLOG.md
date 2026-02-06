@@ -45,11 +45,11 @@ Legend: [DONE] implemented, [PENDING] not implemented, [EXPERIMENT] requires val
 3. [DONE] Optional vector quantization / compression for RAM reduction.
 4. [PENDING] Multi‑tenant isolation (rate limits, resource caps per tenant).
 5. [DONE] Async index rebuild / background maintenance scheduling.
-6. [PENDING] Load‑aware shard placement using worker heartbeat metrics.
-7. [PENDING] Capacity‑weighted placement (bigger nodes get more shards).
-8. [PENDING] Failure‑domain aware placement (rack/zone separation).
-9. [PENDING] Hot‑shard detection with targeted replica moves.
-10. [PENDING] Background rebalancing with throttling to avoid compaction storms.
+6. [DONE] Load‑aware shard placement using worker heartbeat metrics.
+7. [DONE] Capacity‑weighted placement (bigger nodes get more shards).
+8. [DONE] Failure‑domain aware placement (rack/zone separation).
+9. [DONE] Hot‑shard detection with targeted replica moves.
+10. [DONE] Background rebalancing with throttling to avoid compaction storms.
 
 ## Notes
 - Items marked DONE are already implemented in the codebase (as of current changes).

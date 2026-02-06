@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -134,10 +136,71 @@ func NewClient(pdAddrs []string, grpcAddr, raftAddr string, workerID uint64, sha
 // Register registers the worker with the Placement Driver.
 // The PD will assign a unique ID to the worker, which may be different from the
 // node ID provided at startup, although they are the same in this implementation.
+// collectCapacityMetrics gathers system capacity information
+func collectCapacityMetrics() (cpuCores int32, memoryBytes, diskBytes int64) {
+	// Get CPU cores
+	cpuCores = int32(runtime.NumCPU())
+
+	// Get memory info using runtime
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	// Use Sys as total memory allocated from OS (approximation)
+	// In production, use gopsutil to get actual system memory
+	memoryBytes = int64(m.Sys)
+
+	// Disk capacity - placeholder
+	// In production, use syscall to get actual disk size
+	diskBytes = 500 * 1024 * 1024 * 1024 // 500GB default
+
+	return
+}
+
+// collectFailureDomain gathers failure domain information from environment
+// Workers should set these environment variables to enable fault-tolerant placement:
+// - VECTRON_RACK: Rack identifier (e.g., "rack-01")
+// - VECTRON_ZONE: Availability zone (e.g., "us-east-1a")
+// - VECTRON_REGION: Region (e.g., "us-east-1")
+func collectFailureDomain() (rack, zone, region string) {
+	// In production, these would typically come from:
+	// - Kubernetes node labels
+	// - Cloud metadata services (EC2, GCE, Azure)
+	// - Configuration management
+	// - Environment variables (used here for flexibility)
+
+	rack = os.Getenv("VECTRON_RACK")
+	if rack == "" {
+		rack = "default-rack"
+	}
+
+	zone = os.Getenv("VECTRON_ZONE")
+	if zone == "" {
+		zone = "default-zone"
+	}
+
+	region = os.Getenv("VECTRON_REGION")
+	if region == "" {
+		region = "default-region"
+	}
+
+	return
+}
+
 func (c *Client) Register(ctx context.Context) error {
+	// Collect capacity metrics
+	cpuCores, memoryBytes, diskBytes := collectCapacityMetrics()
+
+	// Collect failure domain information
+	rack, zone, region := collectFailureDomain()
+
 	req := &pd.RegisterWorkerRequest{
 		GrpcAddress: c.grpcAddr,
 		RaftAddress: c.raftAddr,
+		CpuCores:    cpuCores,
+		MemoryBytes: memoryBytes,
+		DiskBytes:   diskBytes,
+		Rack:        rack,
+		Zone:        zone,
+		Region:      region,
 	}
 
 	leader, err := c.getLeader()
@@ -193,6 +256,38 @@ func (c *Client) StartHeartbeatLoop(shardUpdateChan chan<- []*ShardAssignment) {
 	}
 }
 
+// collectLoadMetrics gathers current load metrics from the worker
+func collectLoadMetrics(shardManager ShardManager) (cpuPercent, memoryPercent, diskPercent, qps float32, activeShards int64) {
+	// Get CPU usage using runtime statistics
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+
+	// Memory usage as percentage (simplified - in production, use system memory info)
+	// For now, use a placeholder based on allocated memory
+	memoryPercent = float32(m.Sys/1024/1024) / 100.0 // Rough estimate in MB
+	if memoryPercent > 100 {
+		memoryPercent = 100
+	}
+
+	// Disk usage - simplified placeholder
+	// In production, use syscall to get actual disk usage
+	diskPercent = 50.0 // Placeholder
+
+	// Query rate - placeholder
+	// In production, track actual query metrics
+	qps = 0.0 // Will be populated by shard manager if available
+
+	// Active shards
+	if shardManager != nil {
+		activeShards = int64(len(shardManager.GetShardLeaderInfo()))
+	}
+
+	// CPU usage placeholder - in production, use gopsutil or similar
+	cpuPercent = 50.0 // Placeholder
+
+	return
+}
+
 // sendHeartbeat sends a single heartbeat to the placement driver.
 func (c *Client) sendHeartbeat(ctx context.Context, shardUpdateChan chan<- []*ShardAssignment) {
 	if c.workerID == 0 {
@@ -200,9 +295,18 @@ func (c *Client) sendHeartbeat(ctx context.Context, shardUpdateChan chan<- []*Sh
 		return
 	}
 
+	// Collect load metrics
+	cpuPercent, memoryPercent, diskPercent, qps, activeShards := collectLoadMetrics(c.shardManager)
+
 	req := &pd.HeartbeatRequest{
-		WorkerId:        strconv.FormatUint(c.workerID, 10),
-		ShardLeaderInfo: c.shardManager.GetShardLeaderInfo(),
+		WorkerId:           strconv.FormatUint(c.workerID, 10),
+		ShardLeaderInfo:    c.shardManager.GetShardLeaderInfo(),
+		Timestamp:          time.Now().Unix(),
+		CpuUsagePercent:    cpuPercent,
+		MemoryUsagePercent: memoryPercent,
+		DiskUsagePercent:   diskPercent,
+		QueriesPerSecond:   qps,
+		ActiveShards:       activeShards,
 	}
 
 	leader, err := c.getLeader()

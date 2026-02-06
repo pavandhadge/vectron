@@ -57,6 +57,12 @@ func (s *Server) RegisterWorker(ctx context.Context, req *pb.RegisterWorkerReque
 	payload := fsm.RegisterWorkerPayload{
 		GrpcAddress: req.GetGrpcAddress(),
 		RaftAddress: req.GetRaftAddress(),
+		CPUCores:    req.GetCpuCores(),
+		MemoryBytes: req.GetMemoryBytes(),
+		DiskBytes:   req.GetDiskBytes(),
+		Rack:        req.GetRack(),
+		Zone:        req.GetZone(),
+		Region:      req.GetRegion(),
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -102,8 +108,17 @@ func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.H
 		return nil, status.Errorf(codes.InvalidArgument, "invalid worker_id format: %v", err)
 	}
 
-	// Propose a command to update the worker's last heartbeat time in the FSM.
-	hbPayload := fsm.UpdateWorkerHeartbeatPayload{WorkerID: workerID}
+	// Propose a command to update the worker's last heartbeat time and load metrics in the FSM.
+	hbPayload := fsm.UpdateWorkerHeartbeatPayload{
+		WorkerID:           workerID,
+		CPUUsagePercent:    float64(req.GetCpuUsagePercent()),
+		MemoryUsagePercent: float64(req.GetMemoryUsagePercent()),
+		DiskUsagePercent:   float64(req.GetDiskUsagePercent()),
+		QueriesPerSecond:   float64(req.GetQueriesPerSecond()),
+		ActiveShards:       req.GetActiveShards(),
+		VectorCount:        req.GetVectorCount(),
+		MemoryBytes:        req.GetMemoryBytes(),
+	}
 	payloadBytes, err := json.Marshal(hbPayload)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to marshal heartbeat payload: %v", err)
@@ -118,6 +133,31 @@ func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.H
 	// as the primary goal is to return shard assignments.
 	if _, err := s.raft.Propose(cmdBytes, raftTimeout); err != nil {
 		fmt.Printf("Warning: failed to propose heartbeat for worker %d: %v\n", workerID, err)
+	}
+
+	// Propose commands to update shard metrics for hot-shard detection
+	for _, shardMetric := range req.GetShardMetrics() {
+		metricsPayload := fsm.ShardMetricsPayload{
+			WorkerID:         workerID,
+			ShardID:          shardMetric.GetShardId(),
+			QueriesPerSecond: float64(shardMetric.GetQueriesPerSecond()),
+			VectorCount:      shardMetric.GetVectorCount(),
+			AvgLatencyMs:     float64(shardMetric.GetAvgLatencyMs()),
+		}
+		metricsPayloadBytes, err := json.Marshal(metricsPayload)
+		if err != nil {
+			fmt.Printf("Warning: failed to marshal shard metrics payload: %v\n", err)
+			continue
+		}
+		metricsCmd := fsm.Command{Type: fsm.UpdateShardMetrics, Payload: metricsPayloadBytes}
+		metricsCmdBytes, err := json.Marshal(metricsCmd)
+		if err != nil {
+			fmt.Printf("Warning: failed to marshal shard metrics command: %v\n", err)
+			continue
+		}
+		if _, err := s.raft.Propose(metricsCmdBytes, raftTimeout); err != nil {
+			fmt.Printf("Warning: failed to propose shard metrics for shard %d: %v\n", shardMetric.GetShardId(), err)
+		}
 	}
 
 	// Propose commands to update shard leader information.

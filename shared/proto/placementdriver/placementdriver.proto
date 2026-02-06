@@ -65,6 +65,16 @@ message RegisterWorkerRequest {
   string raft_address = 2;
   repeated string capabilities = 3; // ["gpu", "large-memory"]
   int64 timestamp = 4;
+
+  // Capacity information for capacity-weighted placement
+  int32 cpu_cores = 5;        // Number of CPU cores available
+  int64 memory_bytes = 6;     // Total memory in bytes
+  int64 disk_bytes = 7;       // Total disk space in bytes
+
+  // Failure domain information for fault-tolerant placement
+  string rack = 8;            // Rack identifier (e.g., "rack-01")
+  string zone = 9;            // Zone/availability zone (e.g., "us-east-1a")
+  string region = 10;         // Region (e.g., "us-east-1")
 }
 
 message RegisterWorkerResponse {
@@ -79,6 +89,14 @@ message ShardLeaderInfo {
   uint64 leader_id = 2;
 }
 
+// ShardMetrics contains per-shard performance metrics for hot-shard detection
+message ShardMetrics {
+  uint64 shard_id = 1;
+  float queries_per_second = 2;  // Query rate for this shard
+  int64 vector_count = 3;        // Number of vectors in this shard
+  float avg_latency_ms = 4;      // Average query latency in milliseconds
+}
+
 message HeartbeatRequest {
   string worker_id = 1;
 
@@ -91,6 +109,21 @@ message HeartbeatRequest {
   int64 memory_bytes = 4;
 
   repeated ShardLeaderInfo shard_leader_info = 5;
+
+  // Load metrics for load-aware placement
+
+  float cpu_usage_percent = 6; // 0-100
+
+  float memory_usage_percent = 7; // 0-100
+
+  float disk_usage_percent = 8; // 0-100
+
+  float queries_per_second = 9; // Current query rate
+
+  int64 active_shards = 10; // Number of shards being served
+
+  // Per-shard metrics for hot-shard detection
+  repeated ShardMetrics shard_metrics = 11;
 }
 
 message HeartbeatResponse {

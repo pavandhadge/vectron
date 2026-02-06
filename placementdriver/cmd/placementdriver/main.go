@@ -112,6 +112,13 @@ func Start(nodeID, clusterID uint64, raftAddr, grpcAddr, dataDir string, initial
 	// Register reconciler for graceful shutdown
 	shutdownHandler.Register(graceful.NewReconciler(func() { reconciler.Stop() }, "Shard Reconciler"))
 
+	// Start the rebalancing manager for background shard rebalancing with throttling
+	rebalanceManager := server.NewRebalanceManager(grpcServer, server.DefaultRebalanceConfig())
+	rebalanceManager.Start()
+
+	// Register rebalancing manager for graceful shutdown
+	shutdownHandler.Register(graceful.NewReconciler(func() { rebalanceManager.Stop() }, "Rebalance Manager"))
+
 	log.Printf("gRPC server listening at %v", lis.Addr())
 
 	// Start serving in a goroutine

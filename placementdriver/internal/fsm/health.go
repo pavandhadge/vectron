@@ -29,6 +29,12 @@ const (
 
 	// MaxReplicationFactor is the maximum allowed replication factor
 	MaxReplicationFactor = 5
+
+	// HotShardThresholdQPS is the query rate threshold for detecting hot shards
+	HotShardThresholdQPS = 1000.0 // 1000 QPS
+
+	// HotShardThresholdLatencyMs is the latency threshold for detecting hot shards
+	HotShardThresholdLatencyMs = 100.0 // 100ms
 )
 
 // IsWorkerHealthy checks if a worker is healthy based on its last heartbeat
@@ -175,6 +181,16 @@ func (f *FSM) IsShardHealthy(shardID uint64) bool {
 	return f.CountHealthyReplicas(shardID) > 0
 }
 
+// HotShardInfo provides details about a detected hot shard
+type HotShardInfo struct {
+	ShardID          uint64  `json:"shard_id"`
+	Collection       string  `json:"collection"`
+	QueriesPerSecond float64 `json:"queries_per_second"`
+	AvgLatencyMs     float64 `json:"avg_latency_ms"`
+	WorkerID         uint64  `json:"worker_id"` // Worker reporting this shard
+	Reason           string  `json:"reason"`    // "high_qps", "high_latency"
+}
+
 // HealthReport provides a comprehensive health status of the cluster
 type HealthReport struct {
 	TotalWorkers          int
@@ -185,6 +201,8 @@ type HealthReport struct {
 	HealthyShards         int
 	UnderReplicatedShards []*ShardInfo
 	DeadWorkers           []WorkerInfo
+	HotShards             []*HotShardInfo // Hot shards detected
+	HotShardCount         int
 }
 
 // GetHealthReport generates a comprehensive health report
@@ -240,8 +258,32 @@ func (f *FSM) GetHealthReport() *HealthReport {
 			if healthyCount < targetReplicas {
 				report.UnderReplicatedShards = append(report.UnderReplicatedShards, shard)
 			}
+
+			// Check for hot shard
+			isHot := false
+			reason := ""
+			if shard.QueriesPerSecond > HotShardThresholdQPS {
+				isHot = true
+				reason = "high_qps"
+			} else if shard.AvgLatencyMs > HotShardThresholdLatencyMs {
+				isHot = true
+				reason = "high_latency"
+			}
+
+			if isHot {
+				report.HotShards = append(report.HotShards, &HotShardInfo{
+					ShardID:          shard.ShardID,
+					Collection:       shard.Collection,
+					QueriesPerSecond: shard.QueriesPerSecond,
+					AvgLatencyMs:     shard.AvgLatencyMs,
+					WorkerID:         shard.LeaderID, // Use leader as the worker
+					Reason:           reason,
+				})
+			}
 		}
 	}
+
+	report.HotShardCount = len(report.HotShards)
 
 	return report
 }
@@ -269,7 +311,15 @@ func (r *HealthReport) PrintHealthReport() {
 		}
 	}
 
-	if len(r.UnderReplicatedShards) == 0 && len(r.DeadWorkers) == 0 {
+	if len(r.HotShards) > 0 {
+		fmt.Printf("🔥 Hot shards detected: %d\n", len(r.HotShards))
+		for _, shard := range r.HotShards {
+			fmt.Printf("   - Shard %d (collection: %s): %.1f QPS, %.1fms latency [%s]\n",
+				shard.ShardID, shard.Collection, shard.QueriesPerSecond, shard.AvgLatencyMs, shard.Reason)
+		}
+	}
+
+	if len(r.UnderReplicatedShards) == 0 && len(r.DeadWorkers) == 0 && len(r.HotShards) == 0 {
 		fmt.Println("✅ Cluster is healthy!")
 	}
 	fmt.Println("=============================")

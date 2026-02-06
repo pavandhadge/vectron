@@ -30,6 +30,10 @@ const (
 	UpdateWorkerHeartbeat
 	// UpdateShardLeader updates the leader of a shard.
 	UpdateShardLeader
+	// MoveShard initiates a shard migration from one worker to another.
+	MoveShard
+	// UpdateShardMetrics updates per-shard metrics for hot-shard detection.
+	UpdateShardMetrics
 )
 
 // Command is the structure that is serialized and sent to the Raft log.
@@ -50,6 +54,14 @@ type RegisterPeerPayload struct {
 type RegisterWorkerPayload struct {
 	GrpcAddress string `json:"grpc_address"`
 	RaftAddress string `json:"raft_address"`
+	// Capacity information for capacity-weighted placement
+	CPUCores    int32 `json:"cpu_cores"`
+	MemoryBytes int64 `json:"memory_bytes"`
+	DiskBytes   int64 `json:"disk_bytes"`
+	// Failure domain information for fault-tolerant placement
+	Rack   string `json:"rack"`
+	Zone   string `json:"zone"`
+	Region string `json:"region"`
 }
 
 // CreateCollectionPayload is the data for the CreateCollection command.
@@ -62,13 +74,36 @@ type CreateCollectionPayload struct {
 
 // UpdateWorkerHeartbeatPayload is the data for the UpdateWorkerHeartbeat command.
 type UpdateWorkerHeartbeatPayload struct {
-	WorkerID uint64 `json:"worker_id"`
+	WorkerID           uint64  `json:"worker_id"`
+	CPUUsagePercent    float64 `json:"cpu_usage_percent"`
+	MemoryUsagePercent float64 `json:"memory_usage_percent"`
+	DiskUsagePercent   float64 `json:"disk_usage_percent"`
+	QueriesPerSecond   float64 `json:"queries_per_second"`
+	ActiveShards       int64   `json:"active_shards"`
+	VectorCount        int64   `json:"vector_count"`
+	MemoryBytes        int64   `json:"memory_bytes"`
 }
 
 // UpdateShardLeaderPayload is the data for the UpdateShardLeader command.
 type UpdateShardLeaderPayload struct {
 	ShardID  uint64 `json:"shard_id"`
 	LeaderID uint64 `json:"leader_id"`
+}
+
+// MoveShardPayload is the data for the MoveShard command.
+type MoveShardPayload struct {
+	ShardID        uint64 `json:"shard_id"`
+	SourceWorkerID uint64 `json:"source_worker_id"`
+	TargetWorkerID uint64 `json:"target_worker_id"`
+}
+
+// ShardMetricsPayload contains per-shard metrics for hot-shard detection
+type ShardMetricsPayload struct {
+	WorkerID         uint64  `json:"worker_id"`
+	ShardID          uint64  `json:"shard_id"`
+	QueriesPerSecond float64 `json:"queries_per_second"`
+	VectorCount      int64   `json:"vector_count"`
+	AvgLatencyMs     float64 `json:"avg_latency_ms"`
 }
 
 // ======================================================================================
@@ -85,6 +120,11 @@ type ShardInfo struct {
 	LeaderID      uint64   `json:"leader_id"` // The current leader of the shard's Raft group.
 	Dimension     int32    `json:"dimension"`
 	Distance      string   `json:"distance"`
+	// Metrics for hot-shard detection
+	QueriesPerSecond float64   `json:"queries_per_second"` // Current query rate
+	TotalQueries     int64     `json:"total_queries"`      // Cumulative query count
+	AvgLatencyMs     float64   `json:"avg_latency_ms"`     // Average latency
+	LastUpdated      time.Time `json:"last_updated"`       // Last metrics update time
 }
 
 // Collection holds the metadata for a single collection, including its shards.
@@ -108,6 +148,23 @@ type WorkerInfo struct {
 	GrpcAddress   string    `json:"grpc_address"`
 	RaftAddress   string    `json:"raft_address"`
 	LastHeartbeat time.Time `json:"last_heartbeat"`
+	// Load metrics for load-aware placement
+	CPUUsagePercent    float64 `json:"cpu_usage_percent"`
+	MemoryUsagePercent float64 `json:"memory_usage_percent"`
+	DiskUsagePercent   float64 `json:"disk_usage_percent"`
+	QueriesPerSecond   float64 `json:"queries_per_second"`
+	ActiveShards       int64   `json:"active_shards"`
+	VectorCount        int64   `json:"vector_count"`
+	MemoryBytes        int64   `json:"memory_bytes"`
+	// Capacity information for capacity-weighted placement
+	CPUCores      int32 `json:"cpu_cores"`      // Total CPU cores
+	TotalMemory   int64 `json:"total_memory"`   // Total memory in bytes
+	TotalDisk     int64 `json:"total_disk"`     // Total disk in bytes
+	TotalCapacity int64 `json:"total_capacity"` // Normalized capacity score
+	// Failure domain information for fault-tolerant placement
+	Rack   string `json:"rack"`   // Rack identifier
+	Zone   string `json:"zone"`   // Availability zone
+	Region string `json:"region"` // Region
 }
 
 // ======================================================================================
@@ -200,6 +257,25 @@ func (f *FSM) Update(entries []sm.Entry) ([]sm.Entry, error) {
 			} else {
 				f.applyUpdateShardLeader(payload)
 			}
+		case MoveShard:
+			var payload MoveShardPayload
+			if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
+				appErr = fmt.Errorf("failed to unmarshal MoveShard payload: %w", err)
+			} else {
+				if err := f.applyMoveShard(payload); err != nil {
+					appErr = err
+					result = 0
+				} else {
+					result = 1
+				}
+			}
+		case UpdateShardMetrics:
+			var payload ShardMetricsPayload
+			if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
+				appErr = fmt.Errorf("failed to unmarshal ShardMetrics payload: %w", err)
+			} else {
+				f.applyUpdateShardMetrics(payload)
+			}
 		default:
 			appErr = fmt.Errorf("unknown command type: %d", cmd.Type)
 		}
@@ -246,13 +322,33 @@ func (f *FSM) applyRegisterWorker(payload RegisterWorkerPayload) uint64 {
 	workerID := f.NextWorkerID
 	f.NextWorkerID++
 
+	// Calculate normalized capacity score
+	// Formula: weighted sum of normalized resources
+	// CPU cores: weight 0.3, Memory: weight 0.4, Disk: weight 0.3
+	// Base normalization: 8 cores, 32GB RAM, 500GB disk = 1000 base capacity
+	cpuScore := float64(payload.CPUCores) / 8.0 * 300.0
+	memScore := float64(payload.MemoryBytes) / (32 * 1024 * 1024 * 1024) * 400.0
+	diskScore := float64(payload.DiskBytes) / (500 * 1024 * 1024 * 1024) * 300.0
+	totalCapacity := int64(cpuScore + memScore + diskScore)
+	if totalCapacity < 100 {
+		totalCapacity = 100 // Minimum capacity to avoid division issues
+	}
+
 	f.Workers[workerID] = WorkerInfo{
 		ID:            workerID,
 		GrpcAddress:   payload.GrpcAddress,
 		RaftAddress:   payload.RaftAddress,
 		LastHeartbeat: time.Now().UTC(),
+		CPUCores:      payload.CPUCores,
+		TotalMemory:   payload.MemoryBytes,
+		TotalDisk:     payload.DiskBytes,
+		TotalCapacity: totalCapacity,
+		Rack:          payload.Rack,
+		Zone:          payload.Zone,
+		Region:        payload.Region,
 	}
-	fmt.Printf("Registered new worker %d with GRPC address %s and Raft address %s\n", workerID, payload.GrpcAddress, payload.RaftAddress)
+	fmt.Printf("Registered new worker %d with GRPC address %s, Raft address %s, capacity=%d, rack=%s, zone=%s, region=%s\n",
+		workerID, payload.GrpcAddress, payload.RaftAddress, totalCapacity, payload.Rack, payload.Zone, payload.Region)
 	return workerID
 }
 
@@ -287,13 +383,11 @@ func (f *FSM) applyCreateCollection(payload CreateCollectionPayload) error {
 	}
 	shardRangeSize := uint64(math.MaxUint64 / float64(numShards))
 
-	workerIDs := make([]uint64, 0, len(f.Workers))
-	for id := range f.Workers {
-		workerIDs = append(workerIDs, id)
-	}
+	// Get workers sorted by load (least loaded first)
+	workerIDs := f.getWorkersSortedByLoad()
 
-	// Assign replicas to shards in a round-robin fashion.
-	workerIdx := 0
+	// Assign replicas to shards using failure domain-aware placement.
+	// This ensures replicas are spread across different racks/zones for fault tolerance.
 	for i := 0; i < numShards; i++ {
 		shardID := f.NextShardID
 		f.NextShardID++
@@ -304,11 +398,8 @@ func (f *FSM) applyCreateCollection(payload CreateCollectionPayload) error {
 			endKey = math.MaxUint64 // Ensure the last shard covers the rest of the key space.
 		}
 
-		replicas := make([]uint64, 0, replicationFactor)
-		for j := 0; j < replicationFactor; j++ {
-			replicas = append(replicas, workerIDs[workerIdx%len(workerIDs)])
-			workerIdx++
-		}
+		// Select replicas using failure domain-aware placement
+		replicas := f.selectReplicasWithFailureDomain(workerIDs, replicationFactor)
 
 		shard := &ShardInfo{
 			ShardID:       shardID,
@@ -327,12 +418,228 @@ func (f *FSM) applyCreateCollection(payload CreateCollectionPayload) error {
 	return nil
 }
 
+// getWorkersSortedByLoad returns worker IDs sorted by capacity-normalized load (least loaded first)
+// Uses capacity-weighted placement: bigger nodes get proportionally more shards
+func (f *FSM) getWorkersSortedByLoad() []uint64 {
+	type workerLoad struct {
+		id        uint64
+		loadRatio float64 // load score / capacity (lower is better)
+		rawLoad   float64
+		capacity  int64
+	}
+
+	// Calculate total capacity of all workers for proportional allocation
+	var totalCapacity int64
+	for _, worker := range f.Workers {
+		totalCapacity += worker.TotalCapacity
+	}
+
+	loads := make([]workerLoad, 0, len(f.Workers))
+	for id, worker := range f.Workers {
+		rawLoad := calculateLoadScore(worker)
+		// Load ratio = raw load / normalized capacity
+		// This allows bigger nodes to have higher absolute load before being considered "full"
+		capacity := float64(worker.TotalCapacity)
+		if capacity < 100 {
+			capacity = 100 // Minimum capacity
+		}
+
+		// Calculate expected load based on capacity proportion
+		// If a node has 2x capacity, it can handle 2x load before reaching same load ratio
+		loadRatio := rawLoad / capacity
+
+		loads = append(loads, workerLoad{
+			id:        id,
+			loadRatio: loadRatio,
+			rawLoad:   rawLoad,
+			capacity:  worker.TotalCapacity,
+		})
+	}
+
+	// Sort by load ratio (ascending - nodes with most spare capacity relative to their size first)
+	for i := 0; i < len(loads); i++ {
+		for j := i + 1; j < len(loads); j++ {
+			if loads[j].loadRatio < loads[i].loadRatio {
+				loads[i], loads[j] = loads[j], loads[i]
+			}
+		}
+	}
+
+	result := make([]uint64, len(loads))
+	for i, wl := range loads {
+		result[i] = wl.id
+	}
+	return result
+}
+
+// getWorkersByCapacity returns workers sorted by total capacity (largest first)
+// Useful for initial placement when we want to fill big nodes first
+func (f *FSM) getWorkersByCapacity() []uint64 {
+	type workerCap struct {
+		id       uint64
+		capacity int64
+	}
+
+	caps := make([]workerCap, 0, len(f.Workers))
+	for id, worker := range f.Workers {
+		caps = append(caps, workerCap{id: id, capacity: worker.TotalCapacity})
+	}
+
+	// Sort by capacity (descending - largest nodes first)
+	for i := 0; i < len(caps); i++ {
+		for j := i + 1; j < len(caps); j++ {
+			if caps[j].capacity > caps[i].capacity {
+				caps[i], caps[j] = caps[j], caps[i]
+			}
+		}
+	}
+
+	result := make([]uint64, len(caps))
+	for i, wc := range caps {
+		result[i] = wc.id
+	}
+	return result
+}
+
+// calculateLoadScore computes a composite load score (lower is better)
+// This is the raw load score before capacity normalization
+func calculateLoadScore(worker WorkerInfo) float64 {
+	// Weight factors for different metrics
+	const (
+		cpuWeight    = 0.3
+		memoryWeight = 0.3
+		diskWeight   = 0.15
+		queryWeight  = 0.15
+		shardWeight  = 0.1
+	)
+
+	// Normalize query rate (assume 1000 QPS is high load)
+	normalizedQueries := math.Min(worker.QueriesPerSecond/1000.0, 1.0)
+
+	// Normalize active shards (assume 100 shards is high load)
+	normalizedShards := math.Min(float64(worker.ActiveShards)/100.0, 1.0)
+
+	score := worker.CPUUsagePercent*cpuWeight +
+		worker.MemoryUsagePercent*memoryWeight +
+		worker.DiskUsagePercent*diskWeight +
+		normalizedQueries*queryWeight*100 +
+		normalizedShards*shardWeight*100
+
+	return score
+}
+
+// selectReplicasWithFailureDomain selects replica workers ensuring they are spread across failure domains
+// Priority: Zone > Rack (tries to spread across zones first, then racks within zones)
+func (f *FSM) selectReplicasWithFailureDomain(sortedWorkerIDs []uint64, replicationFactor int) []uint64 {
+	if replicationFactor <= 1 {
+		// Single replica, just return the first (least loaded) worker
+		if len(sortedWorkerIDs) > 0 {
+			return []uint64{sortedWorkerIDs[0]}
+		}
+		return nil
+	}
+
+	selected := make([]uint64, 0, replicationFactor)
+	usedZones := make(map[string]bool)
+	usedRacks := make(map[string]bool)
+
+	// First pass: try to select workers from different zones
+	for _, workerID := range sortedWorkerIDs {
+		if len(selected) >= replicationFactor {
+			break
+		}
+
+		worker, ok := f.Workers[workerID]
+		if !ok {
+			continue
+		}
+
+		// Check if this zone is already used
+		zoneKey := worker.Region + "/" + worker.Zone
+		if !usedZones[zoneKey] {
+			selected = append(selected, workerID)
+			usedZones[zoneKey] = true
+			usedRacks[worker.Region+"/"+worker.Zone+"/"+worker.Rack] = true
+		}
+	}
+
+	// Second pass: if we still need more replicas, try different racks within used zones
+	if len(selected) < replicationFactor {
+		for _, workerID := range sortedWorkerIDs {
+			if len(selected) >= replicationFactor {
+				break
+			}
+
+			// Skip already selected workers
+			alreadySelected := false
+			for _, s := range selected {
+				if s == workerID {
+					alreadySelected = true
+					break
+				}
+			}
+			if alreadySelected {
+				continue
+			}
+
+			worker, ok := f.Workers[workerID]
+			if !ok {
+				continue
+			}
+
+			// Check if this rack is already used
+			rackKey := worker.Region + "/" + worker.Zone + "/" + worker.Rack
+			if !usedRacks[rackKey] {
+				selected = append(selected, workerID)
+				usedRacks[rackKey] = true
+			}
+		}
+	}
+
+	// Third pass: if still need more, just fill with remaining workers (best effort)
+	if len(selected) < replicationFactor {
+		for _, workerID := range sortedWorkerIDs {
+			if len(selected) >= replicationFactor {
+				break
+			}
+
+			// Skip already selected workers
+			alreadySelected := false
+			for _, s := range selected {
+				if s == workerID {
+					alreadySelected = true
+					break
+				}
+			}
+			if !alreadySelected {
+				selected = append(selected, workerID)
+			}
+		}
+	}
+
+	return selected
+}
+
+const loadMetricDecayFactor = 0.7 // Exponential decay factor for smoothing load metrics
+
 func (f *FSM) applyUpdateWorkerHeartbeat(payload UpdateWorkerHeartbeatPayload) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	if worker, ok := f.Workers[payload.WorkerID]; ok {
 		worker.LastHeartbeat = time.Now().UTC()
+
+		// Apply exponential decay to smooth load metrics
+		worker.CPUUsagePercent = worker.CPUUsagePercent*loadMetricDecayFactor + payload.CPUUsagePercent*(1-loadMetricDecayFactor)
+		worker.MemoryUsagePercent = worker.MemoryUsagePercent*loadMetricDecayFactor + payload.MemoryUsagePercent*(1-loadMetricDecayFactor)
+		worker.DiskUsagePercent = worker.DiskUsagePercent*loadMetricDecayFactor + payload.DiskUsagePercent*(1-loadMetricDecayFactor)
+		worker.QueriesPerSecond = worker.QueriesPerSecond*loadMetricDecayFactor + payload.QueriesPerSecond*(1-loadMetricDecayFactor)
+
+		// Direct values (not decayed)
+		worker.ActiveShards = payload.ActiveShards
+		worker.VectorCount = payload.VectorCount
+		worker.MemoryBytes = payload.MemoryBytes
+
 		f.Workers[payload.WorkerID] = worker
 	}
 }
@@ -347,6 +654,72 @@ func (f *FSM) applyUpdateShardLeader(payload UpdateShardLeaderPayload) {
 			return
 		}
 	}
+}
+
+func (f *FSM) applyUpdateShardMetrics(payload ShardMetricsPayload) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	for _, collection := range f.Collections {
+		if shard, ok := collection.Shards[payload.ShardID]; ok {
+			// Apply exponential decay to smooth metrics
+			const decayFactor = 0.7
+			shard.QueriesPerSecond = shard.QueriesPerSecond*decayFactor + payload.QueriesPerSecond*(1-decayFactor)
+			shard.AvgLatencyMs = shard.AvgLatencyMs*decayFactor + payload.AvgLatencyMs*(1-decayFactor)
+			shard.TotalQueries += int64(payload.QueriesPerSecond) // Approximate
+			shard.LastUpdated = time.Now().UTC()
+			return
+		}
+	}
+}
+
+func (f *FSM) applyMoveShard(payload MoveShardPayload) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	// Find the shard
+	var targetShard *ShardInfo
+	var targetCollection string
+	for collName, collection := range f.Collections {
+		if shard, ok := collection.Shards[payload.ShardID]; ok {
+			targetShard = shard
+			targetCollection = collName
+			break
+		}
+	}
+
+	if targetShard == nil {
+		return fmt.Errorf("shard %d not found", payload.ShardID)
+	}
+
+	// Verify source worker has this shard
+	hasShard := false
+	for _, replicaID := range targetShard.Replicas {
+		if replicaID == payload.SourceWorkerID {
+			hasShard = true
+			break
+		}
+	}
+	if !hasShard {
+		return fmt.Errorf("source worker %d does not have shard %d", payload.SourceWorkerID, payload.ShardID)
+	}
+
+	// Verify target worker exists
+	if _, ok := f.Workers[payload.TargetWorkerID]; !ok {
+		return fmt.Errorf("target worker %d not found", payload.TargetWorkerID)
+	}
+
+	// Replace source with target in replicas list
+	for i, replicaID := range targetShard.Replicas {
+		if replicaID == payload.SourceWorkerID {
+			targetShard.Replicas[i] = payload.TargetWorkerID
+			break
+		}
+	}
+
+	fmt.Printf("FSM: Moved shard %d from worker %d to worker %d (collection: %s)\n",
+		payload.ShardID, payload.SourceWorkerID, payload.TargetWorkerID, targetCollection)
+	return nil
 }
 
 // Lookup is used for read-only queries of the FSM's state. It is called by

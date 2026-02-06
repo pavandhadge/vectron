@@ -5,12 +5,15 @@
 // - Automatically repairs under-replicated shards
 // - Cleans up dead workers
 // - Triggers alerts for issues that require manual intervention
+// - Background rebalancing with compaction-aware throttling
 
 package server
 
 import (
 	"encoding/json"
 	"fmt"
+	"math"
+	"sync"
 	"time"
 
 	"github.com/pavandhadge/vectron/placementdriver/internal/fsm"
@@ -110,6 +113,9 @@ func (r *Reconciler) reconcile() {
 
 	// Step 3: Check for leaderless shards and trigger re-election
 	r.checkLeaderlessShards()
+
+	// Step 4: Log background rebalancing status (if enabled)
+	// Note: The RebalanceManager runs independently with its own scheduling
 
 	duration := time.Since(start)
 	fmt.Printf("✅ Reconciliation pass completed in %v\n\n", duration)
@@ -386,4 +392,484 @@ func (r *Reconciler) GetShardDistribution() []ShardDistribution {
 	}
 
 	return distribution
+}
+
+// ==============================================================================
+// RebalanceManager - Background rebalancing with throttling
+// ==============================================================================
+
+// RebalanceConfig holds configuration for background rebalancing
+type RebalanceConfig struct {
+	// EnableBackgroundRebalance enables automatic shard rebalancing
+	EnableBackgroundRebalance bool
+
+	// RebalanceInterval is the minimum time between rebalance operations
+	RebalanceInterval time.Duration
+
+	// MaxConcurrentMoves limits concurrent shard migrations
+	MaxConcurrentMoves int
+
+	// ImbalanceThreshold triggers rebalancing when exceeded (e.g., 1.5 = 50% deviation)
+	ImbalanceThreshold float64
+
+	// CompactionBackoffDuration pauses rebalancing during suspected compaction
+	CompactionBackoffDuration time.Duration
+
+	// MaxMovesPerInterval limits shard moves per rebalance cycle
+	MaxMovesPerInterval int
+}
+
+// DefaultRebalanceConfig returns default rebalancing configuration
+func DefaultRebalanceConfig() *RebalanceConfig {
+	return &RebalanceConfig{
+		EnableBackgroundRebalance: true,
+		RebalanceInterval:         5 * time.Minute,
+		MaxConcurrentMoves:        2,
+		ImbalanceThreshold:        1.3, // 30% deviation triggers rebalance
+		CompactionBackoffDuration: 2 * time.Minute,
+		MaxMovesPerInterval:       3,
+	}
+}
+
+// RebalanceManager handles background shard rebalancing with throttling
+type RebalanceManager struct {
+	server *Server
+	config *RebalanceConfig
+	stopCh chan struct{}
+	mu     sync.RWMutex
+
+	// Tracking state
+	lastRebalanceTime   time.Time
+	movesInProgress     int
+	movesCompletedToday int
+	totalBytesMoved     int64
+
+	// Compaction detection
+	recentMoveLatencies  []time.Duration
+	compactionDetected   bool
+	compactionBackoffEnd time.Time
+}
+
+// NewRebalanceManager creates a new rebalancing manager
+func NewRebalanceManager(s *Server, config *RebalanceConfig) *RebalanceManager {
+	if config == nil {
+		config = DefaultRebalanceConfig()
+	}
+
+	return &RebalanceManager{
+		server:              s,
+		config:              config,
+		stopCh:              make(chan struct{}),
+		recentMoveLatencies: make([]time.Duration, 0, 10),
+	}
+}
+
+// Start begins the background rebalancing loop
+func (rm *RebalanceManager) Start() {
+	if !rm.config.EnableBackgroundRebalance {
+		fmt.Println("⏸️  Background rebalancing is disabled")
+		return
+	}
+
+	fmt.Printf("🔄 Starting background rebalancing manager (interval: %v, threshold: %.1f)\n",
+		rm.config.RebalanceInterval, rm.config.ImbalanceThreshold)
+
+	ticker := time.NewTicker(rm.config.RebalanceInterval)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				rm.runRebalanceCycle()
+			case <-rm.stopCh:
+				ticker.Stop()
+				fmt.Println("🛑 Rebalancing manager stopped")
+				return
+			}
+		}
+	}()
+}
+
+// Stop stops the rebalancing manager
+func (rm *RebalanceManager) Stop() {
+	close(rm.stopCh)
+}
+
+// runRebalanceCycle performs a single rebalancing pass with throttling
+func (rm *RebalanceManager) runRebalanceCycle() {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	// Check if we're in compaction backoff
+	if rm.compactionDetected {
+		if time.Now().Before(rm.compactionBackoffEnd) {
+			fmt.Printf("⏸️  Rebalancing paused due to compaction detection (resumes at %s)\n",
+				rm.compactionBackoffEnd.Format("15:04:05"))
+			return
+		}
+		rm.compactionDetected = false
+		fmt.Println("▶️  Compaction backoff ended, resuming rebalancing")
+	}
+
+	// Check if we have capacity for more moves
+	if rm.movesInProgress >= rm.config.MaxConcurrentMoves {
+		fmt.Printf("⏸️  Rebalancing skipped: %d moves already in progress (max: %d)\n",
+			rm.movesInProgress, rm.config.MaxConcurrentMoves)
+		return
+	}
+
+	// Analyze current distribution
+	moves := rm.identifyRebalanceMoves()
+	if len(moves) == 0 {
+		return // No rebalancing needed
+	}
+
+	// Execute moves with throttling
+	movesToExecute := rm.config.MaxMovesPerInterval
+	if movesToExecute > len(moves) {
+		movesToExecute = len(moves)
+	}
+	if movesToExecute > rm.config.MaxConcurrentMoves-rm.movesInProgress {
+		movesToExecute = rm.config.MaxConcurrentMoves - rm.movesInProgress
+	}
+
+	fmt.Printf("🔄 Executing %d shard moves (identified %d total, %d in progress)\n",
+		movesToExecute, len(moves), rm.movesInProgress)
+
+	for i := 0; i < movesToExecute; i++ {
+		move := moves[i]
+		if err := rm.executeMove(move); err != nil {
+			fmt.Printf("❌ Failed to move shard %d: %v\n", move.ShardID, err)
+		} else {
+			rm.movesInProgress++
+			rm.movesCompletedToday++
+			fmt.Printf("✅ Initiated move: shard %d from worker %d to %d\n",
+				move.ShardID, move.SourceWorkerID, move.TargetWorkerID)
+		}
+	}
+
+	rm.lastRebalanceTime = time.Now()
+}
+
+// RebalanceMove represents a planned shard migration
+type RebalanceMove struct {
+	ShardID        uint64
+	SourceWorkerID uint64
+	TargetWorkerID uint64
+	Bytes          int64
+	Reason         string // "load_imbalance", "failure_domain", "hot_shard"
+}
+
+// identifyRebalanceMoves analyzes the cluster and identifies necessary shard moves
+func (rm *RebalanceManager) identifyRebalanceMoves() []RebalanceMove {
+	var moves []RebalanceMove
+
+	// Get current distribution
+	workerShardCounts := make(map[uint64]int)
+	workerLoadScores := make(map[uint64]float64)
+	totalShards := 0
+
+	healthyWorkers := rm.server.fsm.GetHealthyWorkers()
+	if len(healthyWorkers) < 2 {
+		return moves // Need at least 2 workers to rebalance
+	}
+
+	for _, collection := range rm.server.fsm.GetCollections() {
+		for _, shard := range collection.Shards {
+			totalShards++
+			for _, replicaID := range shard.Replicas {
+				workerShardCounts[replicaID]++
+			}
+		}
+	}
+
+	// Calculate average load
+	avgShards := float64(totalShards*fsm.DefaultReplicationFactor) / float64(len(healthyWorkers))
+	threshold := avgShards * rm.config.ImbalanceThreshold
+
+	// Identify overloaded and underloaded workers
+	var overloaded, underloaded []uint64
+	for _, worker := range healthyWorkers {
+		count := workerShardCounts[worker.ID]
+		workerLoadScores[worker.ID] = float64(count)
+
+		if float64(count) > threshold {
+			overloaded = append(overloaded, worker.ID)
+		} else if float64(count) < avgShards/rm.config.ImbalanceThreshold {
+			underloaded = append(underloaded, worker.ID)
+		}
+	}
+
+	if len(overloaded) == 0 || len(underloaded) == 0 {
+		return moves // Distribution is balanced enough
+	}
+
+	fmt.Printf("📊 Detected load imbalance: avg=%.1f, threshold=%.1f, overloaded=%v, underloaded=%v\n",
+		avgShards, threshold, overloaded, underloaded)
+
+	// Plan moves from overloaded to underloaded workers
+	for _, sourceID := range overloaded {
+		// Find movable shards on this worker
+		movableShards := rm.getMovableShards(sourceID)
+
+		for _, shard := range movableShards {
+			if len(moves) >= rm.config.MaxMovesPerInterval*2 {
+				break // Don't plan too many moves at once
+			}
+
+			// Find best target (least loaded worker that doesn't already have this shard)
+			targetID := rm.findBestTarget(shard.ShardID, underloaded, workerShardCounts)
+			if targetID == 0 {
+				continue
+			}
+
+			moves = append(moves, RebalanceMove{
+				ShardID:        shard.ShardID,
+				SourceWorkerID: sourceID,
+				TargetWorkerID: targetID,
+				Bytes:          0, // Would be populated from actual shard size
+				Reason:         "load_imbalance",
+			})
+
+			// Update counts for planning
+			workerShardCounts[sourceID]--
+			workerShardCounts[targetID]++
+		}
+	}
+
+	// Check for hot shards from health report
+	healthReport := rm.server.fsm.GetHealthReport()
+	if len(healthReport.HotShards) > 0 {
+		fmt.Printf("🔥 Detected %d hot shards, planning targeted moves...\n", len(healthReport.HotShards))
+		for _, hotShard := range healthReport.HotShards {
+			// Find a target worker that doesn't have this shard
+			targetID := rm.findBestTargetForHotShard(hotShard.ShardID, healthyWorkers, workerShardCounts)
+			if targetID != 0 && targetID != hotShard.WorkerID {
+				// Check if we already have a move planned for this shard
+				alreadyPlanned := false
+				for _, move := range moves {
+					if move.ShardID == hotShard.ShardID {
+						alreadyPlanned = true
+						break
+					}
+				}
+				if !alreadyPlanned {
+					moves = append(moves, RebalanceMove{
+						ShardID:        hotShard.ShardID,
+						SourceWorkerID: hotShard.WorkerID,
+						TargetWorkerID: targetID,
+						Bytes:          0,
+						Reason:         "hot_shard_" + hotShard.Reason,
+					})
+					workerShardCounts[hotShard.WorkerID]--
+					workerShardCounts[targetID]++
+				}
+			}
+		}
+	}
+
+	return moves
+}
+
+// findBestTargetForHotShard finds the best target worker for a hot shard
+func (rm *RebalanceManager) findBestTargetForHotShard(shardID uint64, healthyWorkers []fsm.WorkerInfo, counts map[uint64]int) uint64 {
+	var bestTarget uint64
+	minLoad := float64(1 << 30) // Very large number
+
+	for _, worker := range healthyWorkers {
+		// Check if worker already has this shard
+		shards := rm.server.fsm.GetShardsOnWorker(worker.ID)
+		hasShard := false
+		for _, shard := range shards {
+			if shard.ShardID == shardID {
+				hasShard = true
+				break
+			}
+		}
+		if hasShard {
+			continue
+		}
+
+		// Calculate load ratio (current shards / capacity)
+		loadRatio := float64(counts[worker.ID]) / float64(worker.TotalCapacity)
+		if loadRatio < minLoad {
+			minLoad = loadRatio
+			bestTarget = worker.ID
+		}
+	}
+
+	return bestTarget
+}
+
+// getMovableShards returns shards that can be moved from a worker
+func (rm *RebalanceManager) getMovableShards(workerID uint64) []*fsm.ShardInfo {
+	var movable []*fsm.ShardInfo
+
+	for _, collection := range rm.server.fsm.GetCollections() {
+		for _, shard := range collection.Shards {
+			// Check if this worker has this shard
+			hasShard := false
+			for _, replicaID := range shard.Replicas {
+				if replicaID == workerID {
+					hasShard = true
+					break
+				}
+			}
+			if !hasShard {
+				continue
+			}
+
+			// Only move if we have other healthy replicas
+			healthyReplicas := 0
+			for _, replicaID := range shard.Replicas {
+				if rm.server.fsm.IsWorkerHealthy(replicaID) {
+					healthyReplicas++
+				}
+			}
+
+			// Only move if we have at least 2 healthy replicas (don't break quorum)
+			if healthyReplicas >= 2 {
+				movable = append(movable, shard)
+			}
+		}
+	}
+
+	return movable
+}
+
+// findBestTarget finds the best target worker for a shard move
+func (rm *RebalanceManager) findBestTarget(shardID uint64, candidates []uint64, counts map[uint64]int) uint64 {
+	var bestTarget uint64
+	minCount := math.MaxInt32
+
+	for _, workerID := range candidates {
+		// Check if worker already has this shard
+		shards := rm.server.fsm.GetShardsOnWorker(workerID)
+		hasShard := false
+		for _, shard := range shards {
+			if shard.ShardID == shardID {
+				hasShard = true
+				break
+			}
+		}
+		if hasShard {
+			continue
+		}
+
+		// Pick the least loaded candidate
+		if counts[workerID] < minCount {
+			minCount = counts[workerID]
+			bestTarget = workerID
+		}
+	}
+
+	return bestTarget
+}
+
+// executeMove proposes a shard move via Raft
+func (rm *RebalanceManager) executeMove(move RebalanceMove) error {
+	payload := fsm.MoveShardPayload{
+		ShardID:        move.ShardID,
+		SourceWorkerID: move.SourceWorkerID,
+		TargetWorkerID: move.TargetWorkerID,
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal move payload: %w", err)
+	}
+
+	cmd := fsm.Command{Type: fsm.MoveShard, Payload: payloadBytes}
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to marshal move command: %w", err)
+	}
+
+	// Use a shorter timeout for moves to detect slow operations (possible compaction)
+	start := time.Now()
+	_, err = rm.server.raft.Propose(cmdBytes, 10*time.Second)
+	duration := time.Since(start)
+
+	if err != nil {
+		// Check if this might be due to compaction (slow operation)
+		if duration > 5*time.Second {
+			rm.detectCompaction(duration)
+		}
+		return fmt.Errorf("failed to propose move: %w", err)
+	}
+
+	// Track latency for compaction detection
+	rm.trackMoveLatency(duration)
+
+	return nil
+}
+
+// trackMoveLatency records move latency for compaction detection
+func (rm *RebalanceManager) trackMoveLatency(latency time.Duration) {
+	rm.recentMoveLatencies = append(rm.recentMoveLatencies, latency)
+	if len(rm.recentMoveLatencies) > 10 {
+		rm.recentMoveLatencies = rm.recentMoveLatencies[1:]
+	}
+
+	// Detect if latencies are increasing (possible compaction)
+	if len(rm.recentMoveLatencies) >= 5 {
+		avgRecent := rm.averageLatency(rm.recentMoveLatencies[len(rm.recentMoveLatencies)-3:])
+		avgPrevious := rm.averageLatency(rm.recentMoveLatencies[:len(rm.recentMoveLatencies)-3])
+
+		if avgRecent > avgPrevious*2 && avgRecent > 2*time.Second {
+			rm.detectCompaction(avgRecent)
+		}
+	}
+}
+
+// averageLatency calculates average duration
+func (rm *RebalanceManager) averageLatency(latencies []time.Duration) time.Duration {
+	if len(latencies) == 0 {
+		return 0
+	}
+	var sum time.Duration
+	for _, l := range latencies {
+		sum += l
+	}
+	return sum / time.Duration(len(latencies))
+}
+
+// detectCompaction marks that compaction is likely happening and backs off
+func (rm *RebalanceManager) detectCompaction(indicator time.Duration) {
+	if rm.compactionDetected {
+		return // Already in backoff
+	}
+
+	rm.compactionDetected = true
+	rm.compactionBackoffEnd = time.Now().Add(rm.config.CompactionBackoffDuration)
+
+	fmt.Printf("⚠️  Compaction detected (indicator: %v). Pausing rebalancing for %v\n",
+		indicator, rm.config.CompactionBackoffDuration)
+}
+
+// MoveCompleted should be called when a shard move completes (success or failure)
+func (rm *RebalanceManager) MoveCompleted(success bool, bytesMoved int64) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	if rm.movesInProgress > 0 {
+		rm.movesInProgress--
+	}
+
+	if success {
+		rm.totalBytesMoved += bytesMoved
+	}
+}
+
+// GetStats returns current rebalancing statistics
+func (rm *RebalanceManager) GetStats() map[string]interface{} {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+
+	return map[string]interface{}{
+		"moves_in_progress":     rm.movesInProgress,
+		"moves_completed_today": rm.movesCompletedToday,
+		"total_bytes_moved":     rm.totalBytesMoved,
+		"compaction_detected":   rm.compactionDetected,
+		"last_rebalance_time":   rm.lastRebalanceTime,
+	}
 }
