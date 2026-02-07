@@ -308,8 +308,14 @@ func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dime
 		syncInterval = 1 * time.Second
 		syncMaxInterval = 5 * time.Second
 	}
-	writeBufferSize := 256 * 1024 * 1024
+	// Keep the default small to avoid large WAL preallocation on small datasets.
+	writeBufferSize := 32 * 1024 * 1024
 	if v := os.Getenv("VECTRON_WRITE_BUFFER_MB"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			writeBufferSize = n * 1024 * 1024
+		}
+	} else if v := os.Getenv("PEBBLE_MEMTABLE_MB"); v != "" {
+		// Honor Pebble's memtable env if no Vectron-specific override is set.
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			writeBufferSize = n * 1024 * 1024
 		}

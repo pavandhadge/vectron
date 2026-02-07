@@ -5,6 +5,7 @@ package idxhnsw
 /*
 #cgo CFLAGS: -O3 -mavx2
 #include <immintrin.h>
+#include <stdlib.h>
 
 static int dotProductInt8AVX2(const signed char* a, const signed char* b, int n) {
     __m256i sum = _mm256_setzero_si256();
@@ -66,34 +67,56 @@ func dotProductInt8BatchSIMD(q []int8, vecs [][]int8, out []int32) bool {
 		return false
 	}
 
-	ptrs := int8PtrPool.Get().([]*C.schar)
-	if cap(ptrs) < len(vecs) {
-		ptrs = make([]*C.schar, len(vecs))
-	} else {
-		ptrs = ptrs[:len(vecs)]
+	buf := getCPtrBuf(len(vecs))
+	if buf.ptr == nil {
+		putCPtrBuf(buf)
+		return false
 	}
+	ptrs := unsafe.Slice((**C.schar)(buf.ptr), len(vecs))
 	for i := range vecs {
 		if len(vecs[i]) != len(q) || len(vecs[i]) == 0 {
-			int8PtrPool.Put(ptrs[:0])
+			putCPtrBuf(buf)
 			return false
 		}
 		ptrs[i] = (*C.schar)(unsafe.Pointer(&vecs[i][0]))
 	}
 	C.dotProductInt8BatchAVX2(
 		(*C.schar)(unsafe.Pointer(&q[0])),
-		(**C.schar)(unsafe.Pointer(&ptrs[0])),
+		(**C.schar)(buf.ptr),
 		(*C.int)(unsafe.Pointer(&out[0])),
 		C.int(len(vecs)),
 		C.int(len(q)),
 	)
-	int8PtrPool.Put(ptrs[:0])
+	putCPtrBuf(buf)
 	runtime.KeepAlive(q)
 	runtime.KeepAlive(vecs)
 	return true
 }
 
-var int8PtrPool = sync.Pool{
+type cPtrBuf struct {
+	ptr unsafe.Pointer
+	cap int
+}
+
+var cPtrBufPool = sync.Pool{
 	New: func() interface{} {
-		return make([]*C.schar, 0, 256)
+		return &cPtrBuf{}
 	},
+}
+
+func getCPtrBuf(n int) *cPtrBuf {
+	buf := cPtrBufPool.Get().(*cPtrBuf)
+	if buf.cap < n {
+		if buf.ptr != nil {
+			C.free(buf.ptr)
+		}
+		size := C.size_t(n) * C.size_t(unsafe.Sizeof(uintptr(0)))
+		buf.ptr = C.malloc(size)
+		buf.cap = n
+	}
+	return buf
+}
+
+func putCPtrBuf(buf *cPtrBuf) {
+	cPtrBufPool.Put(buf)
 }

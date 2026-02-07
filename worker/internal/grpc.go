@@ -92,6 +92,59 @@ func envIntDefault(key string, def int) int {
 	return def
 }
 
+func isRetryableProposeErr(err error) bool {
+	return errors.Is(err, dragonboat.ErrSystemBusy) || errors.Is(err, dragonboat.ErrTimeout)
+}
+
+func backoffDelay(baseMs int, attempt int) time.Duration {
+	if baseMs <= 0 {
+		baseMs = 10
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	// Exponential backoff with small deterministic jitter.
+	delay := time.Duration(baseMs) * time.Millisecond * time.Duration(1<<uint(attempt-1))
+	jitter := time.Duration((time.Now().UnixNano() % 7)) * time.Millisecond
+	return delay + jitter
+}
+
+func (s *GrpcServer) syncProposeWithRetry(ctx context.Context, shardID uint64, cmdBytes []byte) error {
+	retries := envIntDefault("VECTRON_RAFT_PROPOSE_RETRIES", 3)
+	backoffMs := envIntDefault("VECTRON_RAFT_PROPOSE_BACKOFF_MS", 25)
+	timeoutMs := envIntDefault("VECTRON_RAFT_PROPOSE_TIMEOUT_MS", int(raftTimeout.Milliseconds()))
+	if retries < 0 {
+		retries = 0
+	}
+	attempts := retries + 1
+	cs := s.nodeHost.GetNoOPSession(shardID)
+
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		attemptCtx := ctx
+		var cancel context.CancelFunc
+		if timeoutMs > 0 {
+			attemptCtx, cancel = context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
+		}
+		_, err := s.nodeHost.SyncPropose(attemptCtx, cs, cmdBytes)
+		if cancel != nil {
+			cancel()
+		}
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isRetryableProposeErr(err) || attempt == attempts {
+			return err
+		}
+		time.Sleep(backoffDelay(backoffMs, attempt))
+	}
+	return lastErr
+}
+
 type searchMinHeap []searchHeapItem
 
 func (h searchMinHeap) Len() int           { return len(h) }
@@ -385,9 +438,7 @@ func (s *GrpcServer) StoreVector(ctx context.Context, req *worker.StoreVectorReq
 	}
 
 	// Propose the command to the shard's Raft group. This is a blocking call.
-	cs := s.nodeHost.GetNoOPSession(req.GetShardId())
-	_, err = s.nodeHost.SyncPropose(ctx, cs, cmdBytes)
-	if err != nil {
+	if err := s.syncProposeWithRetry(ctx, req.GetShardId(), cmdBytes); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to propose StoreVector command: %v", err)
 	}
 	if shouldLogHotPath() {
@@ -436,8 +487,7 @@ func (s *GrpcServer) BatchStoreVector(ctx context.Context, req *worker.BatchStor
 		return nil, status.Errorf(codes.Internal, "failed to marshal batch command: %v", err)
 	}
 
-	cs := s.nodeHost.GetNoOPSession(req.GetShardId())
-	if _, err := s.nodeHost.SyncPropose(ctx, cs, cmdBytes); err != nil {
+	if err := s.syncProposeWithRetry(ctx, req.GetShardId(), cmdBytes); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to propose batch StoreVector command: %v", err)
 	}
 	if shouldLogHotPath() {
@@ -497,8 +547,7 @@ func (s *GrpcServer) StreamBatchStoreVector(stream worker.WorkerService_StreamBa
 			return status.Errorf(codes.Internal, "failed to marshal batch command: %v", err)
 		}
 
-		cs := s.nodeHost.GetNoOPSession(req.GetShardId())
-		if _, err := s.nodeHost.SyncPropose(stream.Context(), cs, cmdBytes); err != nil {
+		if err := s.syncProposeWithRetry(stream.Context(), req.GetShardId(), cmdBytes); err != nil {
 			return status.Errorf(codes.Internal, "failed to propose batch StoreVector command: %v", err)
 		}
 		totalStored += int32(len(cmdVectors))
@@ -956,10 +1005,8 @@ func (s *GrpcServer) DeleteVector(ctx context.Context, req *worker.DeleteVectorR
 		return nil, status.Errorf(codes.Internal, "failed to marshal command: %v", err)
 	}
 
-	cs := s.nodeHost.GetNoOPSession(req.GetShardId())
 	// Propose the delete command to the shard's Raft group.
-	_, err = s.nodeHost.SyncPropose(ctx, cs, cmdBytes)
-	if err != nil {
+	if err := s.syncProposeWithRetry(ctx, req.GetShardId(), cmdBytes); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to propose DeleteVector command: %v", err)
 	}
 

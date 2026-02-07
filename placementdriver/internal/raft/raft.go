@@ -3,7 +3,11 @@ package raft
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
+	"strconv"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/lni/dragonboat/v3"
@@ -54,6 +58,7 @@ func NewNode(cfg Config) (*Node, error) {
 		RaftEventListener:   listener,
 		SystemEventListener: listener,
 	}
+	applyLogDBProfile(&nhc)
 
 	// Create the NodeHost instance.
 	nh, err := dragonboat.NewNodeHost(nhc)
@@ -90,6 +95,69 @@ func NewNode(cfg Config) (*Node, error) {
 			fsm:      fsmInstance,
 		},
 		nil
+}
+
+func applyLogDBProfile(nhc *config.NodeHostConfig) {
+	profile := strings.ToLower(strings.TrimSpace(os.Getenv("VECTRON_LOGDB_PROFILE")))
+	switch profile {
+	case "":
+		// Default to small to avoid large LogDB preallocation on light workloads.
+		nhc.Expert.LogDB = config.GetSmallMemLogDBConfig()
+	case "tiny":
+		nhc.Expert.LogDB = config.GetTinyMemLogDBConfig()
+	case "small":
+		nhc.Expert.LogDB = config.GetSmallMemLogDBConfig()
+	case "medium":
+		nhc.Expert.LogDB = config.GetMediumMemLogDBConfig()
+	case "large":
+		nhc.Expert.LogDB = config.GetLargeMemLogDBConfig()
+	case "default":
+		// Leave empty to let Dragonboat choose its default.
+	default:
+		log.Printf("Unknown VECTRON_LOGDB_PROFILE=%q, using small", profile)
+		nhc.Expert.LogDB = config.GetSmallMemLogDBConfig()
+	}
+	applyLogDBOverrides(nhc)
+}
+
+func applyLogDBOverrides(nhc *config.NodeHostConfig) {
+	if nhc == nil {
+		return
+	}
+	cfg := nhc.Expert.LogDB
+	if v := envUintMB("VECTRON_LOGDB_WRITE_BUFFER_MB"); v > 0 {
+		cfg.KVWriteBufferSize = v
+	}
+	if v := envUint("VECTRON_LOGDB_MAX_WRITE_BUFFERS"); v > 0 {
+		cfg.KVMaxWriteBufferNumber = v
+	}
+	if v := envUint("VECTRON_LOGDB_KEEP_LOGS"); v > 0 {
+		cfg.KVKeepLogFileNum = v
+	}
+	if v := envUint("VECTRON_LOGDB_RECYCLE_LOGS"); v > 0 {
+		cfg.KVRecycleLogFileNum = v
+	}
+	nhc.Expert.LogDB = cfg
+}
+
+func envUint(key string) uint64 {
+	val := strings.TrimSpace(os.Getenv(key))
+	if val == "" {
+		return 0
+	}
+	parsed, err := strconv.ParseUint(val, 10, 64)
+	if err != nil || parsed == 0 {
+		return 0
+	}
+	return parsed
+}
+
+func envUintMB(key string) uint64 {
+	mb := envUint(key)
+	if mb == 0 {
+		return 0
+	}
+	return mb * 1024 * 1024
 }
 
 // GetFSM returns a pointer to the FSM instance managed by this Raft node.

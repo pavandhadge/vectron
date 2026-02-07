@@ -22,6 +22,7 @@
 package main_test
 
 import (
+	"bufio"
 	"context"
 	"encoding/csv"
 	"fmt"
@@ -203,6 +204,7 @@ type BenchmarkTest struct {
 	jwtToken       string
 	apiKey         string
 	userID         string
+	baseEnv        []string
 
 	// gRPC clients
 	authClient      authpb.AuthServiceClient
@@ -239,6 +241,78 @@ func resolveBenchmarkPaths(t *testing.T) {
 	benchmarkLogTempDir = filepath.Join(benchmarkBaseTempDir, "logs")
 }
 
+func loadEnvFile(path string) map[string]string {
+	f, err := os.Open(path)
+	if err != nil {
+		return map[string]string{}
+	}
+	defer f.Close()
+
+	env := make(map[string]string)
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "export ") {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		}
+		idx := strings.Index(line, "=")
+		if idx < 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:idx])
+		val := strings.TrimSpace(line[idx+1:])
+		if len(val) >= 2 {
+			if (val[0] == '"' && val[len(val)-1] == '"') || (val[0] == '\'' && val[len(val)-1] == '\'') {
+				val = val[1 : len(val)-1]
+			}
+		}
+		if key != "" {
+			env[key] = val
+		}
+	}
+	return env
+}
+
+func mergeEnv(base []string, extra map[string]string) []string {
+	out := make(map[string]string, len(base)+len(extra))
+	for _, kv := range base {
+		if kv == "" {
+			continue
+		}
+		idx := strings.Index(kv, "=")
+		if idx <= 0 {
+			continue
+		}
+		out[kv[:idx]] = kv[idx+1:]
+	}
+	for k, v := range extra {
+		out[k] = v
+	}
+
+	result := make([]string, 0, len(out))
+	for k, v := range out {
+		result = append(result, fmt.Sprintf("%s=%s", k, v))
+	}
+	return result
+}
+
+func buildBenchmarkEnv(t *testing.T) []string {
+	t.Helper()
+	root, err := findRepoRootBenchmark()
+	if err != nil {
+		return os.Environ()
+	}
+	envPath := filepath.Join(root, ".env")
+	extra := loadEnvFile(envPath)
+	if len(extra) == 0 {
+		return os.Environ()
+	}
+	return mergeEnv(os.Environ(), extra)
+}
+
 // =============================================================================
 // Main Research Benchmark Test
 // =============================================================================
@@ -269,6 +343,7 @@ func TestResearchBenchmark(t *testing.T) {
 	}
 
 	suite := &BenchmarkTest{t: t}
+	suite.baseEnv = buildBenchmarkEnv(t)
 	suite.ctx, suite.cancel = context.WithTimeout(context.Background(), 60*time.Minute)
 	t.Cleanup(suite.cleanup)
 	defer suite.cancel()
@@ -528,8 +603,9 @@ func (s *BenchmarkTest) startPlacementDriverCluster() {
 			"--initial-members", "1:127.0.0.1:11001,2:127.0.0.1:11002,3:127.0.0.1:11003",
 			"--data-dir", dataDir,
 		)
+		env := append([]string{}, s.baseEnv...)
 		if profileDir != "" {
-			cmd.Env = append(os.Environ(),
+			env = append(env,
 				"PPROF_MUTEX_FRACTION=5",
 				"PPROF_BLOCK_RATE=1",
 				"PPROF_CPU_SECONDS=15",
@@ -538,6 +614,7 @@ func (s *BenchmarkTest) startPlacementDriverCluster() {
 				fmt.Sprintf("PPROF_BLOCK_PATH=%s", filepath.Join(profileDir, fmt.Sprintf("pd%d_block.pprof", node.id))),
 			)
 		}
+		cmd.Env = env
 		cmd.Dir = "/home/pavan/Programming/vectron"
 
 		logFile := filepath.Join(benchmarkLogTempDir, fmt.Sprintf("vectron-pd%d-benchmark.log", node.id))
@@ -579,8 +656,9 @@ func (s *BenchmarkTest) startWorkers() {
 			"--pd-addrs", "127.0.0.1:10001,127.0.0.1:10002,127.0.0.1:10003",
 			"--data-dir", dataDir,
 		)
+		env := append([]string{}, s.baseEnv...)
 		if profileDir != "" {
-			cmd.Env = append(os.Environ(),
+			env = append(env,
 				"PPROF_MUTEX_FRACTION=5",
 				"PPROF_BLOCK_RATE=1",
 				"PPROF_CPU_SECONDS=15",
@@ -589,6 +667,7 @@ func (s *BenchmarkTest) startWorkers() {
 				fmt.Sprintf("PPROF_BLOCK_PATH=%s", filepath.Join(profileDir, fmt.Sprintf("worker%d_block.pprof", i))),
 			)
 		}
+		cmd.Env = env
 		cmd.Dir = "/home/pavan/Programming/vectron"
 
 		logFile := filepath.Join(benchmarkLogTempDir, fmt.Sprintf("vectron-worker%d-benchmark.log", i))
@@ -613,7 +692,7 @@ func (s *BenchmarkTest) startAuthService() {
 
 	cmd := exec.CommandContext(s.ctx, "./bin/authsvc")
 	cmd.Dir = "/home/pavan/Programming/vectron"
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(append([]string{}, s.baseEnv...),
 		"GRPC_PORT=:10008",
 		"HTTP_PORT=:10009",
 		"JWT_SECRET=test-jwt-secret-for-testing-only-do-not-use-in-production",
@@ -643,6 +722,7 @@ func (s *BenchmarkTest) startReranker() {
 		"--cache", "memory",
 	)
 	cmd.Dir = "/home/pavan/Programming/vectron"
+	cmd.Env = append([]string{}, s.baseEnv...)
 
 	if f, err := os.OpenFile(filepath.Join(benchmarkLogTempDir, "vectron-reranker-benchmark.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {
 		cmd.Stdout = f
@@ -678,7 +758,7 @@ func (s *BenchmarkTest) startAPIGateway() {
 
 	cmd := exec.CommandContext(s.ctx, apigwPath)
 	cmd.Dir = repoRoot
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(append([]string{}, s.baseEnv...),
 		"GRPC_ADDR=127.0.0.1:10010",
 		"HTTP_ADDR=127.0.0.1:10012",
 		"PLACEMENT_DRIVER=127.0.0.1:10001,127.0.0.1:10002,127.0.0.1:10003",

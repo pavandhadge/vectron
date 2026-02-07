@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"hash/fnv"
 	"sort"
 	"strconv"
@@ -31,6 +32,18 @@ const (
 	// shardLeaseTTL is the routing lease duration returned to gateways.
 	shardLeaseTTL = 20 * time.Second
 )
+
+func envIntDefault(key string, def int) int {
+	val := strings.TrimSpace(os.Getenv(key))
+	if val == "" {
+		return def
+	}
+	parsed, err := strconv.Atoi(val)
+	if err != nil || parsed <= 0 {
+		return def
+	}
+	return parsed
+}
 
 // Server implements the gRPC PlacementService.
 type Server struct {
@@ -567,7 +580,7 @@ func (s *Server) CreateCollection(ctx context.Context, req *pb.CreateCollectionR
 		Name:          req.Name,
 		Dimension:     req.Dimension,
 		Distance:      req.Distance,
-		InitialShards: defaultInitialShards,
+		InitialShards: envIntDefault("VECTRON_DEFAULT_SHARDS", defaultInitialShards),
 	}
 
 	payloadBytes, err := json.Marshal(payload)
