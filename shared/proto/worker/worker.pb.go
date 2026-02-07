@@ -754,6 +754,284 @@ func (x *BatchSearchResponse) GetResponses() []*SearchResponse {
 	return nil
 }
 
+// Snapshot streaming
+type HNSWSnapshotRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ShardId       uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HNSWSnapshotRequest) Reset() {
+	*x = HNSWSnapshotRequest{}
+	mi := &file_worker_worker_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HNSWSnapshotRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HNSWSnapshotRequest) ProtoMessage() {}
+
+func (x *HNSWSnapshotRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_worker_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HNSWSnapshotRequest.ProtoReflect.Descriptor instead.
+func (*HNSWSnapshotRequest) Descriptor() ([]byte, []int) {
+	return file_worker_worker_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *HNSWSnapshotRequest) GetShardId() uint64 {
+	if x != nil {
+		return x.ShardId
+	}
+	return 0
+}
+
+type HNSWSnapshotChunk struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	ShardId            uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	SnapshotTsUnixNano int64                  `protobuf:"varint,2,opt,name=snapshot_ts_unix_nano,json=snapshotTsUnixNano,proto3" json:"snapshot_ts_unix_nano,omitempty"`
+	Data               []byte                 `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`
+	Done               bool                   `protobuf:"varint,4,opt,name=done,proto3" json:"done,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *HNSWSnapshotChunk) Reset() {
+	*x = HNSWSnapshotChunk{}
+	mi := &file_worker_worker_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HNSWSnapshotChunk) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HNSWSnapshotChunk) ProtoMessage() {}
+
+func (x *HNSWSnapshotChunk) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_worker_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HNSWSnapshotChunk.ProtoReflect.Descriptor instead.
+func (*HNSWSnapshotChunk) Descriptor() ([]byte, []int) {
+	return file_worker_worker_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *HNSWSnapshotChunk) GetShardId() uint64 {
+	if x != nil {
+		return x.ShardId
+	}
+	return 0
+}
+
+func (x *HNSWSnapshotChunk) GetSnapshotTsUnixNano() int64 {
+	if x != nil {
+		return x.SnapshotTsUnixNano
+	}
+	return 0
+}
+
+func (x *HNSWSnapshotChunk) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *HNSWSnapshotChunk) GetDone() bool {
+	if x != nil {
+		return x.Done
+	}
+	return false
+}
+
+// WAL update streaming
+type HNSWUpdatesRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ShardId        uint64                 `protobuf:"varint,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	FromTsUnixNano int64                  `protobuf:"varint,2,opt,name=from_ts_unix_nano,json=fromTsUnixNano,proto3" json:"from_ts_unix_nano,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *HNSWUpdatesRequest) Reset() {
+	*x = HNSWUpdatesRequest{}
+	mi := &file_worker_worker_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HNSWUpdatesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HNSWUpdatesRequest) ProtoMessage() {}
+
+func (x *HNSWUpdatesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_worker_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HNSWUpdatesRequest.ProtoReflect.Descriptor instead.
+func (*HNSWUpdatesRequest) Descriptor() ([]byte, []int) {
+	return file_worker_worker_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *HNSWUpdatesRequest) GetShardId() uint64 {
+	if x != nil {
+		return x.ShardId
+	}
+	return 0
+}
+
+func (x *HNSWUpdatesRequest) GetFromTsUnixNano() int64 {
+	if x != nil {
+		return x.FromTsUnixNano
+	}
+	return 0
+}
+
+type HNSWUpdate struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Value         []byte                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	Delete        bool                   `protobuf:"varint,3,opt,name=delete,proto3" json:"delete,omitempty"`
+	TsUnixNano    int64                  `protobuf:"varint,4,opt,name=ts_unix_nano,json=tsUnixNano,proto3" json:"ts_unix_nano,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HNSWUpdate) Reset() {
+	*x = HNSWUpdate{}
+	mi := &file_worker_worker_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HNSWUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HNSWUpdate) ProtoMessage() {}
+
+func (x *HNSWUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_worker_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HNSWUpdate.ProtoReflect.Descriptor instead.
+func (*HNSWUpdate) Descriptor() ([]byte, []int) {
+	return file_worker_worker_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *HNSWUpdate) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *HNSWUpdate) GetValue() []byte {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
+func (x *HNSWUpdate) GetDelete() bool {
+	if x != nil {
+		return x.Delete
+	}
+	return false
+}
+
+func (x *HNSWUpdate) GetTsUnixNano() int64 {
+	if x != nil {
+		return x.TsUnixNano
+	}
+	return 0
+}
+
+type HNSWUpdateBatch struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Updates       []*HNSWUpdate          `protobuf:"bytes,1,rep,name=updates,proto3" json:"updates,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HNSWUpdateBatch) Reset() {
+	*x = HNSWUpdateBatch{}
+	mi := &file_worker_worker_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HNSWUpdateBatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HNSWUpdateBatch) ProtoMessage() {}
+
+func (x *HNSWUpdateBatch) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_worker_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HNSWUpdateBatch.ProtoReflect.Descriptor instead.
+func (*HNSWUpdateBatch) Descriptor() ([]byte, []int) {
+	return file_worker_worker_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *HNSWUpdateBatch) GetUpdates() []*HNSWUpdate {
+	if x != nil {
+		return x.Updates
+	}
+	return nil
+}
+
 // Key-value messages
 type KeyValuePair struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -765,7 +1043,7 @@ type KeyValuePair struct {
 
 func (x *KeyValuePair) Reset() {
 	*x = KeyValuePair{}
-	mi := &file_worker_worker_proto_msgTypes[13]
+	mi := &file_worker_worker_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -777,7 +1055,7 @@ func (x *KeyValuePair) String() string {
 func (*KeyValuePair) ProtoMessage() {}
 
 func (x *KeyValuePair) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[13]
+	mi := &file_worker_worker_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -790,7 +1068,7 @@ func (x *KeyValuePair) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KeyValuePair.ProtoReflect.Descriptor instead.
 func (*KeyValuePair) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{13}
+	return file_worker_worker_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *KeyValuePair) GetKey() []byte {
@@ -819,7 +1097,7 @@ type PutRequest struct {
 
 func (x *PutRequest) Reset() {
 	*x = PutRequest{}
-	mi := &file_worker_worker_proto_msgTypes[14]
+	mi := &file_worker_worker_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -831,7 +1109,7 @@ func (x *PutRequest) String() string {
 func (*PutRequest) ProtoMessage() {}
 
 func (x *PutRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[14]
+	mi := &file_worker_worker_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -844,7 +1122,7 @@ func (x *PutRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutRequest.ProtoReflect.Descriptor instead.
 func (*PutRequest) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{14}
+	return file_worker_worker_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *PutRequest) GetShardId() uint64 {
@@ -883,7 +1161,7 @@ type PutResponse struct {
 
 func (x *PutResponse) Reset() {
 	*x = PutResponse{}
-	mi := &file_worker_worker_proto_msgTypes[15]
+	mi := &file_worker_worker_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -895,7 +1173,7 @@ func (x *PutResponse) String() string {
 func (*PutResponse) ProtoMessage() {}
 
 func (x *PutResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[15]
+	mi := &file_worker_worker_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -908,7 +1186,7 @@ func (x *PutResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutResponse.ProtoReflect.Descriptor instead.
 func (*PutResponse) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{15}
+	return file_worker_worker_proto_rawDescGZIP(), []int{20}
 }
 
 type GetRequest struct {
@@ -923,7 +1201,7 @@ type GetRequest struct {
 
 func (x *GetRequest) Reset() {
 	*x = GetRequest{}
-	mi := &file_worker_worker_proto_msgTypes[16]
+	mi := &file_worker_worker_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -935,7 +1213,7 @@ func (x *GetRequest) String() string {
 func (*GetRequest) ProtoMessage() {}
 
 func (x *GetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[16]
+	mi := &file_worker_worker_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -948,7 +1226,7 @@ func (x *GetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRequest.ProtoReflect.Descriptor instead.
 func (*GetRequest) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{16}
+	return file_worker_worker_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *GetRequest) GetShardId() uint64 {
@@ -988,7 +1266,7 @@ type GetResponse struct {
 
 func (x *GetResponse) Reset() {
 	*x = GetResponse{}
-	mi := &file_worker_worker_proto_msgTypes[17]
+	mi := &file_worker_worker_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1000,7 +1278,7 @@ func (x *GetResponse) String() string {
 func (*GetResponse) ProtoMessage() {}
 
 func (x *GetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[17]
+	mi := &file_worker_worker_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1013,7 +1291,7 @@ func (x *GetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetResponse.ProtoReflect.Descriptor instead.
 func (*GetResponse) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{17}
+	return file_worker_worker_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *GetResponse) GetKv() *KeyValuePair {
@@ -1035,7 +1313,7 @@ type DeleteRequest struct {
 
 func (x *DeleteRequest) Reset() {
 	*x = DeleteRequest{}
-	mi := &file_worker_worker_proto_msgTypes[18]
+	mi := &file_worker_worker_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1047,7 +1325,7 @@ func (x *DeleteRequest) String() string {
 func (*DeleteRequest) ProtoMessage() {}
 
 func (x *DeleteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[18]
+	mi := &file_worker_worker_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1060,7 +1338,7 @@ func (x *DeleteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteRequest.ProtoReflect.Descriptor instead.
 func (*DeleteRequest) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{18}
+	return file_worker_worker_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *DeleteRequest) GetShardId() uint64 {
@@ -1099,7 +1377,7 @@ type DeleteResponse struct {
 
 func (x *DeleteResponse) Reset() {
 	*x = DeleteResponse{}
-	mi := &file_worker_worker_proto_msgTypes[19]
+	mi := &file_worker_worker_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1111,7 +1389,7 @@ func (x *DeleteResponse) String() string {
 func (*DeleteResponse) ProtoMessage() {}
 
 func (x *DeleteResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[19]
+	mi := &file_worker_worker_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1124,7 +1402,7 @@ func (x *DeleteResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteResponse.ProtoReflect.Descriptor instead.
 func (*DeleteResponse) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{19}
+	return file_worker_worker_proto_rawDescGZIP(), []int{24}
 }
 
 // Control/Admin messages
@@ -1139,7 +1417,7 @@ type StatusRequest struct {
 
 func (x *StatusRequest) Reset() {
 	*x = StatusRequest{}
-	mi := &file_worker_worker_proto_msgTypes[20]
+	mi := &file_worker_worker_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1151,7 +1429,7 @@ func (x *StatusRequest) String() string {
 func (*StatusRequest) ProtoMessage() {}
 
 func (x *StatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[20]
+	mi := &file_worker_worker_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1164,7 +1442,7 @@ func (x *StatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatusRequest.ProtoReflect.Descriptor instead.
 func (*StatusRequest) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{20}
+	return file_worker_worker_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *StatusRequest) GetShardId() uint64 {
@@ -1197,7 +1475,7 @@ type StatusResponse struct {
 
 func (x *StatusResponse) Reset() {
 	*x = StatusResponse{}
-	mi := &file_worker_worker_proto_msgTypes[21]
+	mi := &file_worker_worker_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1209,7 +1487,7 @@ func (x *StatusResponse) String() string {
 func (*StatusResponse) ProtoMessage() {}
 
 func (x *StatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[21]
+	mi := &file_worker_worker_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1222,7 +1500,7 @@ func (x *StatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatusResponse.ProtoReflect.Descriptor instead.
 func (*StatusResponse) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{21}
+	return file_worker_worker_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *StatusResponse) GetStatus() string {
@@ -1243,7 +1521,7 @@ type FlushRequest struct {
 
 func (x *FlushRequest) Reset() {
 	*x = FlushRequest{}
-	mi := &file_worker_worker_proto_msgTypes[22]
+	mi := &file_worker_worker_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1255,7 +1533,7 @@ func (x *FlushRequest) String() string {
 func (*FlushRequest) ProtoMessage() {}
 
 func (x *FlushRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[22]
+	mi := &file_worker_worker_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1268,7 +1546,7 @@ func (x *FlushRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FlushRequest.ProtoReflect.Descriptor instead.
 func (*FlushRequest) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{22}
+	return file_worker_worker_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *FlushRequest) GetShardId() uint64 {
@@ -1300,7 +1578,7 @@ type FlushResponse struct {
 
 func (x *FlushResponse) Reset() {
 	*x = FlushResponse{}
-	mi := &file_worker_worker_proto_msgTypes[23]
+	mi := &file_worker_worker_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1312,7 +1590,7 @@ func (x *FlushResponse) String() string {
 func (*FlushResponse) ProtoMessage() {}
 
 func (x *FlushResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_worker_proto_msgTypes[23]
+	mi := &file_worker_worker_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1325,7 +1603,7 @@ func (x *FlushResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FlushResponse.ProtoReflect.Descriptor instead.
 func (*FlushResponse) Descriptor() ([]byte, []int) {
-	return file_worker_worker_proto_rawDescGZIP(), []int{23}
+	return file_worker_worker_proto_rawDescGZIP(), []int{28}
 }
 
 var File_worker_worker_proto protoreflect.FileDescriptor
@@ -1386,7 +1664,26 @@ const file_worker_worker_proto_rawDesc = "" +
 	"\x12BatchSearchRequest\x12<\n" +
 	"\brequests\x18\x01 \x03(\v2 .vectron.worker.v1.SearchRequestR\brequests\"V\n" +
 	"\x13BatchSearchResponse\x12?\n" +
-	"\tresponses\x18\x01 \x03(\v2!.vectron.worker.v1.SearchResponseR\tresponses\"6\n" +
+	"\tresponses\x18\x01 \x03(\v2!.vectron.worker.v1.SearchResponseR\tresponses\"0\n" +
+	"\x13HNSWSnapshotRequest\x12\x19\n" +
+	"\bshard_id\x18\x01 \x01(\x04R\ashardId\"\x89\x01\n" +
+	"\x11HNSWSnapshotChunk\x12\x19\n" +
+	"\bshard_id\x18\x01 \x01(\x04R\ashardId\x121\n" +
+	"\x15snapshot_ts_unix_nano\x18\x02 \x01(\x03R\x12snapshotTsUnixNano\x12\x12\n" +
+	"\x04data\x18\x03 \x01(\fR\x04data\x12\x12\n" +
+	"\x04done\x18\x04 \x01(\bR\x04done\"Z\n" +
+	"\x12HNSWUpdatesRequest\x12\x19\n" +
+	"\bshard_id\x18\x01 \x01(\x04R\ashardId\x12)\n" +
+	"\x11from_ts_unix_nano\x18\x02 \x01(\x03R\x0efromTsUnixNano\"l\n" +
+	"\n" +
+	"HNSWUpdate\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\fR\x05value\x12\x16\n" +
+	"\x06delete\x18\x03 \x01(\bR\x06delete\x12 \n" +
+	"\fts_unix_nano\x18\x04 \x01(\x03R\n" +
+	"tsUnixNano\"J\n" +
+	"\x0fHNSWUpdateBatch\x127\n" +
+	"\aupdates\x18\x01 \x03(\v2\x1d.vectron.worker.v1.HNSWUpdateR\aupdates\"6\n" +
 	"\fKeyValuePair\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\fR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\fR\x05value\"\xaa\x01\n" +
@@ -1426,7 +1723,8 @@ const file_worker_worker_proto_rawDesc = "" +
 	"\vshard_epoch\x18\x02 \x01(\x04R\n" +
 	"shardEpoch\x12/\n" +
 	"\x14lease_expiry_unix_ms\x18\x03 \x01(\x03R\x11leaseExpiryUnixMs\"\x0f\n" +
-	"\rFlushResponse2\xc3\b\n" +
+	"\rFlushResponse2\x8f\n" +
+	"\n" +
 	"\rWorkerService\x12^\n" +
 	"\vStoreVector\x12%.vectron.worker.v1.StoreVectorRequest\x1a&.vectron.worker.v1.StoreVectorResponse\"\x00\x12m\n" +
 	"\x10BatchStoreVector\x12*.vectron.worker.v1.BatchStoreVectorRequest\x1a+.vectron.worker.v1.BatchStoreVectorResponse\"\x00\x12u\n" +
@@ -1434,7 +1732,9 @@ const file_worker_worker_proto_rawDesc = "" +
 	"\tGetVector\x12#.vectron.worker.v1.GetVectorRequest\x1a$.vectron.worker.v1.GetVectorResponse\"\x00\x12a\n" +
 	"\fDeleteVector\x12&.vectron.worker.v1.DeleteVectorRequest\x1a'.vectron.worker.v1.DeleteVectorResponse\"\x00\x12O\n" +
 	"\x06Search\x12 .vectron.worker.v1.SearchRequest\x1a!.vectron.worker.v1.SearchResponse\"\x00\x12^\n" +
-	"\vBatchSearch\x12%.vectron.worker.v1.BatchSearchRequest\x1a&.vectron.worker.v1.BatchSearchResponse\"\x00\x12F\n" +
+	"\vBatchSearch\x12%.vectron.worker.v1.BatchSearchRequest\x1a&.vectron.worker.v1.BatchSearchResponse\"\x00\x12f\n" +
+	"\x12StreamHNSWSnapshot\x12&.vectron.worker.v1.HNSWSnapshotRequest\x1a$.vectron.worker.v1.HNSWSnapshotChunk\"\x000\x01\x12b\n" +
+	"\x11StreamHNSWUpdates\x12%.vectron.worker.v1.HNSWUpdatesRequest\x1a\".vectron.worker.v1.HNSWUpdateBatch\"\x000\x01\x12F\n" +
 	"\x03Put\x12\x1d.vectron.worker.v1.PutRequest\x1a\x1e.vectron.worker.v1.PutResponse\"\x00\x12F\n" +
 	"\x03Get\x12\x1d.vectron.worker.v1.GetRequest\x1a\x1e.vectron.worker.v1.GetResponse\"\x00\x12O\n" +
 	"\x06Delete\x12 .vectron.worker.v1.DeleteRequest\x1a!.vectron.worker.v1.DeleteResponse\"\x00\x12O\n" +
@@ -1453,7 +1753,7 @@ func file_worker_worker_proto_rawDescGZIP() []byte {
 	return file_worker_worker_proto_rawDescData
 }
 
-var file_worker_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_worker_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
 var file_worker_worker_proto_goTypes = []any{
 	(*Vector)(nil),                   // 0: vectron.worker.v1.Vector
 	(*StoreVectorRequest)(nil),       // 1: vectron.worker.v1.StoreVectorRequest
@@ -1468,17 +1768,22 @@ var file_worker_worker_proto_goTypes = []any{
 	(*SearchResponse)(nil),           // 10: vectron.worker.v1.SearchResponse
 	(*BatchSearchRequest)(nil),       // 11: vectron.worker.v1.BatchSearchRequest
 	(*BatchSearchResponse)(nil),      // 12: vectron.worker.v1.BatchSearchResponse
-	(*KeyValuePair)(nil),             // 13: vectron.worker.v1.KeyValuePair
-	(*PutRequest)(nil),               // 14: vectron.worker.v1.PutRequest
-	(*PutResponse)(nil),              // 15: vectron.worker.v1.PutResponse
-	(*GetRequest)(nil),               // 16: vectron.worker.v1.GetRequest
-	(*GetResponse)(nil),              // 17: vectron.worker.v1.GetResponse
-	(*DeleteRequest)(nil),            // 18: vectron.worker.v1.DeleteRequest
-	(*DeleteResponse)(nil),           // 19: vectron.worker.v1.DeleteResponse
-	(*StatusRequest)(nil),            // 20: vectron.worker.v1.StatusRequest
-	(*StatusResponse)(nil),           // 21: vectron.worker.v1.StatusResponse
-	(*FlushRequest)(nil),             // 22: vectron.worker.v1.FlushRequest
-	(*FlushResponse)(nil),            // 23: vectron.worker.v1.FlushResponse
+	(*HNSWSnapshotRequest)(nil),      // 13: vectron.worker.v1.HNSWSnapshotRequest
+	(*HNSWSnapshotChunk)(nil),        // 14: vectron.worker.v1.HNSWSnapshotChunk
+	(*HNSWUpdatesRequest)(nil),       // 15: vectron.worker.v1.HNSWUpdatesRequest
+	(*HNSWUpdate)(nil),               // 16: vectron.worker.v1.HNSWUpdate
+	(*HNSWUpdateBatch)(nil),          // 17: vectron.worker.v1.HNSWUpdateBatch
+	(*KeyValuePair)(nil),             // 18: vectron.worker.v1.KeyValuePair
+	(*PutRequest)(nil),               // 19: vectron.worker.v1.PutRequest
+	(*PutResponse)(nil),              // 20: vectron.worker.v1.PutResponse
+	(*GetRequest)(nil),               // 21: vectron.worker.v1.GetRequest
+	(*GetResponse)(nil),              // 22: vectron.worker.v1.GetResponse
+	(*DeleteRequest)(nil),            // 23: vectron.worker.v1.DeleteRequest
+	(*DeleteResponse)(nil),           // 24: vectron.worker.v1.DeleteResponse
+	(*StatusRequest)(nil),            // 25: vectron.worker.v1.StatusRequest
+	(*StatusResponse)(nil),           // 26: vectron.worker.v1.StatusResponse
+	(*FlushRequest)(nil),             // 27: vectron.worker.v1.FlushRequest
+	(*FlushResponse)(nil),            // 28: vectron.worker.v1.FlushResponse
 }
 var file_worker_worker_proto_depIdxs = []int32{
 	0,  // 0: vectron.worker.v1.StoreVectorRequest.vector:type_name -> vectron.worker.v1.Vector
@@ -1486,37 +1791,42 @@ var file_worker_worker_proto_depIdxs = []int32{
 	0,  // 2: vectron.worker.v1.GetVectorResponse.vector:type_name -> vectron.worker.v1.Vector
 	9,  // 3: vectron.worker.v1.BatchSearchRequest.requests:type_name -> vectron.worker.v1.SearchRequest
 	10, // 4: vectron.worker.v1.BatchSearchResponse.responses:type_name -> vectron.worker.v1.SearchResponse
-	13, // 5: vectron.worker.v1.PutRequest.kv:type_name -> vectron.worker.v1.KeyValuePair
-	13, // 6: vectron.worker.v1.GetResponse.kv:type_name -> vectron.worker.v1.KeyValuePair
-	1,  // 7: vectron.worker.v1.WorkerService.StoreVector:input_type -> vectron.worker.v1.StoreVectorRequest
-	3,  // 8: vectron.worker.v1.WorkerService.BatchStoreVector:input_type -> vectron.worker.v1.BatchStoreVectorRequest
-	3,  // 9: vectron.worker.v1.WorkerService.StreamBatchStoreVector:input_type -> vectron.worker.v1.BatchStoreVectorRequest
-	5,  // 10: vectron.worker.v1.WorkerService.GetVector:input_type -> vectron.worker.v1.GetVectorRequest
-	7,  // 11: vectron.worker.v1.WorkerService.DeleteVector:input_type -> vectron.worker.v1.DeleteVectorRequest
-	9,  // 12: vectron.worker.v1.WorkerService.Search:input_type -> vectron.worker.v1.SearchRequest
-	11, // 13: vectron.worker.v1.WorkerService.BatchSearch:input_type -> vectron.worker.v1.BatchSearchRequest
-	14, // 14: vectron.worker.v1.WorkerService.Put:input_type -> vectron.worker.v1.PutRequest
-	16, // 15: vectron.worker.v1.WorkerService.Get:input_type -> vectron.worker.v1.GetRequest
-	18, // 16: vectron.worker.v1.WorkerService.Delete:input_type -> vectron.worker.v1.DeleteRequest
-	20, // 17: vectron.worker.v1.WorkerService.Status:input_type -> vectron.worker.v1.StatusRequest
-	22, // 18: vectron.worker.v1.WorkerService.Flush:input_type -> vectron.worker.v1.FlushRequest
-	2,  // 19: vectron.worker.v1.WorkerService.StoreVector:output_type -> vectron.worker.v1.StoreVectorResponse
-	4,  // 20: vectron.worker.v1.WorkerService.BatchStoreVector:output_type -> vectron.worker.v1.BatchStoreVectorResponse
-	4,  // 21: vectron.worker.v1.WorkerService.StreamBatchStoreVector:output_type -> vectron.worker.v1.BatchStoreVectorResponse
-	6,  // 22: vectron.worker.v1.WorkerService.GetVector:output_type -> vectron.worker.v1.GetVectorResponse
-	8,  // 23: vectron.worker.v1.WorkerService.DeleteVector:output_type -> vectron.worker.v1.DeleteVectorResponse
-	10, // 24: vectron.worker.v1.WorkerService.Search:output_type -> vectron.worker.v1.SearchResponse
-	12, // 25: vectron.worker.v1.WorkerService.BatchSearch:output_type -> vectron.worker.v1.BatchSearchResponse
-	15, // 26: vectron.worker.v1.WorkerService.Put:output_type -> vectron.worker.v1.PutResponse
-	17, // 27: vectron.worker.v1.WorkerService.Get:output_type -> vectron.worker.v1.GetResponse
-	19, // 28: vectron.worker.v1.WorkerService.Delete:output_type -> vectron.worker.v1.DeleteResponse
-	21, // 29: vectron.worker.v1.WorkerService.Status:output_type -> vectron.worker.v1.StatusResponse
-	23, // 30: vectron.worker.v1.WorkerService.Flush:output_type -> vectron.worker.v1.FlushResponse
-	19, // [19:31] is the sub-list for method output_type
-	7,  // [7:19] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	16, // 5: vectron.worker.v1.HNSWUpdateBatch.updates:type_name -> vectron.worker.v1.HNSWUpdate
+	18, // 6: vectron.worker.v1.PutRequest.kv:type_name -> vectron.worker.v1.KeyValuePair
+	18, // 7: vectron.worker.v1.GetResponse.kv:type_name -> vectron.worker.v1.KeyValuePair
+	1,  // 8: vectron.worker.v1.WorkerService.StoreVector:input_type -> vectron.worker.v1.StoreVectorRequest
+	3,  // 9: vectron.worker.v1.WorkerService.BatchStoreVector:input_type -> vectron.worker.v1.BatchStoreVectorRequest
+	3,  // 10: vectron.worker.v1.WorkerService.StreamBatchStoreVector:input_type -> vectron.worker.v1.BatchStoreVectorRequest
+	5,  // 11: vectron.worker.v1.WorkerService.GetVector:input_type -> vectron.worker.v1.GetVectorRequest
+	7,  // 12: vectron.worker.v1.WorkerService.DeleteVector:input_type -> vectron.worker.v1.DeleteVectorRequest
+	9,  // 13: vectron.worker.v1.WorkerService.Search:input_type -> vectron.worker.v1.SearchRequest
+	11, // 14: vectron.worker.v1.WorkerService.BatchSearch:input_type -> vectron.worker.v1.BatchSearchRequest
+	13, // 15: vectron.worker.v1.WorkerService.StreamHNSWSnapshot:input_type -> vectron.worker.v1.HNSWSnapshotRequest
+	15, // 16: vectron.worker.v1.WorkerService.StreamHNSWUpdates:input_type -> vectron.worker.v1.HNSWUpdatesRequest
+	19, // 17: vectron.worker.v1.WorkerService.Put:input_type -> vectron.worker.v1.PutRequest
+	21, // 18: vectron.worker.v1.WorkerService.Get:input_type -> vectron.worker.v1.GetRequest
+	23, // 19: vectron.worker.v1.WorkerService.Delete:input_type -> vectron.worker.v1.DeleteRequest
+	25, // 20: vectron.worker.v1.WorkerService.Status:input_type -> vectron.worker.v1.StatusRequest
+	27, // 21: vectron.worker.v1.WorkerService.Flush:input_type -> vectron.worker.v1.FlushRequest
+	2,  // 22: vectron.worker.v1.WorkerService.StoreVector:output_type -> vectron.worker.v1.StoreVectorResponse
+	4,  // 23: vectron.worker.v1.WorkerService.BatchStoreVector:output_type -> vectron.worker.v1.BatchStoreVectorResponse
+	4,  // 24: vectron.worker.v1.WorkerService.StreamBatchStoreVector:output_type -> vectron.worker.v1.BatchStoreVectorResponse
+	6,  // 25: vectron.worker.v1.WorkerService.GetVector:output_type -> vectron.worker.v1.GetVectorResponse
+	8,  // 26: vectron.worker.v1.WorkerService.DeleteVector:output_type -> vectron.worker.v1.DeleteVectorResponse
+	10, // 27: vectron.worker.v1.WorkerService.Search:output_type -> vectron.worker.v1.SearchResponse
+	12, // 28: vectron.worker.v1.WorkerService.BatchSearch:output_type -> vectron.worker.v1.BatchSearchResponse
+	14, // 29: vectron.worker.v1.WorkerService.StreamHNSWSnapshot:output_type -> vectron.worker.v1.HNSWSnapshotChunk
+	17, // 30: vectron.worker.v1.WorkerService.StreamHNSWUpdates:output_type -> vectron.worker.v1.HNSWUpdateBatch
+	20, // 31: vectron.worker.v1.WorkerService.Put:output_type -> vectron.worker.v1.PutResponse
+	22, // 32: vectron.worker.v1.WorkerService.Get:output_type -> vectron.worker.v1.GetResponse
+	24, // 33: vectron.worker.v1.WorkerService.Delete:output_type -> vectron.worker.v1.DeleteResponse
+	26, // 34: vectron.worker.v1.WorkerService.Status:output_type -> vectron.worker.v1.StatusResponse
+	28, // 35: vectron.worker.v1.WorkerService.Flush:output_type -> vectron.worker.v1.FlushResponse
+	22, // [22:36] is the sub-list for method output_type
+	8,  // [8:22] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_worker_worker_proto_init() }
@@ -1530,7 +1840,7 @@ func file_worker_worker_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_worker_worker_proto_rawDesc), len(file_worker_worker_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   24,
+			NumMessages:   29,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

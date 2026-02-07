@@ -27,7 +27,9 @@ import (
 	"github.com/pavandhadge/vectron/shared/runtimeutil"
 	"github.com/pavandhadge/vectron/worker/internal"
 	"github.com/pavandhadge/vectron/worker/internal/pd"
+	"github.com/pavandhadge/vectron/worker/internal/searchonly"
 	"github.com/pavandhadge/vectron/worker/internal/shard"
+	"github.com/pavandhadge/vectron/worker/internal/storage"
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/keepalive"
@@ -35,6 +37,18 @@ import (
 
 // Start configures and runs the core components of the worker node.
 func Start(nodeID uint64, raftAddr, grpcAddr string, pdAddrs []string, workerDataDir string) {
+	searchOnly := os.Getenv("VECTRON_SEARCH_ONLY") == "1"
+	walStreamEnabled := os.Getenv("VECTRON_WAL_STREAM_ENABLED") == "1"
+	var walHub *storage.WALHub
+	if walStreamEnabled {
+		walHub = storage.NewWALHub()
+	}
+
+	if searchOnly {
+		startSearchOnly(nodeID, raftAddr, grpcAddr, pdAddrs, workerDataDir)
+		return
+	}
+
 	// Create a top-level directory for this worker's Raft data.
 	nhDataDir := filepath.Join(workerDataDir, fmt.Sprintf("node-%d", nodeID))
 	if err := os.MkdirAll(nhDataDir, 0750); err != nil {
@@ -60,7 +74,7 @@ func Start(nodeID uint64, raftAddr, grpcAddr string, pdAddrs []string, workerDat
 	log.Printf("Dragonboat NodeHost created. Node ID: %d, Raft Address: %s", nodeID, raftAddr)
 
 	// Create the shard manager, which is responsible for creating, starting, and stopping shards on this worker.
-	shardManager := shard.NewManager(nh, workerDataDir, nodeID)
+	shardManager := shard.NewManager(nh, workerDataDir, nodeID, walHub)
 
 	// Create a client to communicate with the placement driver.
 	pdClient, err := pd.NewClient(pdAddrs, grpcAddr, raftAddr, nodeID, shardManager)
@@ -124,8 +138,73 @@ func Start(nodeID uint64, raftAddr, grpcAddr string, pdAddrs []string, workerDat
 		grpc.MaxRecvMsgSize(maxRecv),
 		grpc.MaxSendMsgSize(maxSend),
 	)
-	worker.RegisterWorkerServiceServer(s, internal.NewGrpcServer(nh, shardManager))
+	worker.RegisterWorkerServiceServer(s, internal.NewGrpcServer(nh, shardManager, nil, false))
 	log.Printf("gRPC server listening at %v", lis.Addr())
+	if err := s.Serve(lis); err != nil {
+		log.Fatalf("failed to serve gRPC: %v", err)
+	}
+}
+
+func startSearchOnly(nodeID uint64, raftAddr, grpcAddr string, pdAddrs []string, workerDataDir string) {
+	_ = workerDataDir
+	// Create the search-only shard manager.
+	searchManager := searchonly.NewManager(nil)
+
+	// Create a client to communicate with the placement driver.
+	pdClient, err := pd.NewClient(pdAddrs, grpcAddr, raftAddr, nodeID, searchManager)
+	if err != nil {
+		log.Fatalf("failed to create PD client: %v", err)
+	}
+	searchManager.SetPDClient(pdClient)
+
+	// Register the worker with the placement driver, retrying a few times on failure.
+	for i := 0; i < 5; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := pdClient.Register(ctx)
+		cancel()
+		if err == nil {
+			break
+		}
+		log.Printf("Failed to register with PD (attempt %d): %v. Retrying...", i+1, err)
+		if i == 4 {
+			log.Fatalf("Could not register with placement driver after multiple attempts.")
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	shardUpdateChan := make(chan []*pd.ShardAssignment)
+	go pdClient.StartHeartbeatLoop(shardUpdateChan)
+	go func() {
+		for assignments := range shardUpdateChan {
+			log.Printf("Received %d shard assignments from PD.", len(assignments))
+			searchManager.SyncShards(assignments)
+		}
+	}()
+
+	lis, err := net.Listen("tcp", grpcAddr)
+	if err != nil {
+		log.Fatalf("failed to listen on %s: %v", grpcAddr, err)
+	}
+	maxRecv := envIntDefault("GRPC_MAX_RECV_MB", 256) * 1024 * 1024
+	maxSend := envIntDefault("GRPC_MAX_SEND_MB", 256) * 1024 * 1024
+	maxStreams := envIntDefault("GRPC_MAX_STREAMS", 1024)
+	s := grpc.NewServer(
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    30 * time.Second,
+			Timeout: 10 * time.Second,
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
+		grpc.ReadBufferSize(64*1024),
+		grpc.WriteBufferSize(64*1024),
+		grpc.MaxConcurrentStreams(uint32(maxStreams)),
+		grpc.MaxRecvMsgSize(maxRecv),
+		grpc.MaxSendMsgSize(maxSend),
+	)
+	worker.RegisterWorkerServiceServer(s, internal.NewGrpcServer(nil, searchManager, searchManager, true))
+	log.Printf("search-only gRPC server listening at %v", lis.Addr())
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve gRPC: %v", err)
 	}

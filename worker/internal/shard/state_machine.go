@@ -3,6 +3,7 @@ package shard
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
 	"encoding/binary"
 	"encoding/gob"
 	"encoding/json"
@@ -13,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -296,49 +296,17 @@ func readLastApplied(dir string) (uint64, error) {
 }
 
 // NewStateMachine creates a new shard StateMachine.
-func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dimension int32, distance string) (*StateMachine, error) {
+func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dimension int32, distance string, walHub *storage.WALHub) (*StateMachine, error) {
 	dbPath := filepath.Join(workerDataDir, fmt.Sprintf("shard-%d", clusterID))
 
 	dim := int(dimension)
-	quantizeEnabled := distance == "cosine"
-	keepFloatVectors := quantizeEnabled
-	// Performance-first defaults: avoid extra per-insert CPU and dual-index overhead.
-	compressEnabled := false
-	adaptiveScale := 1.0
-	if dim >= 1024 {
-		adaptiveScale = 0.5
-	} else if dim >= 768 {
-		adaptiveScale = 0.65
-	} else if dim >= 512 {
-		adaptiveScale = 0.8
-	}
-
-	durabilityProfile := strings.ToLower(os.Getenv("VECTRON_DURABILITY_PROFILE"))
+	durabilityProfile := ParseDurabilityProfile()
 	writeSpeedMode := os.Getenv("VECTRON_WRITE_SPEED_MODE") == "1"
 	syncInterval := 500 * time.Millisecond
 	syncMaxInterval := 2 * time.Second
-	indexFlushInterval := 200 * time.Millisecond
 	if durabilityProfile == "relaxed" {
 		syncInterval = 1 * time.Second
 		syncMaxInterval = 5 * time.Second
-		indexFlushInterval = 500 * time.Millisecond
-	}
-	indexBatchSize := 4096
-	indexQueueSize := 200000
-	if v := os.Getenv("VECTRON_INDEX_BATCH_SIZE"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			indexBatchSize = n
-		}
-	}
-	if v := os.Getenv("VECTRON_INDEX_QUEUE_SIZE"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			indexQueueSize = n
-		}
-	}
-	if v := os.Getenv("VECTRON_INDEX_FLUSH_MS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			indexFlushInterval = time.Duration(n) * time.Millisecond
-		}
 	}
 	writeBufferSize := 256 * 1024 * 1024
 	if v := os.Getenv("VECTRON_WRITE_BUFFER_MB"); v != "" {
@@ -347,26 +315,9 @@ func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dime
 		}
 	}
 	if writeSpeedMode {
-		indexBatchSize = 8192
-		indexQueueSize = 500000
 		if durabilityProfile != "relaxed" {
 			syncInterval = 1 * time.Second
 			syncMaxInterval = 5 * time.Second
-			indexFlushInterval = 500 * time.Millisecond
-		}
-	}
-
-	hotEnabled := os.Getenv("VECTRON_HOT_INDEX_ENABLED") == "1"
-	hotMaxSize := 30000
-	if v := os.Getenv("VECTRON_HOT_INDEX_MAX"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			hotMaxSize = n
-		}
-	}
-	hotColdScale := 0.6
-	if v := os.Getenv("VECTRON_HOT_INDEX_COLD_EF_SCALE"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f < 1 {
-			hotColdScale = f
 		}
 	}
 	ingestMode := os.Getenv("VECTRON_INGEST_MODE") == "1"
@@ -378,45 +329,15 @@ func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dime
 		BackgroundSyncMaxInterval: syncMaxInterval,
 		WriteBufferSize:           writeBufferSize,
 		IngestMode:                ingestMode,
-		HNSWConfig: storage.HNSWConfig{
-			Dim:                      dim,
-			M:                        16,
-			EfConstruction:           200,
-			EfSearch:                 100, // check what it controlls then tunr it
-			DistanceMetric:           distance,
-			NormalizeVectors:         distance == "cosine",
-			QuantizeVectors:          quantizeEnabled,
-			QuantizeKeepFloatVectors: keepFloatVectors,
-			VectorCompressionEnabled: compressEnabled,
-			MultiStageEnabled:        quantizeEnabled,
-			HotIndexEnabled:          hotEnabled,
-			HotIndexMaxSize:          hotMaxSize,
-			HotIndexColdEfScale:      hotColdScale,
-			BulkLoadEnabled:          true,
-			BulkLoadThreshold:        1000,
-			AdaptiveEfEnabled:        true,
-			AdaptiveEfMultiplier:     2,
-			AdaptiveEfDimScale:       adaptiveScale,
-			MaintenanceEnabled:       false,
-			MaintenanceInterval:      30 * time.Minute,
-			PruneEnabled:             false,
-			PruneMaxNodes:            2000,
-			MmapVectorsEnabled:       false,
-			WALBatchEnabled:          true,
-			AsyncIndexingEnabled:     true,
-			IndexingQueueSize:        indexQueueSize,
-			IndexingBatchSize:        indexBatchSize,
-			IndexingFlushInterval:    indexFlushInterval,
-			WarmupEnabled:            false,
-			WarmupMaxVectors:         10000,
-			WarmupDelay:              5 * time.Second,
-		},
+		HNSWConfig:                DefaultHNSWConfig(dim, distance, durabilityProfile, writeSpeedMode),
 	}
 
 	db := storage.NewPebbleDB()
 	if err := db.Init(dbPath, opts); err != nil {
 		return nil, fmt.Errorf("failed to initialize storage for shard %d: %w", clusterID, err)
 	}
+	db.SetShardID(clusterID)
+	db.SetWALHub(walHub)
 
 	return &StateMachine{
 		PebbleDB:  db,
@@ -503,6 +424,14 @@ func (s *StateMachine) Lookup(query interface{}) (interface{}, error) {
 	default:
 		return nil, fmt.Errorf("unknown query type: %T", q)
 	}
+}
+
+// GetHNSWSnapshot returns the latest HNSW snapshot for streaming.
+func (s *StateMachine) GetHNSWSnapshot() ([]byte, int64, error) {
+	if s == nil || s.PebbleDB == nil {
+		return nil, 0, errors.New("state machine not initialized")
+	}
+	return s.PebbleDB.GetHNSWSnapshot()
 }
 
 // Sync is a no-op.

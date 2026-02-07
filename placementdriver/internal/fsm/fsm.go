@@ -62,6 +62,7 @@ type RegisterPeerPayload struct {
 type RegisterWorkerPayload struct {
 	GrpcAddress string `json:"grpc_address"`
 	RaftAddress string `json:"raft_address"`
+	Role        string `json:"role"`
 	// Capacity information for capacity-weighted placement
 	CPUCores    int32 `json:"cpu_cores"`
 	MemoryBytes int64 `json:"memory_bytes"`
@@ -195,6 +196,7 @@ type WorkerInfo struct {
 	LastHeartbeat time.Time `json:"last_heartbeat"`
 	State         WorkerState `json:"state"`
 	RunningShards []uint64  `json:"running_shards"`
+	Role          string    `json:"role"`
 	// Load metrics for load-aware placement
 	CPUUsagePercent    float64 `json:"cpu_usage_percent"`
 	MemoryUsagePercent float64 `json:"memory_usage_percent"`
@@ -399,6 +401,9 @@ func (f *FSM) applyRegisterWorker(payload RegisterWorkerPayload) uint64 {
 	for id, info := range f.Workers {
 		if info.GrpcAddress == payload.GrpcAddress && info.RaftAddress == payload.RaftAddress {
 			info.LastHeartbeat = time.Now().UTC()
+			if payload.Role != "" {
+				info.Role = payload.Role
+			}
 			f.Workers[id] = info
 			fmt.Printf("Worker already registered as %d (GRPC %s, Raft %s)\n", id, info.GrpcAddress, info.RaftAddress)
 			return id
@@ -420,12 +425,17 @@ func (f *FSM) applyRegisterWorker(payload RegisterWorkerPayload) uint64 {
 		totalCapacity = 100 // Minimum capacity to avoid division issues
 	}
 
+	role := payload.Role
+	if role == "" {
+		role = "write"
+	}
 	f.Workers[workerID] = WorkerInfo{
 		ID:            workerID,
 		GrpcAddress:   payload.GrpcAddress,
 		RaftAddress:   payload.RaftAddress,
 		LastHeartbeat: time.Now().UTC(),
 		State:         WorkerStateJoining,
+		Role:          role,
 		CPUCores:      payload.CPUCores,
 		TotalMemory:   payload.MemoryBytes,
 		TotalDisk:     payload.DiskBytes,
@@ -455,7 +465,7 @@ func (f *FSM) applyCreateCollection(payload CreateCollectionPayload) error {
 		return fmt.Errorf("collection %s already exists", payload.Name)
 	}
 
-	const replicationFactor = DefaultReplicationFactor // TODO: Make this configurable per collection.
+	replicationFactor := ReplicationFactor()
 	if eligibleWorkers == 0 {
 		err := fmt.Errorf("no eligible workers available for collection creation")
 		fmt.Printf("Error creating collection: %v\n", err)
@@ -637,6 +647,9 @@ func calculateLoadScore(worker WorkerInfo) float64 {
 
 func (f *FSM) isWorkerEligibleForPlacement(worker WorkerInfo) bool {
 	if worker.State != WorkerStateReady {
+		return false
+	}
+	if worker.Role == "search_only" {
 		return false
 	}
 	return time.Since(worker.LastHeartbeat) < WorkerTimeout
@@ -898,7 +911,7 @@ func (f *FSM) applyRemoveShardReplica(payload RemoveShardReplicaPayload) error {
 		return fmt.Errorf("replica %d not found in shard %d", payload.ReplicaID, payload.ShardID)
 	}
 
-	minAllowed := DefaultReplicationFactor
+	minAllowed := ReplicationFactor()
 	if len(targetShard.Replicas) < minAllowed {
 		minAllowed = len(targetShard.Replicas)
 	}

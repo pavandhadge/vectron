@@ -16,6 +16,10 @@ service WorkerService {
   rpc Search(SearchRequest) returns (SearchResponse) {}
   // Batch multiple searches into a single RPC
   rpc BatchSearch(BatchSearchRequest) returns (BatchSearchResponse) {}
+  // Stream HNSW snapshot for search-only replication
+  rpc StreamHNSWSnapshot(HNSWSnapshotRequest) returns (stream HNSWSnapshotChunk) {}
+  // Stream HNSW WAL updates for search-only replication
+  rpc StreamHNSWUpdates(HNSWUpdatesRequest) returns (stream HNSWUpdateBatch) {}
 
   // Key-value operations
   rpc Put(PutRequest) returns (PutResponse) {}
@@ -96,6 +100,35 @@ message BatchSearchRequest {
 
 message BatchSearchResponse {
   repeated SearchResponse responses = 1;
+}
+
+// Snapshot streaming
+message HNSWSnapshotRequest {
+  uint64 shard_id = 1;
+}
+
+message HNSWSnapshotChunk {
+  uint64 shard_id = 1;
+  int64 snapshot_ts_unix_nano = 2;
+  bytes data = 3;
+  bool done = 4;
+}
+
+// WAL update streaming
+message HNSWUpdatesRequest {
+  uint64 shard_id = 1;
+  int64 from_ts_unix_nano = 2;
+}
+
+message HNSWUpdate {
+  string id = 1;
+  bytes value = 2;
+  bool delete = 3;
+  int64 ts_unix_nano = 4;
+}
+
+message HNSWUpdateBatch {
+  repeated HNSWUpdate updates = 1;
 }
 
 // Key-value messages

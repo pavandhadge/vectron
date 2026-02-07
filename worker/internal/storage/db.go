@@ -733,6 +733,87 @@ func (r *PebbleDB) replayWALFrom(ts int64) error {
 	return nil
 }
 
+// GetHNSWSnapshot returns the latest snapshot bytes and timestamp (if any).
+func (r *PebbleDB) GetHNSWSnapshot() ([]byte, int64, error) {
+	if r.db == nil {
+		return nil, 0, errors.New("db not initialized")
+	}
+	val, closer, err := r.db.Get([]byte(hnswIndexKey))
+	if err != nil {
+		if errors.Is(err, pebble.ErrNotFound) {
+			return nil, 0, nil
+		}
+		return nil, 0, err
+	}
+	defer closer.Close()
+	data := append([]byte(nil), val...)
+
+	var ts int64
+	tsData, tsCloser, err := r.db.Get([]byte(hnswIndexTimestampKey))
+	if err == nil {
+		ts, _ = strconv.ParseInt(string(tsData), 10, 64)
+		tsCloser.Close()
+	}
+	return data, ts, nil
+}
+
+// IterateWALFrom streams WAL entries after the provided timestamp.
+func (r *PebbleDB) IterateWALFrom(ts int64, fn func(WALUpdate) bool) error {
+	if r.db == nil {
+		return errors.New("db not initialized")
+	}
+	iter := r.db.NewIter(&pebble.IterOptions{
+		LowerBound: []byte(fmt.Sprintf("%s%d", hnswWALPrefix, ts)),
+	})
+	defer iter.Close()
+
+	for iter.First(); iter.Valid(); iter.Next() {
+		key := string(iter.Key())
+		rest := strings.TrimPrefix(key, hnswWALPrefix)
+		if strings.HasPrefix(rest, "batch_") {
+			tsVal, err := strconv.ParseInt(strings.TrimPrefix(rest, "batch_"), 10, 64)
+			if err != nil {
+				continue
+			}
+			raw := iter.Value()
+			ids, vals, ok := decodeWALBatchEncoded(raw)
+			if !ok {
+				continue
+			}
+			for i, id := range ids {
+				upd := WALUpdate{ID: id, Value: vals[i], Delete: false, TS: tsVal + int64(i)}
+				if !fn(upd) {
+					return nil
+				}
+			}
+			continue
+		}
+		isDelete := false
+		if strings.HasSuffix(rest, "_delete") {
+			isDelete = true
+			rest = strings.TrimSuffix(rest, "_delete")
+		}
+		parts := strings.SplitN(rest, "_", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		tsVal, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			continue
+		}
+		id := parts[1]
+		var valCopy []byte
+		if !isDelete {
+			valCopy = append([]byte(nil), iter.Value()...)
+		}
+		upd := WALUpdate{ID: id, Value: valCopy, Delete: isDelete, TS: tsVal}
+		if !fn(upd) {
+			return nil
+		}
+	}
+	return iter.Error()
+}
+
 func (r *PebbleDB) warmupIndex(delay time.Duration, maxVectors int) {
 	defer r.wg.Done()
 	if delay > 0 {
@@ -942,6 +1023,8 @@ func (r *PebbleDB) Restore(backupPath string) error {
 }
 
 func applyPebbleTuning(dbOpts *pebble.Options, opts *Options) {
+	memtableExplicit := strings.TrimSpace(os.Getenv("PEBBLE_MEMTABLE_MB")) != ""
+	memtableStopExplicit := strings.TrimSpace(os.Getenv("PEBBLE_MEMTABLE_STOP")) != ""
 	if opts != nil {
 		if opts.MaxOpenFiles > 0 {
 			dbOpts.MaxOpenFiles = opts.MaxOpenFiles
@@ -986,10 +1069,10 @@ func applyPebbleTuning(dbOpts *pebble.Options, opts *Options) {
 
 	// Aggressive write-speed tuning (opt-in).
 	if envBool("VECTRON_WRITE_SPEED_MODE", false) {
-		if dbOpts.MemTableSize < 256*1024*1024 {
+		if !memtableExplicit && dbOpts.MemTableSize < 256*1024*1024 {
 			dbOpts.MemTableSize = 256 * 1024 * 1024
 		}
-		if dbOpts.MemTableStopWritesThreshold < 8 {
+		if !memtableStopExplicit && dbOpts.MemTableStopWritesThreshold < 8 {
 			dbOpts.MemTableStopWritesThreshold = 8
 		}
 		if dbOpts.L0CompactionThreshold < 16 {

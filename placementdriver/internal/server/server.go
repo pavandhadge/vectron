@@ -12,6 +12,7 @@ import (
 	"hash/fnv"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,7 +27,7 @@ const (
 	// raftTimeout is the default timeout for Raft proposals.
 	raftTimeout = 5 * time.Second
 	// defaultInitialShards is the number of shards created for a new collection by default.
-	defaultInitialShards = 8
+	defaultInitialShards = 16
 	// shardLeaseTTL is the routing lease duration returned to gateways.
 	shardLeaseTTL = 20 * time.Second
 )
@@ -68,10 +69,19 @@ func (s *Server) RegisterWorker(ctx context.Context, req *pb.RegisterWorkerReque
 		return nil, status.Error(codes.InvalidArgument, "worker raft_address is required")
 	}
 
+	role := "write"
+	for _, cap := range req.GetCapabilities() {
+		if strings.EqualFold(cap, "search_only") {
+			role = "search_only"
+			break
+		}
+	}
+
 	// Create the payload for the FSM command.
 	payload := fsm.RegisterWorkerPayload{
 		GrpcAddress: req.GetGrpcAddress(),
 		RaftAddress: req.GetRaftAddress(),
+		Role:        role,
 		CPUCores:    req.GetCpuCores(),
 		MemoryBytes: req.GetMemoryBytes(),
 		DiskBytes:   req.GetDiskBytes(),
@@ -239,37 +249,49 @@ func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.H
 	assignments := make([]*ShardAssignment, 0)
 	allWorkers := s.fsm.GetWorkers()
 	workerMap := make(map[uint64]fsm.WorkerInfo, len(allWorkers))
+	workerRole := ""
 	for _, w := range allWorkers {
 		workerMap[w.ID] = w
+		if w.ID == workerID {
+			workerRole = w.Role
+		}
 	}
 
 	for _, coll := range s.fsm.GetCollections() {
 		for _, shard := range coll.Shards {
 			isReplica := false
-			for _, replicaID := range shard.Replicas {
-				if replicaID == workerID {
-					isReplica = true
-					break
+			if workerRole != "search_only" {
+				for _, replicaID := range shard.Replicas {
+					if replicaID == workerID {
+						isReplica = true
+						break
+					}
 				}
+			} else {
+				isReplica = true
 			}
 
 			// If the worker is a replica for this shard, build the assignment details.
 			if isReplica {
 				initialMembers := make(map[uint64]string)
-				for _, replicaID := range shard.Replicas {
-					if worker, ok := workerMap[replicaID]; ok {
-						initialMembers[replicaID] = worker.RaftAddress
-					} else {
-						fmt.Printf("Warning: could not find worker address for replica %d in shard %d\n", replicaID, shard.ShardID)
+				if workerRole != "search_only" {
+					for _, replicaID := range shard.Replicas {
+						if worker, ok := workerMap[replicaID]; ok {
+							initialMembers[replicaID] = worker.RaftAddress
+						} else {
+							fmt.Printf("Warning: could not find worker address for replica %d in shard %d\n", replicaID, shard.ShardID)
+						}
 					}
 				}
 
 				bootstrap := false
-				if !shard.Bootstrapped && len(shard.BootstrapMembers) > 0 {
-					for _, memberID := range shard.BootstrapMembers {
-						if memberID == workerID {
-							bootstrap = true
-							break
+				if workerRole != "search_only" {
+					if !shard.Bootstrapped && len(shard.BootstrapMembers) > 0 {
+						for _, memberID := range shard.BootstrapMembers {
+							if memberID == workerID {
+								bootstrap = true
+								break
+							}
 						}
 					}
 				}
@@ -401,6 +423,13 @@ func (s *Server) ListWorkers(ctx context.Context, req *pb.ListWorkersRequest) (*
 			state = pb.WorkerState_WORKER_STATE_DRAINING
 		}
 
+		role := w.Role
+		if role == "" {
+			role = "write"
+		}
+		metadata := map[string]string{
+			"role": role,
+		}
 		workerInfos = append(workerInfos, &pb.WorkerInfo{
 			WorkerId:      strconv.FormatUint(w.ID, 10),
 			GrpcAddress:   w.GrpcAddress,
@@ -408,7 +437,7 @@ func (s *Server) ListWorkers(ctx context.Context, req *pb.ListWorkersRequest) (*
 			Collections:   collections,
 			LastHeartbeat: w.LastHeartbeat.Unix(),
 			Healthy:       s.fsm.IsWorkerHealthy(w.ID),
-			Metadata:      map[string]string{},
+			Metadata:      metadata,
 			State:         state,
 		})
 	}
@@ -493,6 +522,29 @@ func (s *Server) ListWorkersForCollection(ctx context.Context, req *pb.ListWorke
 			uniqueGrpcAddresses[worker.GrpcAddress] = struct{}{}
 		}
 	}
+	// Include healthy search-only workers for read routing if they report shard readiness.
+	shardToCollection := make(map[uint64]string)
+	for _, coll := range s.fsm.GetCollections() {
+		for _, shard := range coll.Shards {
+			shardToCollection[shard.ShardID] = coll.Name
+		}
+	}
+	for _, worker := range s.fsm.GetWorkers() {
+		if worker.Role != "search_only" || !s.fsm.IsWorkerHealthy(worker.ID) {
+			continue
+		}
+		hasCollection := false
+		for _, shardID := range worker.RunningShards {
+			if shardToCollection[shardID] == req.Collection {
+				hasCollection = true
+				break
+			}
+		}
+		if !hasCollection {
+			continue
+		}
+		uniqueGrpcAddresses[worker.GrpcAddress] = struct{}{}
+	}
 
 	grpcAddresses := make([]string, 0, len(uniqueGrpcAddresses))
 	for addr := range uniqueGrpcAddresses {
@@ -565,8 +617,22 @@ func (s *Server) GetCollectionStatus(ctx context.Context, req *pb.GetCollectionS
 	}
 
 	workerMap := make(map[uint64]fsm.WorkerInfo)
+	searchOnlyAddrs := make(map[uint64][]string)
+	shardToCollection := make(map[uint64]string)
+	for _, coll := range s.fsm.GetCollections() {
+		for _, shard := range coll.Shards {
+			shardToCollection[shard.ShardID] = coll.Name
+		}
+	}
 	for _, w := range s.fsm.GetWorkers() {
 		workerMap[w.ID] = w
+		if w.Role == "search_only" && s.fsm.IsWorkerHealthy(w.ID) {
+			for _, shardID := range w.RunningShards {
+				if shardToCollection[shardID] == collection.Name {
+					searchOnlyAddrs[shardID] = append(searchOnlyAddrs[shardID], w.GrpcAddress)
+				}
+			}
+		}
 	}
 
 	shardStatuses := make([]*pb.ShardStatus, 0, len(collection.Shards))
@@ -578,9 +644,22 @@ func (s *Server) GetCollectionStatus(ctx context.Context, req *pb.GetCollectionS
 			}
 		}
 		replicaAddrs := make([]string, 0, len(shard.Replicas))
+		replicaSet := make(map[string]struct{})
 		for _, replicaID := range shard.Replicas {
 			if w, ok := workerMap[replicaID]; ok && s.fsm.IsWorkerHealthy(w.ID) {
-				replicaAddrs = append(replicaAddrs, w.GrpcAddress)
+				if _, ok := replicaSet[w.GrpcAddress]; !ok {
+					replicaSet[w.GrpcAddress] = struct{}{}
+					replicaAddrs = append(replicaAddrs, w.GrpcAddress)
+				}
+			}
+		}
+		if addrs, ok := searchOnlyAddrs[shard.ShardID]; ok {
+			for _, addr := range addrs {
+				if _, ok := replicaSet[addr]; ok {
+					continue
+				}
+				replicaSet[addr] = struct{}{}
+				replicaAddrs = append(replicaAddrs, addr)
 			}
 		}
 

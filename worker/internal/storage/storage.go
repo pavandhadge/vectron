@@ -80,6 +80,8 @@ type PebbleDB struct {
 	path                       string // The path to the database directory
 	dirty                      uint32
 	ingestMode                 bool
+	shardID                    uint64
+	walHub                     *WALHub
 	indexPending               uint64
 	hnswWriteCount             uint64
 	hnswSnapshotBaseInterval   time.Duration
@@ -115,6 +117,21 @@ type indexOp struct {
 // NewPebbleDB creates a new, uninitialized instance of PebbleDB.
 func NewPebbleDB() *PebbleDB {
 	return &PebbleDB{}
+}
+
+// SetShardID sets the shard ID for WAL streaming.
+func (r *PebbleDB) SetShardID(shardID uint64) {
+	r.shardID = shardID
+}
+
+// SetWALHub attaches a WAL hub for streaming updates.
+func (r *PebbleDB) SetWALHub(hub *WALHub) {
+	r.walHub = hub
+}
+
+// WALHub returns the attached WAL hub (if any).
+func (r *PebbleDB) WALHub() *WALHub {
+	return r.walHub
 }
 
 // Search finds the k-nearest neighbors to a query vector using the HNSW index.

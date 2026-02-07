@@ -238,6 +238,11 @@ func decodeVectorWithMeta(data []byte) ([]float32, []byte, error) {
 	return vector, metadata, nil
 }
 
+// DecodeVectorWithMeta is the exported wrapper for decoding WAL/vector payloads.
+func DecodeVectorWithMeta(data []byte) ([]float32, []byte, error) {
+	return decodeVectorWithMeta(data)
+}
+
 // pebbleIterator implements the Iterator interface for PebbleDB.
 type pebbleIterator struct {
 	iter *pebble.Iterator

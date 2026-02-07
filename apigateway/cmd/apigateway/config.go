@@ -49,6 +49,8 @@ type Config struct {
 	RoutingCacheTTLms             int             // TTL for routing cache (milliseconds).
 	WorkerListCacheTTLms          int             // TTL for worker list cache (milliseconds).
 	ResolveCacheTTLms             int             // TTL for resolve cache (milliseconds).
+	PreferSearchOnlyWorkers       bool            // Prefer search-only workers for non-linearizable reads.
+	WorkerRoleCacheTTLms          int             // TTL for worker role cache (milliseconds).
 	GatewayDebugLogs              bool            // Enable verbose gateway logs.
 	GatewayLogSampleEvery         int             // Sample rate for hot-path logs (1 = log all).
 	RawSpeedMode                  bool            // Disable expensive features for max throughput.
@@ -94,6 +96,8 @@ func LoadConfig() Config {
 		RoutingCacheTTLms:             getEnvAsInt("ROUTING_CACHE_TTL_MS", 30000),
 		WorkerListCacheTTLms:          getEnvAsInt("WORKER_LIST_CACHE_TTL_MS", 30000),
 		ResolveCacheTTLms:             getEnvAsInt("RESOLVE_CACHE_TTL_MS", 30000),
+		PreferSearchOnlyWorkers:       getEnvAsBool("PREFER_SEARCH_ONLY_WORKERS", true),
+		WorkerRoleCacheTTLms:          getEnvAsInt("WORKER_ROLE_CACHE_TTL_MS", 5000),
 		GatewayDebugLogs:              getEnvAsBool("GATEWAY_DEBUG_LOGS", false),
 		GatewayLogSampleEvery:         getEnvAsInt("GATEWAY_LOG_SAMPLE_EVERY", 100),
 		RawSpeedMode:                  getEnvAsBool("RAW_SPEED_MODE", false),
@@ -109,6 +113,7 @@ func LoadConfig() Config {
 		cfg.SearchCacheTTLms = 0
 		cfg.SearchCacheMaxSize = 0
 		cfg.DistributedCacheSearchEnabled = false
+		cfg.PreferSearchOnlyWorkers = false
 	}
 
 	return cfg

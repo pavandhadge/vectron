@@ -11,9 +11,11 @@ import {
   type ChannelCredentials,
   Client,
   type ClientOptions,
+  type ClientReadableStream,
   type ClientUnaryCall,
   type ClientWritableStream,
   type handleClientStreamingCall,
+  type handleServerStreamingCall,
   type handleUnaryCall,
   makeGenericClientConstructor,
   type Metadata,
@@ -94,6 +96,35 @@ export interface BatchSearchRequest {
 
 export interface BatchSearchResponse {
   responses: SearchResponse[];
+}
+
+/** Snapshot streaming */
+export interface HNSWSnapshotRequest {
+  shardId: string;
+}
+
+export interface HNSWSnapshotChunk {
+  shardId: string;
+  snapshotTsUnixNano: string;
+  data: Buffer;
+  done: boolean;
+}
+
+/** WAL update streaming */
+export interface HNSWUpdatesRequest {
+  shardId: string;
+  fromTsUnixNano: string;
+}
+
+export interface HNSWUpdate {
+  id: string;
+  value: Buffer;
+  delete: boolean;
+  tsUnixNano: string;
+}
+
+export interface HNSWUpdateBatch {
+  updates: HNSWUpdate[];
 }
 
 /** Key-value messages */
@@ -1300,6 +1331,416 @@ export const BatchSearchResponse: MessageFns<BatchSearchResponse> = {
   },
 };
 
+function createBaseHNSWSnapshotRequest(): HNSWSnapshotRequest {
+  return { shardId: "0" };
+}
+
+export const HNSWSnapshotRequest: MessageFns<HNSWSnapshotRequest> = {
+  encode(message: HNSWSnapshotRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.shardId !== "0") {
+      writer.uint32(8).uint64(message.shardId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): HNSWSnapshotRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseHNSWSnapshotRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.shardId = reader.uint64().toString();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): HNSWSnapshotRequest {
+    return { shardId: isSet(object.shardId) ? globalThis.String(object.shardId) : "0" };
+  },
+
+  toJSON(message: HNSWSnapshotRequest): unknown {
+    const obj: any = {};
+    if (message.shardId !== "0") {
+      obj.shardId = message.shardId;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<HNSWSnapshotRequest>, I>>(base?: I): HNSWSnapshotRequest {
+    return HNSWSnapshotRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<HNSWSnapshotRequest>, I>>(object: I): HNSWSnapshotRequest {
+    const message = createBaseHNSWSnapshotRequest();
+    message.shardId = object.shardId ?? "0";
+    return message;
+  },
+};
+
+function createBaseHNSWSnapshotChunk(): HNSWSnapshotChunk {
+  return { shardId: "0", snapshotTsUnixNano: "0", data: Buffer.alloc(0), done: false };
+}
+
+export const HNSWSnapshotChunk: MessageFns<HNSWSnapshotChunk> = {
+  encode(message: HNSWSnapshotChunk, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.shardId !== "0") {
+      writer.uint32(8).uint64(message.shardId);
+    }
+    if (message.snapshotTsUnixNano !== "0") {
+      writer.uint32(16).int64(message.snapshotTsUnixNano);
+    }
+    if (message.data.length !== 0) {
+      writer.uint32(26).bytes(message.data);
+    }
+    if (message.done !== false) {
+      writer.uint32(32).bool(message.done);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): HNSWSnapshotChunk {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseHNSWSnapshotChunk();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.shardId = reader.uint64().toString();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.snapshotTsUnixNano = reader.int64().toString();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.data = Buffer.from(reader.bytes());
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.done = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): HNSWSnapshotChunk {
+    return {
+      shardId: isSet(object.shardId) ? globalThis.String(object.shardId) : "0",
+      snapshotTsUnixNano: isSet(object.snapshotTsUnixNano) ? globalThis.String(object.snapshotTsUnixNano) : "0",
+      data: isSet(object.data) ? Buffer.from(bytesFromBase64(object.data)) : Buffer.alloc(0),
+      done: isSet(object.done) ? globalThis.Boolean(object.done) : false,
+    };
+  },
+
+  toJSON(message: HNSWSnapshotChunk): unknown {
+    const obj: any = {};
+    if (message.shardId !== "0") {
+      obj.shardId = message.shardId;
+    }
+    if (message.snapshotTsUnixNano !== "0") {
+      obj.snapshotTsUnixNano = message.snapshotTsUnixNano;
+    }
+    if (message.data.length !== 0) {
+      obj.data = base64FromBytes(message.data);
+    }
+    if (message.done !== false) {
+      obj.done = message.done;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<HNSWSnapshotChunk>, I>>(base?: I): HNSWSnapshotChunk {
+    return HNSWSnapshotChunk.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<HNSWSnapshotChunk>, I>>(object: I): HNSWSnapshotChunk {
+    const message = createBaseHNSWSnapshotChunk();
+    message.shardId = object.shardId ?? "0";
+    message.snapshotTsUnixNano = object.snapshotTsUnixNano ?? "0";
+    message.data = object.data ?? Buffer.alloc(0);
+    message.done = object.done ?? false;
+    return message;
+  },
+};
+
+function createBaseHNSWUpdatesRequest(): HNSWUpdatesRequest {
+  return { shardId: "0", fromTsUnixNano: "0" };
+}
+
+export const HNSWUpdatesRequest: MessageFns<HNSWUpdatesRequest> = {
+  encode(message: HNSWUpdatesRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.shardId !== "0") {
+      writer.uint32(8).uint64(message.shardId);
+    }
+    if (message.fromTsUnixNano !== "0") {
+      writer.uint32(16).int64(message.fromTsUnixNano);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): HNSWUpdatesRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseHNSWUpdatesRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.shardId = reader.uint64().toString();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.fromTsUnixNano = reader.int64().toString();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): HNSWUpdatesRequest {
+    return {
+      shardId: isSet(object.shardId) ? globalThis.String(object.shardId) : "0",
+      fromTsUnixNano: isSet(object.fromTsUnixNano) ? globalThis.String(object.fromTsUnixNano) : "0",
+    };
+  },
+
+  toJSON(message: HNSWUpdatesRequest): unknown {
+    const obj: any = {};
+    if (message.shardId !== "0") {
+      obj.shardId = message.shardId;
+    }
+    if (message.fromTsUnixNano !== "0") {
+      obj.fromTsUnixNano = message.fromTsUnixNano;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<HNSWUpdatesRequest>, I>>(base?: I): HNSWUpdatesRequest {
+    return HNSWUpdatesRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<HNSWUpdatesRequest>, I>>(object: I): HNSWUpdatesRequest {
+    const message = createBaseHNSWUpdatesRequest();
+    message.shardId = object.shardId ?? "0";
+    message.fromTsUnixNano = object.fromTsUnixNano ?? "0";
+    return message;
+  },
+};
+
+function createBaseHNSWUpdate(): HNSWUpdate {
+  return { id: "", value: Buffer.alloc(0), delete: false, tsUnixNano: "0" };
+}
+
+export const HNSWUpdate: MessageFns<HNSWUpdate> = {
+  encode(message: HNSWUpdate, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.id !== "") {
+      writer.uint32(10).string(message.id);
+    }
+    if (message.value.length !== 0) {
+      writer.uint32(18).bytes(message.value);
+    }
+    if (message.delete !== false) {
+      writer.uint32(24).bool(message.delete);
+    }
+    if (message.tsUnixNano !== "0") {
+      writer.uint32(32).int64(message.tsUnixNano);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): HNSWUpdate {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseHNSWUpdate();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.id = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.value = Buffer.from(reader.bytes());
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.delete = reader.bool();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.tsUnixNano = reader.int64().toString();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): HNSWUpdate {
+    return {
+      id: isSet(object.id) ? globalThis.String(object.id) : "",
+      value: isSet(object.value) ? Buffer.from(bytesFromBase64(object.value)) : Buffer.alloc(0),
+      delete: isSet(object.delete) ? globalThis.Boolean(object.delete) : false,
+      tsUnixNano: isSet(object.tsUnixNano) ? globalThis.String(object.tsUnixNano) : "0",
+    };
+  },
+
+  toJSON(message: HNSWUpdate): unknown {
+    const obj: any = {};
+    if (message.id !== "") {
+      obj.id = message.id;
+    }
+    if (message.value.length !== 0) {
+      obj.value = base64FromBytes(message.value);
+    }
+    if (message.delete !== false) {
+      obj.delete = message.delete;
+    }
+    if (message.tsUnixNano !== "0") {
+      obj.tsUnixNano = message.tsUnixNano;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<HNSWUpdate>, I>>(base?: I): HNSWUpdate {
+    return HNSWUpdate.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<HNSWUpdate>, I>>(object: I): HNSWUpdate {
+    const message = createBaseHNSWUpdate();
+    message.id = object.id ?? "";
+    message.value = object.value ?? Buffer.alloc(0);
+    message.delete = object.delete ?? false;
+    message.tsUnixNano = object.tsUnixNano ?? "0";
+    return message;
+  },
+};
+
+function createBaseHNSWUpdateBatch(): HNSWUpdateBatch {
+  return { updates: [] };
+}
+
+export const HNSWUpdateBatch: MessageFns<HNSWUpdateBatch> = {
+  encode(message: HNSWUpdateBatch, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.updates) {
+      HNSWUpdate.encode(v!, writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): HNSWUpdateBatch {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseHNSWUpdateBatch();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.updates.push(HNSWUpdate.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): HNSWUpdateBatch {
+    return {
+      updates: globalThis.Array.isArray(object?.updates) ? object.updates.map((e: any) => HNSWUpdate.fromJSON(e)) : [],
+    };
+  },
+
+  toJSON(message: HNSWUpdateBatch): unknown {
+    const obj: any = {};
+    if (message.updates?.length) {
+      obj.updates = message.updates.map((e) => HNSWUpdate.toJSON(e));
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<HNSWUpdateBatch>, I>>(base?: I): HNSWUpdateBatch {
+    return HNSWUpdateBatch.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<HNSWUpdateBatch>, I>>(object: I): HNSWUpdateBatch {
+    const message = createBaseHNSWUpdateBatch();
+    message.updates = object.updates?.map((e) => HNSWUpdate.fromPartial(e)) || [];
+    return message;
+  },
+};
+
 function createBaseKeyValuePair(): KeyValuePair {
   return { key: Buffer.alloc(0), value: Buffer.alloc(0) };
 }
@@ -2203,6 +2644,26 @@ export const WorkerServiceService = {
     responseSerialize: (value: BatchSearchResponse): Buffer => Buffer.from(BatchSearchResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): BatchSearchResponse => BatchSearchResponse.decode(value),
   },
+  /** Stream HNSW snapshot for search-only replication */
+  streamHnswSnapshot: {
+    path: "/vectron.worker.v1.WorkerService/StreamHNSWSnapshot",
+    requestStream: false,
+    responseStream: true,
+    requestSerialize: (value: HNSWSnapshotRequest): Buffer => Buffer.from(HNSWSnapshotRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): HNSWSnapshotRequest => HNSWSnapshotRequest.decode(value),
+    responseSerialize: (value: HNSWSnapshotChunk): Buffer => Buffer.from(HNSWSnapshotChunk.encode(value).finish()),
+    responseDeserialize: (value: Buffer): HNSWSnapshotChunk => HNSWSnapshotChunk.decode(value),
+  },
+  /** Stream HNSW WAL updates for search-only replication */
+  streamHnswUpdates: {
+    path: "/vectron.worker.v1.WorkerService/StreamHNSWUpdates",
+    requestStream: false,
+    responseStream: true,
+    requestSerialize: (value: HNSWUpdatesRequest): Buffer => Buffer.from(HNSWUpdatesRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): HNSWUpdatesRequest => HNSWUpdatesRequest.decode(value),
+    responseSerialize: (value: HNSWUpdateBatch): Buffer => Buffer.from(HNSWUpdateBatch.encode(value).finish()),
+    responseDeserialize: (value: Buffer): HNSWUpdateBatch => HNSWUpdateBatch.decode(value),
+  },
   /** Key-value operations */
   put: {
     path: "/vectron.worker.v1.WorkerService/Put",
@@ -2263,6 +2724,10 @@ export interface WorkerServiceServer extends UntypedServiceImplementation {
   search: handleUnaryCall<SearchRequest, SearchResponse>;
   /** Batch multiple searches into a single RPC */
   batchSearch: handleUnaryCall<BatchSearchRequest, BatchSearchResponse>;
+  /** Stream HNSW snapshot for search-only replication */
+  streamHnswSnapshot: handleServerStreamingCall<HNSWSnapshotRequest, HNSWSnapshotChunk>;
+  /** Stream HNSW WAL updates for search-only replication */
+  streamHnswUpdates: handleServerStreamingCall<HNSWUpdatesRequest, HNSWUpdateBatch>;
   /** Key-value operations */
   put: handleUnaryCall<PutRequest, PutResponse>;
   get: handleUnaryCall<GetRequest, GetResponse>;
@@ -2382,6 +2847,23 @@ export interface WorkerServiceClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: BatchSearchResponse) => void,
   ): ClientUnaryCall;
+  /** Stream HNSW snapshot for search-only replication */
+  streamHnswSnapshot(
+    request: HNSWSnapshotRequest,
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<HNSWSnapshotChunk>;
+  streamHnswSnapshot(
+    request: HNSWSnapshotRequest,
+    metadata?: Metadata,
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<HNSWSnapshotChunk>;
+  /** Stream HNSW WAL updates for search-only replication */
+  streamHnswUpdates(request: HNSWUpdatesRequest, options?: Partial<CallOptions>): ClientReadableStream<HNSWUpdateBatch>;
+  streamHnswUpdates(
+    request: HNSWUpdatesRequest,
+    metadata?: Metadata,
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<HNSWUpdateBatch>;
   /** Key-value operations */
   put(request: PutRequest, callback: (error: ServiceError | null, response: PutResponse) => void): ClientUnaryCall;
   put(

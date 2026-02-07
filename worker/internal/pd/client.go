@@ -52,6 +52,13 @@ type Client struct {
 	raftAddr     string // The Raft address of this worker.
 	shardManager ShardManager
 	lastAssignmentsEpoch uint64
+	workerAddrMu sync.RWMutex
+	workerAddrCache map[uint64]addrCacheEntry
+}
+
+type addrCacheEntry struct {
+	addr     string
+	expires  time.Time
 }
 
 // WorkerID returns the assigned worker ID from the placement driver.
@@ -126,6 +133,7 @@ func NewClient(pdAddrs []string, grpcAddr, raftAddr string, workerID uint64, sha
 		raftAddr:     raftAddr,
 		workerID:     workerID,
 		shardManager: shardManager,
+		workerAddrCache: make(map[uint64]addrCacheEntry),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -190,6 +198,16 @@ func collectFailureDomain() (rack, zone, region string) {
 	return
 }
 
+func (c *Client) workerCapabilities() []string {
+	caps := make([]string, 0, 2)
+	if os.Getenv("VECTRON_SEARCH_ONLY") == "1" {
+		caps = append(caps, "search_only")
+	} else {
+		caps = append(caps, "write")
+	}
+	return caps
+}
+
 func (c *Client) Register(ctx context.Context) error {
 	// Collect capacity metrics
 	cpuCores, memoryBytes, diskBytes := collectCapacityMetrics()
@@ -200,6 +218,7 @@ func (c *Client) Register(ctx context.Context) error {
 	req := &pd.RegisterWorkerRequest{
 		GrpcAddress: c.grpcAddr,
 		RaftAddress: c.raftAddr,
+		Capabilities: c.workerCapabilities(),
 		CpuCores:    cpuCores,
 		MemoryBytes: memoryBytes,
 		DiskBytes:   diskBytes,
@@ -398,4 +417,67 @@ func (c *Client) Close() {
 	if c.leader != nil && c.leader.conn != nil {
 		c.leader.conn.Close()
 	}
+}
+
+// ListWorkers returns the current worker list from the PD.
+func (c *Client) ListWorkers(ctx context.Context) ([]*pd.WorkerInfo, error) {
+	leader, err := c.getLeader()
+	if err != nil {
+		if err := c.updateLeader(ctx); err != nil {
+			return nil, err
+		}
+		leader, err = c.getLeader()
+		if err != nil {
+			return nil, err
+		}
+	}
+	resp, err := leader.grpcClient.ListWorkers(ctx, &pd.ListWorkersRequest{})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Workers, nil
+}
+
+// ResolveWorkerAddr resolves a worker ID to its gRPC address with caching.
+func (c *Client) ResolveWorkerAddr(ctx context.Context, workerID uint64) (string, error) {
+	if workerID == 0 {
+		return "", fmt.Errorf("invalid worker id")
+	}
+	cacheTTL := time.Duration(envInt("VECTRON_PD_WORKER_CACHE_MS", 5000)) * time.Millisecond
+	now := time.Now()
+
+	c.workerAddrMu.RLock()
+	entry, ok := c.workerAddrCache[workerID]
+	c.workerAddrMu.RUnlock()
+	if ok && entry.addr != "" && entry.expires.After(now) {
+		return entry.addr, nil
+	}
+
+	workers, err := c.ListWorkers(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, w := range workers {
+		id, err := strconv.ParseUint(w.WorkerId, 10, 64)
+		if err != nil || id == 0 {
+			continue
+		}
+		if id == workerID {
+			addr := w.GrpcAddress
+			c.workerAddrMu.Lock()
+			c.workerAddrCache[workerID] = addrCacheEntry{addr: addr, expires: now.Add(cacheTTL)}
+			c.workerAddrMu.Unlock()
+			return addr, nil
+		}
+	}
+	return "", fmt.Errorf("worker id %d not found", workerID)
+}
+
+func envInt(name string, def int) int {
+	if v := os.Getenv(name); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
 }

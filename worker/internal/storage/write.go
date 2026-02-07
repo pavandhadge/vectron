@@ -28,6 +28,13 @@ func (r *PebbleDB) Put(key []byte, value []byte) error {
 	return nil
 }
 
+func (r *PebbleDB) publishWALUpdates(updates []WALUpdate) {
+	if r == nil || r.walHub == nil || r.shardID == 0 || len(updates) == 0 {
+		return
+	}
+	r.walHub.Publish(r.shardID, updates)
+}
+
 // Delete removes a single key from the database.
 func (r *PebbleDB) Delete(key []byte) error {
 	if r.db == nil {
@@ -106,12 +113,17 @@ func (r *PebbleDB) StoreVector(id string, vector []float32, metadata []byte) err
 		return fmt.Errorf("failed to set vector in batch: %w", err)
 	}
 
+	var walUpdates []WALUpdate
+	ts := time.Now().UnixNano()
 	// If the WAL is enabled, also add a WAL entry to the batch.
 	if r.opts.HNSWConfig.WALEnabled {
-		walKey := []byte(fmt.Sprintf("%s%d_%s", hnswWALPrefix, time.Now().UnixNano(), id))
+		walKey := []byte(fmt.Sprintf("%s%d_%s", hnswWALPrefix, ts, id))
 		if err := batch.Set(walKey, val, nil); err != nil {
 			return fmt.Errorf("failed to set WAL in batch: %w", err)
 		}
+	}
+	if r.walHub != nil {
+		walUpdates = append(walUpdates, WALUpdate{ID: id, Value: val, Delete: false, TS: ts})
 	}
 	if r.ingestMode {
 		if err := r.markIngestDirtyBatch(batch); err != nil {
@@ -124,6 +136,7 @@ func (r *PebbleDB) StoreVector(id string, vector []float32, metadata []byte) err
 		return fmt.Errorf("failed to commit batch for StoreVector: %w", err)
 	}
 	r.markDirty()
+	r.publishWALUpdates(walUpdates)
 
 	if r.ingestMode {
 		return nil
@@ -173,6 +186,7 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 	walBatchEnabled := r.opts != nil && r.opts.HNSWConfig.WALEnabled && r.opts.HNSWConfig.WALBatchEnabled && len(vectors) > 1
 	var walBatchIDs []string
 	var walBatchVals [][]byte
+	var walUpdates []WALUpdate
 	if walBatchEnabled {
 		walBatchIDs = make([]string, 0, len(vectors))
 		walBatchVals = make([][]byte, 0, len(vectors))
@@ -198,11 +212,15 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 			return fmt.Errorf("failed to set vector in batch: %w", err)
 		}
 
+		ts := baseTS + int64(i)
 		if r.opts.HNSWConfig.WALEnabled && !walBatchEnabled {
-			walKey := []byte(fmt.Sprintf("%s%d_%s", hnswWALPrefix, baseTS+int64(i), v.ID))
+			walKey := []byte(fmt.Sprintf("%s%d_%s", hnswWALPrefix, ts, v.ID))
 			if err := batch.Set(walKey, val, nil); err != nil {
 				return fmt.Errorf("failed to set WAL in batch: %w", err)
 			}
+		}
+		if r.walHub != nil {
+			walUpdates = append(walUpdates, WALUpdate{ID: v.ID, Value: val, Delete: false, TS: ts})
 		}
 		if walBatchEnabled {
 			walBatchIDs = append(walBatchIDs, v.ID)
@@ -218,6 +236,7 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 		if err := batch.Set(walKey, walBatchBuf, nil); err != nil {
 			return fmt.Errorf("failed to set WAL batch: %w", err)
 		}
+		// Updates already recorded above when walHub is enabled.
 	}
 
 	if r.ingestMode {
@@ -229,6 +248,7 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 		return fmt.Errorf("failed to commit batch for StoreVectorBatch: %w", err)
 	}
 	r.markDirty()
+	r.publishWALUpdates(walUpdates)
 
 	if r.ingestMode {
 		return nil
@@ -287,11 +307,16 @@ func (r *PebbleDB) DeleteVector(id string) error {
 		return fmt.Errorf("failed to delete vector from batch: %w", err)
 	}
 
+	var walUpdates []WALUpdate
+	ts := time.Now().UnixNano()
 	if r.opts.HNSWConfig.WALEnabled {
-		walKey := []byte(fmt.Sprintf("%s%d_%s_delete", hnswWALPrefix, time.Now().UnixNano(), id))
+		walKey := []byte(fmt.Sprintf("%s%d_%s_delete", hnswWALPrefix, ts, id))
 		if err := batch.Set(walKey, nil, nil); err != nil {
 			return fmt.Errorf("failed to set WAL delete marker in batch: %w", err)
 		}
+	}
+	if r.walHub != nil {
+		walUpdates = append(walUpdates, WALUpdate{ID: id, Value: nil, Delete: true, TS: ts})
 	}
 
 	if r.ingestMode {
@@ -303,6 +328,7 @@ func (r *PebbleDB) DeleteVector(id string) error {
 		return fmt.Errorf("failed to commit batch for DeleteVector: %w", err)
 	}
 	r.markDirty()
+	r.publishWALUpdates(walUpdates)
 
 	if r.ingestMode {
 		return nil
@@ -538,4 +564,42 @@ func encodeWALBatchEncoded(ids []string, values [][]byte) []byte {
 		buf = append(buf, val...)
 	}
 	return buf
+}
+
+func decodeWALBatchEncoded(buf []byte) ([]string, [][]byte, bool) {
+	if len(buf) < 4 {
+		return nil, nil, false
+	}
+	count := int(binary.LittleEndian.Uint32(buf[:4]))
+	if count <= 0 {
+		return nil, nil, false
+	}
+	ids := make([]string, 0, count)
+	values := make([][]byte, 0, count)
+	offset := 4
+	for i := 0; i < count; i++ {
+		if offset+4 > len(buf) {
+			return nil, nil, false
+		}
+		idLen := int(binary.LittleEndian.Uint32(buf[offset : offset+4]))
+		offset += 4
+		if idLen <= 0 || offset+idLen > len(buf) {
+			return nil, nil, false
+		}
+		id := string(buf[offset : offset+idLen])
+		offset += idLen
+		if offset+4 > len(buf) {
+			return nil, nil, false
+		}
+		valLen := int(binary.LittleEndian.Uint32(buf[offset : offset+4]))
+		offset += 4
+		if valLen < 0 || offset+valLen > len(buf) {
+			return nil, nil, false
+		}
+		val := append([]byte(nil), buf[offset:offset+valLen]...)
+		offset += valLen
+		ids = append(ids, id)
+		values = append(values, val)
+	}
+	return ids, values, true
 }

@@ -70,6 +70,16 @@ class WorkerServiceStub(object):
                 request_serializer=worker_dot_worker__pb2.BatchSearchRequest.SerializeToString,
                 response_deserializer=worker_dot_worker__pb2.BatchSearchResponse.FromString,
                 _registered_method=True)
+        self.StreamHNSWSnapshot = channel.unary_stream(
+                '/vectron.worker.v1.WorkerService/StreamHNSWSnapshot',
+                request_serializer=worker_dot_worker__pb2.HNSWSnapshotRequest.SerializeToString,
+                response_deserializer=worker_dot_worker__pb2.HNSWSnapshotChunk.FromString,
+                _registered_method=True)
+        self.StreamHNSWUpdates = channel.unary_stream(
+                '/vectron.worker.v1.WorkerService/StreamHNSWUpdates',
+                request_serializer=worker_dot_worker__pb2.HNSWUpdatesRequest.SerializeToString,
+                response_deserializer=worker_dot_worker__pb2.HNSWUpdateBatch.FromString,
+                _registered_method=True)
         self.Put = channel.unary_unary(
                 '/vectron.worker.v1.WorkerService/Put',
                 request_serializer=worker_dot_worker__pb2.PutRequest.SerializeToString,
@@ -146,6 +156,20 @@ class WorkerServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def StreamHNSWSnapshot(self, request, context):
+        """Stream HNSW snapshot for search-only replication
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def StreamHNSWUpdates(self, request, context):
+        """Stream HNSW WAL updates for search-only replication
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def Put(self, request, context):
         """Key-value operations
         """
@@ -215,6 +239,16 @@ def add_WorkerServiceServicer_to_server(servicer, server):
                     servicer.BatchSearch,
                     request_deserializer=worker_dot_worker__pb2.BatchSearchRequest.FromString,
                     response_serializer=worker_dot_worker__pb2.BatchSearchResponse.SerializeToString,
+            ),
+            'StreamHNSWSnapshot': grpc.unary_stream_rpc_method_handler(
+                    servicer.StreamHNSWSnapshot,
+                    request_deserializer=worker_dot_worker__pb2.HNSWSnapshotRequest.FromString,
+                    response_serializer=worker_dot_worker__pb2.HNSWSnapshotChunk.SerializeToString,
+            ),
+            'StreamHNSWUpdates': grpc.unary_stream_rpc_method_handler(
+                    servicer.StreamHNSWUpdates,
+                    request_deserializer=worker_dot_worker__pb2.HNSWUpdatesRequest.FromString,
+                    response_serializer=worker_dot_worker__pb2.HNSWUpdateBatch.SerializeToString,
             ),
             'Put': grpc.unary_unary_rpc_method_handler(
                     servicer.Put,
@@ -432,6 +466,60 @@ class WorkerService(object):
             '/vectron.worker.v1.WorkerService/BatchSearch',
             worker_dot_worker__pb2.BatchSearchRequest.SerializeToString,
             worker_dot_worker__pb2.BatchSearchResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StreamHNSWSnapshot(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/vectron.worker.v1.WorkerService/StreamHNSWSnapshot',
+            worker_dot_worker__pb2.HNSWSnapshotRequest.SerializeToString,
+            worker_dot_worker__pb2.HNSWSnapshotChunk.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StreamHNSWUpdates(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/vectron.worker.v1.WorkerService/StreamHNSWUpdates',
+            worker_dot_worker__pb2.HNSWUpdatesRequest.SerializeToString,
+            worker_dot_worker__pb2.HNSWUpdateBatch.FromString,
             options,
             channel_credentials,
             insecure,

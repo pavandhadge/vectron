@@ -18,6 +18,7 @@ import (
 	"github.com/lni/dragonboat/v3/config"
 	sm "github.com/lni/dragonboat/v3/statemachine"
 	"github.com/pavandhadge/vectron/shared/proto/placementdriver"
+	"github.com/pavandhadge/vectron/worker/internal/storage"
 	"github.com/pavandhadge/vectron/worker/internal/pd"
 )
 
@@ -26,6 +27,7 @@ type Manager struct {
 	nodeHost      *dragonboat.NodeHost // The Dragonboat instance that runs all Raft clusters.
 	workerDataDir string               // The root directory for this worker's data.
 	nodeID        uint64               // The ID of this worker node.
+	walHub        *storage.WALHub
 
 	mu               sync.RWMutex
 	runningReplicas  map[uint64]bool // A set of shard IDs for replicas currently running on this node.
@@ -33,19 +35,22 @@ type Manager struct {
 	membershipReportedAt map[uint64]time.Time
 	shardEpochs      map[uint64]uint64
 	pendingLeaderTransfers map[uint64]uint64
+	stateMachines   map[uint64]*StateMachine
 }
 
 // NewManager creates a new instance of the ShardManager.
-func NewManager(nh *dragonboat.NodeHost, workerDataDir string, nodeID uint64) *Manager {
+func NewManager(nh *dragonboat.NodeHost, workerDataDir string, nodeID uint64, walHub *storage.WALHub) *Manager {
 	return &Manager{
 		nodeHost:         nh,
 		workerDataDir:    workerDataDir,
 		nodeID:           nodeID,
+		walHub:           walHub,
 		runningReplicas:  make(map[uint64]bool),
 		shardCollections: make(map[uint64]string),
 		membershipReportedAt: make(map[uint64]time.Time),
 		shardEpochs:      make(map[uint64]uint64),
 		pendingLeaderTransfers: make(map[uint64]uint64),
+		stateMachines:   make(map[uint64]*StateMachine),
 	}
 }
 
@@ -145,11 +150,14 @@ func (m *Manager) SyncShards(assignments []*pd.ShardAssignment) {
 
 		// The factory function that Dragonboat will call to create the shard's state machine.
 		createFSM := func(clusterID uint64, nodeID uint64) sm.IOnDiskStateMachine {
-			stateMachine, err := NewStateMachine(clusterID, nodeID, m.workerDataDir, assignment.ShardInfo.Dimension, assignment.ShardInfo.Distance)
+			stateMachine, err := NewStateMachine(clusterID, nodeID, m.workerDataDir, assignment.ShardInfo.Dimension, assignment.ShardInfo.Distance, m.walHub)
 			if err != nil {
 				// Panicking here because a failure to create a state machine is a fatal error for the worker.
 				log.Panicf("failed to create state machine for shard %d: %v", clusterID, err)
 			}
+			m.mu.Lock()
+			m.stateMachines[clusterID] = stateMachine
+			m.mu.Unlock()
 			return stateMachine
 		}
 
@@ -166,6 +174,7 @@ func (m *Manager) SyncShards(assignments []*pd.ShardAssignment) {
 	for _, shardID := range shardsToStop {
 		delete(m.runningReplicas, shardID)
 		delete(m.shardCollections, shardID)
+		delete(m.stateMachines, shardID)
 	}
 	for shardID, assignment := range started {
 		m.runningReplicas[shardID] = true
@@ -216,6 +225,13 @@ func (m *Manager) getShardEpoch(shardID uint64) uint64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.shardEpochs[shardID]
+}
+
+// GetStateMachine returns the local state machine for a shard, if present.
+func (m *Manager) GetStateMachine(shardID uint64) *StateMachine {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.stateMachines[shardID]
 }
 
 // GetShardEpoch returns the current epoch for a shard.

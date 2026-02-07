@@ -10,6 +10,9 @@ package fsm
 
 import (
 	"fmt"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -36,6 +39,25 @@ const (
 	// HotShardThresholdLatencyMs is the latency threshold for detecting hot shards
 	HotShardThresholdLatencyMs = 100.0 // 100ms
 )
+
+// ReplicationFactor returns the configured replication factor (clamped).
+func ReplicationFactor() int {
+	val := strings.TrimSpace(os.Getenv("VECTRON_REPLICATION_FACTOR"))
+	if val == "" {
+		return DefaultReplicationFactor
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		return DefaultReplicationFactor
+	}
+	if n < MinReplicationFactor {
+		return MinReplicationFactor
+	}
+	if n > MaxReplicationFactor {
+		return MaxReplicationFactor
+	}
+	return n
+}
 
 // IsWorkerHealthy checks if a worker is healthy based on its last heartbeat
 func (f *FSM) IsWorkerHealthy(workerID uint64) bool {
@@ -176,7 +198,7 @@ func (f *FSM) GetUnderReplicatedShards() []*ShardInfo {
 			}
 
 			// Consider under-replicated if below the default replication factor
-			targetReplicas := DefaultReplicationFactor
+			targetReplicas := ReplicationFactor()
 
 			if healthyCount < targetReplicas {
 				underReplicated = append(underReplicated, shard)
@@ -281,7 +303,7 @@ func (f *FSM) GetHealthReport() *HealthReport {
 				report.HealthyShards++
 			}
 
-			targetReplicas := DefaultReplicationFactor
+			targetReplicas := ReplicationFactor()
 
 			if healthyCount < targetReplicas {
 				report.UnderReplicatedShards = append(report.UnderReplicatedShards, shard)

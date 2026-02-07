@@ -154,7 +154,7 @@ func (r *Reconciler) repairUnderReplicatedShards(shards []*fsm.ShardInfo) {
 		}
 
 		// Calculate how many new replicas we need
-		targetReplicas := fsm.DefaultReplicationFactor
+		targetReplicas := fsm.ReplicationFactor()
 
 		needed := targetReplicas - len(existingHealthyReplicas)
 		if needed <= 0 {
@@ -291,10 +291,10 @@ func (r *Reconciler) cleanupDeadReplicas(deadWorkers []fsm.WorkerInfo) {
 	for _, worker := range deadWorkers {
 		shards := r.server.fsm.GetShardsOnWorker(worker.ID)
 		for _, shard := range shards {
-			if len(shard.Replicas) <= fsm.DefaultReplicationFactor {
+			if len(shard.Replicas) <= fsm.ReplicationFactor() {
 				continue
 			}
-			if r.server.fsm.CountHealthyReplicas(shard.ShardID) < fsm.DefaultReplicationFactor {
+			if r.server.fsm.CountHealthyReplicas(shard.ShardID) < fsm.ReplicationFactor() {
 				continue
 			}
 			if err := r.removeShardReplica(shard.ShardID, worker.ID); err != nil {
@@ -382,7 +382,7 @@ func (r *Reconciler) TriggerRebalance() error {
 	}
 
 	// Calculate ideal distribution
-	idealShardsPerWorker := float64(totalShards*fsm.DefaultReplicationFactor) / float64(len(healthyWorkers))
+	idealShardsPerWorker := float64(totalShards*fsm.ReplicationFactor()) / float64(len(healthyWorkers))
 
 	fmt.Printf("  📊 Current distribution: %v\n", workerShardCounts)
 	fmt.Printf("  🎯 Ideal distribution: %.1f shards per worker\n", idealShardsPerWorker)
@@ -706,7 +706,7 @@ func (rm *RebalanceManager) identifyRebalanceMoves() []RebalanceMove {
 	}
 
 	// Calculate average load
-	avgShards := float64(totalShards*fsm.DefaultReplicationFactor) / float64(len(healthyWorkers))
+	avgShards := float64(totalShards*fsm.ReplicationFactor()) / float64(len(healthyWorkers))
 	threshold := avgShards * rm.config.ImbalanceThreshold
 
 	// Identify overloaded and underloaded workers
@@ -1115,7 +1115,7 @@ func (rm *RebalanceManager) tryRollbackMove(shard *fsm.ShardInfo, inflight *infl
 	if !containsReplica(shard.Replicas, inflight.move.TargetWorkerID) {
 		return true
 	}
-	if len(shard.Replicas) <= fsm.DefaultReplicationFactor {
+	if len(shard.Replicas) <= fsm.ReplicationFactor() {
 		return true
 	}
 	if err := rm.removeShardReplica(shard.ShardID, inflight.move.TargetWorkerID); err != nil {

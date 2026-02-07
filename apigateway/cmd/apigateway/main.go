@@ -307,6 +307,52 @@ type WorkerListCache struct {
 	ttl    time.Duration
 }
 
+func NewWorkerRoleCache(ttl time.Duration) *WorkerRoleCache {
+	if ttl <= 0 {
+		ttl = 5 * time.Second
+	}
+	return &WorkerRoleCache{
+		roles: make(map[string]string),
+		ttl:   ttl,
+	}
+}
+
+func (c *WorkerRoleCache) Get() (map[string]string, bool) {
+	if c == nil {
+		return nil, false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if time.Now().After(c.expires) || len(c.roles) == 0 {
+		return nil, false
+	}
+	out := make(map[string]string, len(c.roles))
+	for k, v := range c.roles {
+		out[k] = v
+	}
+	return out, true
+}
+
+func (c *WorkerRoleCache) Set(roles map[string]string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.roles = make(map[string]string, len(roles))
+	for k, v := range roles {
+		c.roles[k] = v
+	}
+	c.expires = time.Now().Add(c.ttl)
+}
+
+type WorkerRoleCache struct {
+	mu      sync.RWMutex
+	roles   map[string]string
+	expires time.Time
+	ttl     time.Duration
+}
+
 type WorkerResolveCacheEntry struct {
 	Addr              string
 	ShardID           uint64
@@ -1444,6 +1490,7 @@ type gatewayServer struct {
 	pdPool                   *PDConnPool
 	searchCache              *SearchCache // Cache for search results
 	workerListCache          *WorkerListCache
+	workerRoleCache          *WorkerRoleCache
 	resolveCache             *WorkerResolveCache
 	routingCache             *CollectionRoutingCache
 	distributedCache         *DistributedCache
@@ -1936,6 +1983,19 @@ func pickShardSearchAddress(shard *routingShard, linearizable bool, key uint64) 
 	return candidates[idx]
 }
 
+func filterSearchOnly(addrs []string, roles map[string]string) []string {
+	if len(addrs) == 0 || len(roles) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(addrs))
+	for _, addr := range addrs {
+		if roles[addr] == "search_only" {
+			out = append(out, addr)
+		}
+	}
+	return out
+}
+
 func pickFastSearchTarget(entry *collectionRoutingEntry, linearizable bool, key uint64) (string, uint64, uint64) {
 	shard := pickShardFromRoutingKey(entry, key)
 	if shard == nil {
@@ -1957,6 +2017,93 @@ func workerAddressesForSearch(entry *collectionRoutingEntry, linearizable bool, 
 	for i := range entry.shards {
 		shard := &entry.shards[i]
 		addr := pickShardSearchAddress(shard, linearizable, key)
+		if addr == "" {
+			continue
+		}
+		if _, ok := seen[addr]; ok {
+			continue
+		}
+		seen[addr] = struct{}{}
+		addrs = append(addrs, addr)
+	}
+	return addrs
+}
+
+func (s *gatewayServer) pickFastSearchTargetPreferSearchOnly(ctx context.Context, entry *collectionRoutingEntry, linearizable bool, key uint64) (string, uint64, uint64) {
+	shard := pickShardFromRoutingKey(entry, key)
+	if shard == nil {
+		return "", 0, 0
+	}
+	if linearizable || !cfg.PreferSearchOnlyWorkers {
+		addr := pickShardSearchAddress(shard, linearizable, key)
+		if addr == "" {
+			return "", 0, 0
+		}
+		return addr, shard.shardID, shard.shardEpoch
+	}
+	roles, err := s.getWorkerRoles(ctx)
+	if err != nil {
+		addr := pickShardSearchAddress(shard, linearizable, key)
+		if addr == "" {
+			return "", 0, 0
+		}
+		return addr, shard.shardID, shard.shardEpoch
+	}
+	candidates := make([]string, 0, len(shard.replicaAddrs)+1)
+	for _, addr := range shard.replicaAddrs {
+		if addr != "" {
+			candidates = append(candidates, addr)
+		}
+	}
+	if shard.leaderAddr != "" {
+		candidates = append(candidates, shard.leaderAddr)
+	}
+	if len(candidates) == 0 {
+		return "", 0, 0
+	}
+	preferred := filterSearchOnly(candidates, roles)
+	if len(preferred) == 0 {
+		preferred = candidates
+	}
+	addr := pickAddressByKey(preferred, key^shard.shardID)
+	if addr == "" {
+		return "", 0, 0
+	}
+	return addr, shard.shardID, shard.shardEpoch
+}
+
+func (s *gatewayServer) workerAddressesForSearchPreferSearchOnly(ctx context.Context, entry *collectionRoutingEntry, linearizable bool, key uint64) []string {
+	if entry == nil {
+		return nil
+	}
+	if linearizable || !cfg.PreferSearchOnlyWorkers {
+		return workerAddressesForSearch(entry, linearizable, key)
+	}
+	roles, err := s.getWorkerRoles(ctx)
+	if err != nil {
+		return workerAddressesForSearch(entry, linearizable, key)
+	}
+	seen := make(map[string]struct{})
+	addrs := make([]string, 0)
+	for i := range entry.shards {
+		shard := &entry.shards[i]
+		candidates := make([]string, 0, len(shard.replicaAddrs)+1)
+		for _, addr := range shard.replicaAddrs {
+			if addr != "" {
+				candidates = append(candidates, addr)
+			}
+		}
+		if shard.leaderAddr != "" {
+			candidates = append(candidates, shard.leaderAddr)
+		}
+		if len(candidates) == 0 {
+			continue
+		}
+		preferred := filterSearchOnly(candidates, roles)
+		if len(preferred) == 0 {
+			preferred = candidates
+		}
+		addr := pickAddressByKey(preferred, key^shard.shardID)
 		if addr == "" {
 			continue
 		}
@@ -2076,6 +2223,45 @@ func (s *gatewayServer) resolveWorker(ctx context.Context, collection string, ve
 		}
 	}
 	return addr, shardID, shardEpoch, leaseExpiry, nil
+}
+
+func (s *gatewayServer) getWorkerRoles(ctx context.Context) (map[string]string, error) {
+	if cached, ok := s.workerRoleCache.Get(); ok {
+		return cached, nil
+	}
+	placementClient, err := s.getPlacementClient()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := placementClient.ListWorkers(ctx, &placementpb.ListWorkersRequest{})
+	if err != nil {
+		if st, ok := status.FromError(err); ok && (st.Code() == codes.Unavailable || st.Code() == codes.Internal) {
+			placementClient, err = s.updateLeader()
+			if err != nil {
+				return nil, err
+			}
+			resp, err = placementClient.ListWorkers(ctx, &placementpb.ListWorkersRequest{})
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	roles := make(map[string]string, len(resp.GetWorkers()))
+	for _, w := range resp.GetWorkers() {
+		addr := w.GetGrpcAddress()
+		if addr == "" {
+			continue
+		}
+		role := "write"
+		if w.GetMetadata() != nil {
+			if v, ok := w.GetMetadata()["role"]; ok && v != "" {
+				role = v
+			}
+		}
+		roles[addr] = role
+	}
+	s.workerRoleCache.Set(roles)
+	return roles, nil
 }
 
 func isStaleShardError(err error) bool {
@@ -2798,9 +2984,9 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 	routeStart := time.Now()
 	if routingEntry, err := s.getCollectionRouting(ctx, req.Collection, false); err == nil {
 		if cfg.SearchFanoutEnabled {
-			workerAddresses = workerAddressesForSearch(routingEntry, linearizable, routeKey)
+			workerAddresses = s.workerAddressesForSearchPreferSearchOnly(ctx, routingEntry, linearizable, routeKey)
 		} else {
-			if addr, shardID, shardEpoch := pickFastSearchTarget(routingEntry, linearizable, routeKey); addr != "" {
+			if addr, shardID, shardEpoch := s.pickFastSearchTargetPreferSearchOnly(ctx, routingEntry, linearizable, routeKey); addr != "" {
 				workerAddresses = []string{addr}
 				targetShardID = shardID
 				targetShardEpoch = shardEpoch
@@ -2813,7 +2999,7 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 	if cfg.SearchFanoutEnabled {
 		if len(workerAddresses) == 0 {
 			if routingEntry, err := s.getCollectionRouting(ctx, req.Collection, true); err == nil {
-				workerAddresses = workerAddressesForSearch(routingEntry, linearizable, routeKey)
+				workerAddresses = s.workerAddressesForSearchPreferSearchOnly(ctx, routingEntry, linearizable, routeKey)
 			}
 		}
 		if len(workerAddresses) == 0 {
@@ -2865,11 +3051,26 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 					}
 				}
 				workerAddresses = workerListResp.GetGrpcAddresses()
+				if !linearizable && cfg.PreferSearchOnlyWorkers {
+					if preferred := s.filterPreferSearchOnly(ctx, workerAddresses); len(preferred) > 0 {
+						workerAddresses = preferred
+					}
+				}
 				s.workerListCache.Set(req.Collection, workerAddresses)
 				if s.distributedCache != nil {
 					s.distributedCache.SetWorkerList(ctx, req.Collection, workerAddresses, s.workerListCache.ttl)
 				}
 			}
+		}
+	}
+	if !linearizable && cfg.PreferSearchOnlyWorkers {
+		if preferred := s.filterPreferSearchOnly(ctx, workerAddresses); len(preferred) > 0 {
+			workerAddresses = preferred
+		}
+	}
+	if !linearizable && cfg.PreferSearchOnlyWorkers {
+		if preferred := s.filterPreferSearchOnly(ctx, workerAddresses); len(preferred) > 0 {
+			workerAddresses = preferred
 		}
 	}
 	if !cfg.SearchFanoutEnabled && len(workerAddresses) > 1 {
@@ -2908,7 +3109,7 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 		res, err := workerClient.Search(searchCtx, workerReq)
 		if err != nil && !cfg.SearchFanoutEnabled && shardID != 0 && isStaleShardError(err) {
 			if routingEntry, rerr := s.getCollectionRouting(ctx, req.Collection, true); rerr == nil {
-				if addr, sid, epoch := pickFastSearchTarget(routingEntry, linearizable, routeKey); addr != "" {
+				if addr, sid, epoch := s.pickFastSearchTargetPreferSearchOnly(ctx, routingEntry, linearizable, routeKey); addr != "" {
 					workerAddr = addr
 					shardID = sid
 					shardEpoch = epoch
@@ -3095,6 +3296,21 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 	return finalSnapshot, metadataByID, nil
 }
 
+func (s *gatewayServer) filterPreferSearchOnly(ctx context.Context, addrs []string) []string {
+	if len(addrs) == 0 || !cfg.PreferSearchOnlyWorkers {
+		return nil
+	}
+	roles, err := s.getWorkerRoles(ctx)
+	if err != nil {
+		return nil
+	}
+	preferred := filterSearchOnly(addrs, roles)
+	if len(preferred) == 0 {
+		return nil
+	}
+	return preferred
+}
+
 func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchRequest, warmupKey uint64, warmupKeySet bool) (resp *pb.SearchResponse, err error) {
 	logEnabled := shouldLogGatewayHotPath()
 	startTotal := time.Now()
@@ -3163,9 +3379,9 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 	)
 	if routingEntry, err := s.getCollectionRouting(ctx, req.Collection, false); err == nil {
 		if cfg.SearchFanoutEnabled {
-			workerAddresses = workerAddressesForSearch(routingEntry, linearizable, routeKey)
+			workerAddresses = s.workerAddressesForSearchPreferSearchOnly(ctx, routingEntry, linearizable, routeKey)
 		} else {
-			if addr, shardID, shardEpoch := pickFastSearchTarget(routingEntry, linearizable, routeKey); addr != "" {
+			if addr, shardID, shardEpoch := s.pickFastSearchTargetPreferSearchOnly(ctx, routingEntry, linearizable, routeKey); addr != "" {
 				workerAddresses = []string{addr}
 				targetShardID = shardID
 				targetShardEpoch = shardEpoch
@@ -3180,7 +3396,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 	if cfg.SearchFanoutEnabled {
 		if len(workerAddresses) == 0 {
 			if routingEntry, err := s.getCollectionRouting(ctx, req.Collection, true); err == nil {
-				workerAddresses = workerAddressesForSearch(routingEntry, linearizable, routeKey)
+				workerAddresses = s.workerAddressesForSearchPreferSearchOnly(ctx, routingEntry, linearizable, routeKey)
 			}
 		}
 		if len(workerAddresses) == 0 {
@@ -3232,6 +3448,11 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 					listDur = time.Since(listStart)
 				}
 				workerAddresses = workerListResp.GetGrpcAddresses()
+				if !linearizable && cfg.PreferSearchOnlyWorkers {
+					if preferred := s.filterPreferSearchOnly(ctx, workerAddresses); len(preferred) > 0 {
+						workerAddresses = preferred
+					}
+				}
 				s.workerListCache.Set(req.Collection, workerAddresses)
 				if s.distributedCache != nil {
 					s.distributedCache.SetWorkerList(ctx, req.Collection, workerAddresses, s.workerListCache.ttl)
@@ -3272,7 +3493,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		res, err := workerClient.Search(searchCtx, workerReq)
 		if err != nil && !cfg.SearchFanoutEnabled && shardID != 0 && isStaleShardError(err) {
 			if routingEntry, rerr := s.getCollectionRouting(ctx, req.Collection, true); rerr == nil {
-				if addr, sid, epoch := pickFastSearchTarget(routingEntry, linearizable, routeKey); addr != "" {
+				if addr, sid, epoch := s.pickFastSearchTargetPreferSearchOnly(ctx, routingEntry, linearizable, routeKey); addr != "" {
 					workerAddr = addr
 					shardID = sid
 					shardEpoch = epoch
@@ -3990,6 +4211,10 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 	if workerListTTL <= 0 {
 		workerListTTL = 5 * time.Second
 	}
+	roleTTL := time.Duration(config.WorkerRoleCacheTTLms) * time.Millisecond
+	if roleTTL <= 0 {
+		roleTTL = 5 * time.Second
+	}
 	resolveTTL := time.Duration(config.ResolveCacheTTLms) * time.Millisecond
 	if resolveTTL <= 0 {
 		resolveTTL = 5 * time.Second
@@ -4006,6 +4231,7 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 		pdPool:                   NewPDConnPool(config.GRPCEnableCompression, config.GRPCMaxRecvMB, config.GRPCMaxSendMB),
 		searchCache:              searchCache,
 		workerListCache:          NewWorkerListCache(workerListTTL),
+		workerRoleCache:          NewWorkerRoleCache(roleTTL),
 		resolveCache:             NewWorkerResolveCache(resolveTTL, defaultResolveCacheSize()),
 		routingCache:             NewCollectionRoutingCache(routingTTL),
 		distributedCache:         distributedCache,

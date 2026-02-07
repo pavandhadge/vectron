@@ -10,6 +10,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"errors"
 	"hash/maphash"
 	"io"
 	"log"
@@ -24,6 +25,7 @@ import (
 	"github.com/lni/dragonboat/v3"
 	"github.com/pavandhadge/vectron/shared/proto/worker"
 	"github.com/pavandhadge/vectron/worker/internal/shard"
+	"github.com/pavandhadge/vectron/worker/internal/storage"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -151,13 +153,30 @@ func putSearchItemSlice(s *[]searchHeapItem) {
 	searchItemSlicePool.Put(s)
 }
 
+type shardView interface {
+	IsShardReady(shardID uint64) bool
+	GetShards() []uint64
+	GetShardsForCollection(collection string) []uint64
+	GetShardEpoch(shardID uint64) uint64
+}
+
+type shardSearcher interface {
+	SearchShard(ctx context.Context, shardID uint64, query shard.SearchQuery, linearizable bool) (*shard.SearchResult, error)
+}
+
+type stateMachineProvider interface {
+	GetStateMachine(shardID uint64) *shard.StateMachine
+}
+
 // GrpcServer implements the gRPC worker.WorkerServiceServer interface.
 type GrpcServer struct {
 	worker.UnimplementedWorkerServiceServer
 	nodeHost       *dragonboat.NodeHost // The Dragonboat node host that manages all shards on this worker.
-	shardManager   *shard.Manager       // The manager for all shards hosted on this worker.
+	shardManager   shardView            // The manager for all shards hosted on this worker.
+	searcher       shardSearcher
 	inFlightShards []inFlightShard
 	searchCache    *searchCache
+	searchOnly     bool
 }
 
 type inFlightSearch struct {
@@ -272,14 +291,19 @@ func envInt(name string, def int) int {
 }
 
 // NewGrpcServer creates a new instance of the gRPC server.
-func NewGrpcServer(nh *dragonboat.NodeHost, sm *shard.Manager) *GrpcServer {
+func NewGrpcServer(nh *dragonboat.NodeHost, sm shardView, searcher shardSearcher, searchOnly bool) *GrpcServer {
 	cacheTTL := time.Duration(envInt("VECTRON_WORKER_SEARCH_CACHE_TTL_MS", int(defaultSearchCacheTTL.Milliseconds()))) * time.Millisecond
 	cacheMax := envInt("VECTRON_WORKER_SEARCH_CACHE_MAX", defaultSearchCacheMaxSize)
 	s := &GrpcServer{
 		nodeHost:       nh,
 		shardManager:   sm,
+		searcher:       searcher,
 		inFlightShards: make([]inFlightShard, inFlightShardCount),
 		searchCache:    newSearchCache(cacheTTL, cacheMax),
+		searchOnly:     searchOnly,
+	}
+	if s.searcher == nil {
+		s.searcher = s
 	}
 	for i := range s.inFlightShards {
 		s.inFlightShards[i].m = make(map[uint64]*inFlightSearch)
@@ -304,9 +328,34 @@ func (s *GrpcServer) validateShardLease(shardID uint64, shardEpoch uint64, lease
 	return nil
 }
 
+// SearchShard performs a search on a single shard.
+func (s *GrpcServer) SearchShard(ctx context.Context, shardID uint64, query shard.SearchQuery, linearizable bool) (*shard.SearchResult, error) {
+	if s.nodeHost == nil {
+		return nil, status.Error(codes.FailedPrecondition, "search-only worker has no raft")
+	}
+	var res interface{}
+	var err error
+	if linearizable {
+		res, err = s.nodeHost.SyncRead(ctx, shardID, query)
+	} else {
+		res, err = s.nodeHost.StaleRead(shardID, query)
+	}
+	if err != nil {
+		return nil, err
+	}
+	searchResult, ok := res.(*shard.SearchResult)
+	if !ok {
+		return nil, status.Errorf(codes.Internal, "unexpected search result type: %T", res)
+	}
+	return searchResult, nil
+}
+
 // StoreVector handles the request to store a vector.
 // It marshals the request into a command and proposes it to the target shard's Raft group.
 func (s *GrpcServer) StoreVector(ctx context.Context, req *worker.StoreVectorRequest) (*worker.StoreVectorResponse, error) {
+	if s.searchOnly {
+		return nil, status.Error(codes.FailedPrecondition, "write not supported on search-only worker")
+	}
 	if shouldLogHotPath() {
 		log.Printf("Received StoreVector request for ID: %s on shard %d", req.GetVector().GetId(), req.GetShardId())
 	}
@@ -351,6 +400,9 @@ func (s *GrpcServer) StoreVector(ctx context.Context, req *worker.StoreVectorReq
 
 // BatchStoreVector handles storing multiple vectors in a single Raft proposal.
 func (s *GrpcServer) BatchStoreVector(ctx context.Context, req *worker.BatchStoreVectorRequest) (*worker.BatchStoreVectorResponse, error) {
+	if s.searchOnly {
+		return nil, status.Error(codes.FailedPrecondition, "write not supported on search-only worker")
+	}
 	if req == nil || len(req.GetVectors()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "vectors are empty")
 	}
@@ -403,6 +455,9 @@ func (s *GrpcServer) BatchStoreVector(ctx context.Context, req *worker.BatchStor
 // StreamBatchStoreVector handles streaming multiple batch requests for large ingests.
 // Each incoming batch is proposed as a single Raft command.
 func (s *GrpcServer) StreamBatchStoreVector(stream worker.WorkerService_StreamBatchStoreVectorServer) error {
+	if s.searchOnly {
+		return status.Error(codes.FailedPrecondition, "write not supported on search-only worker")
+	}
 	var totalStored int32
 	for {
 		req, err := stream.Recv()
@@ -531,6 +586,12 @@ func (s *GrpcServer) Search(ctx context.Context, req *worker.SearchRequest) (*wo
 	if err := s.validateShardLease(req.GetShardId(), req.GetShardEpoch(), req.GetLeaseExpiryUnixMs()); err != nil {
 		return nil, err
 	}
+	if s.searchOnly && req.GetLinearizable() {
+		return nil, status.Error(codes.FailedPrecondition, "linearizable reads not supported on search-only worker")
+	}
+	if s.searchOnly && req.GetBruteForce() {
+		return nil, status.Error(codes.FailedPrecondition, "brute force search not supported on search-only worker")
+	}
 
 	key := computeSearchKey(req)
 	cacheable := !req.GetLinearizable() && !req.GetBruteForce()
@@ -569,6 +630,12 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 	}
 	useLinearizable := req.GetLinearizable()
 	cacheable := !useLinearizable && !req.GetBruteForce()
+	if s.searchOnly && useLinearizable {
+		return nil, status.Error(codes.FailedPrecondition, "linearizable reads not supported on search-only worker")
+	}
+	if s.searchOnly && req.GetBruteForce() {
+		return nil, status.Error(codes.FailedPrecondition, "brute force search not supported on search-only worker")
+	}
 
 	// If ShardId is 0, it's a broadcast search. Search all shards on this worker.
 	if req.GetShardId() == 0 {
@@ -584,24 +651,15 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 			shardIDs = s.shardManager.GetShards()
 		}
 		if len(shardIDs) == 1 {
-			var res interface{}
 			var err error
 			if cacheable {
 				if cached, ok := s.searchCache.Get(computeSearchKeyWithShard(req, shardIDs[0])); ok && len(cached.Ids) > 0 {
 					return &worker.SearchResponse{Ids: cached.Ids, Scores: cached.Scores}, nil
 				}
 			}
-			if useLinearizable {
-				res, err = s.nodeHost.SyncRead(ctx, shardIDs[0], query)
-			} else {
-				res, err = s.nodeHost.StaleRead(shardIDs[0], query)
-			}
+			searchResult, err := s.searcher.SearchShard(ctx, shardIDs[0], query, useLinearizable)
 			if err != nil {
-				return nil, err
-			}
-			searchResult, ok := res.(*shard.SearchResult)
-			if !ok {
-				return nil, status.Errorf(codes.Internal, "unexpected search result type: %T", res)
+				return nil, mapSearchError(err)
 			}
 			if cacheable && len(searchResult.IDs) > 0 {
 				s.searchCache.Set(computeSearchKeyWithShard(req, shardIDs[0]), &worker.SearchResponse{
@@ -618,7 +676,6 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 				defer wg.Done()
 				searchSem <- struct{}{}
 				defer func() { <-searchSem }()
-				var res interface{}
 				var err error
 				if cacheable {
 					if cached, ok := s.searchCache.Get(computeSearchKeyWithShard(req, id)); ok && len(cached.Ids) > 0 {
@@ -652,19 +709,10 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 						return
 					}
 				}
-				if useLinearizable {
-					res, err = s.nodeHost.SyncRead(ctx, id, query)
-				} else {
-					res, err = s.nodeHost.StaleRead(id, query)
-				}
+				searchResult, err := s.searcher.SearchShard(ctx, id, query, useLinearizable)
 				if err != nil {
 					// Log error but don't fail the whole search for one failed shard.
 					log.Printf("Failed to search shard %d: %v", id, err)
-					return
-				}
-				searchResult, ok := res.(*shard.SearchResult)
-				if !ok {
-					log.Printf("Unexpected search result type from shard %d: %T", id, res)
 					return
 				}
 				if cacheable && len(searchResult.IDs) > 0 {
@@ -739,25 +787,15 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 
 	} else {
 		// Original logic for single-shard search
-		var res interface{}
 		var err error
 		if cacheable {
 			if cached, ok := s.searchCache.Get(computeSearchKeyWithShard(req, req.GetShardId())); ok && len(cached.Ids) > 0 {
 				return cached, nil
 			}
 		}
-		if useLinearizable {
-			res, err = s.nodeHost.SyncRead(ctx, req.GetShardId(), query)
-		} else {
-			res, err = s.nodeHost.StaleRead(req.GetShardId(), query)
-		}
+		searchResult, err := s.searcher.SearchShard(ctx, req.GetShardId(), query, useLinearizable)
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to perform search: %v", err)
-		}
-
-		searchResult, ok := res.(*shard.SearchResult)
-		if !ok {
-			return nil, status.Errorf(codes.Internal, "unexpected search result type: %T", res)
+			return nil, mapSearchError(err)
 		}
 		if cacheable && len(searchResult.IDs) > 0 {
 			s.searchCache.Set(computeSearchKeyWithShard(req, req.GetShardId()), &worker.SearchResponse{
@@ -768,6 +806,19 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 
 		return &worker.SearchResponse{Ids: searchResult.IDs, Scores: searchResult.Scores}, nil
 	}
+}
+
+func mapSearchError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, shard.ErrShardNotReady) {
+		return status.Error(codes.Unavailable, "shard not ready")
+	}
+	if errors.Is(err, shard.ErrLinearizableNotSupported) {
+		return status.Error(codes.FailedPrecondition, "linearizable reads not supported")
+	}
+	return err
 }
 
 func computeSearchKey(req *worker.SearchRequest) uint64 {
@@ -843,6 +894,9 @@ func (s *GrpcServer) finishInFlight(key uint64, resp *worker.SearchResponse, err
 // GetVector retrieves a vector by its ID.
 // This is a read operation and uses a linearizable read from the FSM.
 func (s *GrpcServer) GetVector(ctx context.Context, req *worker.GetVectorRequest) (*worker.GetVectorResponse, error) {
+	if s.searchOnly {
+		return nil, status.Error(codes.FailedPrecondition, "get not supported on search-only worker")
+	}
 	if shouldLogHotPath() {
 		log.Printf("Received GetVector request for ID: %s on shard %d", req.GetId(), req.GetShardId())
 	}
@@ -880,6 +934,9 @@ func (s *GrpcServer) GetVector(ctx context.Context, req *worker.GetVectorRequest
 // DeleteVector deletes a vector by its ID.
 // This is a write operation and is proposed to the Raft log.
 func (s *GrpcServer) DeleteVector(ctx context.Context, req *worker.DeleteVectorRequest) (*worker.DeleteVectorResponse, error) {
+	if s.searchOnly {
+		return nil, status.Error(codes.FailedPrecondition, "delete not supported on search-only worker")
+	}
 	if shouldLogHotPath() {
 		log.Printf("Received DeleteVector request for ID: %s on shard %d", req.GetId(), req.GetShardId())
 	}
@@ -907,6 +964,209 @@ func (s *GrpcServer) DeleteVector(ctx context.Context, req *worker.DeleteVectorR
 	}
 
 	return &worker.DeleteVectorResponse{}, nil
+}
+
+// StreamHNSWSnapshot streams the latest HNSW snapshot for a shard.
+func (s *GrpcServer) StreamHNSWSnapshot(req *worker.HNSWSnapshotRequest, stream worker.WorkerService_StreamHNSWSnapshotServer) error {
+	if s.searchOnly {
+		return status.Error(codes.FailedPrecondition, "snapshot stream not supported on search-only worker")
+	}
+	if req == nil || req.GetShardId() == 0 {
+		return status.Error(codes.InvalidArgument, "missing shard id")
+	}
+	provider, ok := s.shardManager.(stateMachineProvider)
+	if !ok {
+		return status.Error(codes.FailedPrecondition, "snapshot stream not available")
+	}
+	sm := provider.GetStateMachine(req.GetShardId())
+	if sm == nil {
+		return status.Errorf(codes.Unavailable, "shard %d not ready", req.GetShardId())
+	}
+	data, ts, err := sm.GetHNSWSnapshot()
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to get snapshot: %v", err)
+	}
+	chunkKB := envIntDefault("VECTRON_HNSW_SNAPSHOT_CHUNK_KB", 256)
+	if chunkKB <= 0 {
+		chunkKB = 256
+	}
+	chunkSize := chunkKB * 1024
+	if len(data) == 0 {
+		return stream.Send(&worker.HNSWSnapshotChunk{
+			ShardId:            req.GetShardId(),
+			SnapshotTsUnixNano: ts,
+			Done:               true,
+		})
+	}
+	for offset := 0; offset < len(data); offset += chunkSize {
+		end := offset + chunkSize
+		if end > len(data) {
+			end = len(data)
+		}
+		if err := stream.Send(&worker.HNSWSnapshotChunk{
+			ShardId:            req.GetShardId(),
+			SnapshotTsUnixNano: ts,
+			Data:               data[offset:end],
+			Done:               end == len(data),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// StreamHNSWUpdates streams WAL updates for a shard.
+func (s *GrpcServer) StreamHNSWUpdates(req *worker.HNSWUpdatesRequest, stream worker.WorkerService_StreamHNSWUpdatesServer) error {
+	if s.searchOnly {
+		return status.Error(codes.FailedPrecondition, "update stream not supported on search-only worker")
+	}
+	if req == nil || req.GetShardId() == 0 {
+		return status.Error(codes.InvalidArgument, "missing shard id")
+	}
+	provider, ok := s.shardManager.(stateMachineProvider)
+	if !ok {
+		return status.Error(codes.FailedPrecondition, "update stream not available")
+	}
+	sm := provider.GetStateMachine(req.GetShardId())
+	if sm == nil {
+		return status.Errorf(codes.Unavailable, "shard %d not ready", req.GetShardId())
+	}
+	db := sm.PebbleDB
+
+	maxBatch := envIntDefault("VECTRON_WAL_STREAM_BATCH_MAX", 256)
+	if maxBatch < 1 {
+		maxBatch = 256
+	}
+	flushMs := envIntDefault("VECTRON_WAL_STREAM_FLUSH_MS", 25)
+	if flushMs < 1 {
+		flushMs = 25
+	}
+	backfillSleepMs := envIntDefault("VECTRON_WAL_STREAM_BACKFILL_SLEEP_MS", 0)
+	sendBatch := func(batch []*worker.HNSWUpdate) error {
+		if len(batch) == 0 {
+			return nil
+		}
+		return stream.Send(&worker.HNSWUpdateBatch{Updates: batch})
+	}
+
+	// 1) Catch up from WAL since from_ts.
+	var batch []*worker.HNSWUpdate
+	lastTS := req.GetFromTsUnixNano()
+	var sendErr error
+	if err := db.IterateWALFrom(req.GetFromTsUnixNano(), func(upd storage.WALUpdate) bool {
+		if upd.TS > lastTS {
+			lastTS = upd.TS
+		}
+		batch = append(batch, &worker.HNSWUpdate{
+			Id:         upd.ID,
+			Value:      upd.Value,
+			Delete:     upd.Delete,
+			TsUnixNano: upd.TS,
+		})
+		if len(batch) >= maxBatch {
+			if err := sendBatch(batch); err != nil {
+				sendErr = err
+				return false
+			}
+			batch = batch[:0]
+			if backfillSleepMs > 0 {
+				time.Sleep(time.Duration(backfillSleepMs) * time.Millisecond)
+			}
+		}
+		return true
+	}); err != nil {
+		return status.Errorf(codes.Internal, "failed to read WAL: %v", err)
+	}
+	if sendErr != nil {
+		return sendErr
+	}
+	if err := sendBatch(batch); err != nil {
+		return err
+	}
+
+	// 2) Stream live updates if a hub is attached.
+	hub := db.WALHub()
+	if hub == nil {
+		pollMs := envIntDefault("VECTRON_WAL_POLL_MS", 500)
+		if pollMs < 10 {
+			pollMs = 10
+		}
+		ticker := time.NewTicker(time.Duration(pollMs) * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stream.Context().Done():
+				return nil
+			case <-ticker.C:
+				batch = batch[:0]
+				var sendErr error
+				if err := db.IterateWALFrom(lastTS+1, func(upd storage.WALUpdate) bool {
+					if upd.TS > lastTS {
+						lastTS = upd.TS
+					}
+					batch = append(batch, &worker.HNSWUpdate{
+						Id:         upd.ID,
+						Value:      upd.Value,
+						Delete:     upd.Delete,
+						TsUnixNano: upd.TS,
+					})
+					if len(batch) >= maxBatch {
+						if err := sendBatch(batch); err != nil {
+							sendErr = err
+							return false
+						}
+						batch = batch[:0]
+					}
+					return true
+				}); err != nil {
+					return status.Errorf(codes.Internal, "failed to read WAL: %v", err)
+				}
+				if sendErr != nil {
+					return sendErr
+				}
+				if err := sendBatch(batch); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	_, ch, cancel := hub.Subscribe(req.GetShardId(), envIntDefault("VECTRON_WAL_STREAM_SUB_BUF", 4096))
+	defer cancel()
+
+	ticker := time.NewTicker(time.Duration(flushMs) * time.Millisecond)
+	defer ticker.Stop()
+	batch = batch[:0]
+
+	for {
+		select {
+		case <-stream.Context().Done():
+			return nil
+		case upd, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			if upd.TS > lastTS {
+				lastTS = upd.TS
+			}
+			batch = append(batch, &worker.HNSWUpdate{
+				Id:         upd.ID,
+				Value:      upd.Value,
+				Delete:     upd.Delete,
+				TsUnixNano: upd.TS,
+			})
+			if len(batch) >= maxBatch {
+				if err := sendBatch(batch); err != nil {
+					return err
+				}
+				batch = batch[:0]
+			}
+		case <-ticker.C:
+			if err := sendBatch(batch); err != nil {
+				return err
+			}
+			batch = batch[:0]
+		}
+	}
 }
 
 // --- Unimplemented Methods ---
