@@ -1,26 +1,47 @@
-# Reranker Optimization Suggestions
+# Reranker Optimization (Current)
 
-## Summary
-Reranking is expensive and should be invoked only when it materially improves quality. The API Gateway already skips reranking when the query is empty, which is a strong default. Below are additional options that can further reduce latency and CPU without sacrificing quality.
+Last updated: 2026-02-08
 
-## Recommended (High Impact)
-1. Feature-flag reranking
-   - Gate reranking with an explicit header or config flag (e.g., `X-Rerank: true`) or a per-collection config.
-   - This prevents unintended rerank usage and allows opt-in per workload.
+## 1. Current Implementation Status
 
-2. Candidate cap based on query presence
-   - When query text exists, rerank only a small multiple of `TopK` (e.g., `min(TopK*2, 100)`).
-   - This is already partially done in the gateway; tighten this further if reranker latency is still high.
+- Reranker service is active and integrated with API Gateway.
+- `rule` strategy is implemented and default.
+- `llm` and `rl` strategy selections currently fall back to stub implementations.
 
-3. Timeout + fallback
-   - Add a short timeout for rerank calls (e.g., 50–100ms). On timeout, return the original sorted results.
-   - This bounds tail latency while keeping quality when reranker is fast.
+## 2. Runtime Controls
 
-## Optional
-4. Async rerank warmup
-   - For frequent queries, asynchronously warm rerank cache on the first request and serve base results immediately.
-   - Subsequent requests benefit from cached rerank output.
+Reranker service controls:
 
-5. Per-collection policy
-   - Allow each collection to specify `rerank_enabled`, `rerank_top_n`, and `rerank_timeout_ms` in metadata.
-   - This keeps cost/latency aligned with use-case value.
+- `RERANKER_PORT`
+- `RERANKER_STRATEGY`
+- `CACHE_BACKEND` (`memory` or `redis`)
+- `RULE_CONFIG_PATH` and rule env parameters
+
+Gateway-side rerank controls:
+
+- `RERANK_ENABLED`
+- `RERANK_TIMEOUT_MS`
+- `RERANK_COLLECTIONS`
+- override maps for `TopN` and timeout
+- rerank warmup flags
+
+## 3. Practical Optimization Priorities
+
+1. Keep `rule` strategy for production paths until non-stub alternatives are implemented.
+2. Tune timeout and collection allowlists in gateway first.
+3. Enable cache backend that matches deployment profile (memory for simple, redis for multi-instance).
+4. Measure p95/p99 rerank latency before increasing rerank scope.
+
+## 4. Measurable Checks
+
+- gateway request latency with rerank on/off
+- reranker service latency and error rate
+- cache hit/miss ratio
+- impact on search relevance metrics from feedback datasets
+
+## 5. Source of Truth
+
+- `reranker/cmd/reranker/main.go`
+- `reranker/internal/strategies/rule/*`
+- `apigateway/cmd/apigateway/config.go`
+- `shared/proto/reranker/reranker.proto`
