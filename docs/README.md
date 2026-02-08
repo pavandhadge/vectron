@@ -2,13 +2,19 @@
 
 Last updated: 2026-02-08
 
-This folder is now maintained as current-state documentation.
+This folder is maintained as current-state documentation.
 
-## Start Here
+## Primary Website-Ready Docs
 
-- `docs/CURRENT_STATE.md`: Code-verified architecture, APIs, runtime config, and known gaps.
-- `docs/Vectron_Project_Overview.md`: concise project overview.
-- `docs/Vectron_Architecture.md`: runtime architecture and request flows.
+- `docs/Vectron_Project_Overview.md`
+- `docs/ARCHITECTURE_DEEP_DIVE.md`
+- `docs/PHILOSOPHY_AND_DIRECTION.md`
+- `docs/API.md`
+
+## System State and Reference
+
+- `docs/CURRENT_STATE.md`: code-verified architecture, APIs, runtime config, and known gaps.
+- `docs/Vectron_Architecture.md`: concise architecture and request flow summary.
 
 ## Service Docs
 
