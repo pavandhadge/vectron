@@ -1,45 +1,77 @@
-# Vectron Project Overview
+# Vectron Project Overview (Updated)
 
-This document provides a high-level overview of the Vectron project, its architecture, and its components.
+This document is a code-aligned overview of the current Vectron repository.
 
-## 1. Architecture
+For detailed, verified state, see `docs/CURRENT_STATE.md`.
 
-Vectron is a distributed system built on a microservices architecture. The backend services are written in Go and communicate with each other using gRPC. The system is designed to be a vector database, with services for managing authentication, handling API requests, distributing data, and performing vector searches.
+## 1. What Vectron Is
 
-The key architectural patterns are:
+Vectron is a distributed vector database built as Go microservices with gRPC/HTTP APIs, Raft-based control/data consistency, and multi-language SDK support.
 
-*   **Microservices:** The project is divided into several independent services, each with a specific responsibility. This promotes modularity, scalability, and independent development.
-*   **gRPC for Inter-Service Communication:** All backend services communicate with each other using gRPC, a high-performance RPC framework. The API definitions are specified in `.proto` files located in the `shared/proto` directory.
-*   **API Gateway:** The `apigateway` service acts as an entry point for external clients. It exposes a RESTful JSON API and translates incoming requests into gRPC calls to the appropriate backend services. This provides a single, consistent interface for clients and decouples them from the internal microservice architecture.
-*   **Multi-Module Go Workspace:** The project is organized as a Go workspace, which allows for the simultaneous development and management of multiple Go modules within a single repository.
+Primary goals:
 
-## 2. Components
+- vector storage and ANN search
+- shard-aware routing and replication
+- API key/JWT-based access control
+- optional reranking and feedback capture
+- operational visibility via management endpoints
 
-The project is composed of the following main components:
+## 2. Main Components
 
-| Component         | Location                | Description                                                                                                                              |
-| ----------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **Authentication Service** | `auth/service`          | Manages user authentication and authorization. It likely handles API key generation and validation.                                    |
-| **API Gateway**   | `apigateway`            | Exposes a public-facing RESTful API, handles request routing, and communicates with other backend services via gRPC.                       |
-| **Worker**        | `worker`                | The core data processing and storage engine. It likely manages vector embeddings, performs similarity searches, and stores data in shards. |
-| **Placement Driver** | `placementdriver`       | A coordination service that manages the distribution of data and workload across the `worker` nodes. It likely uses Raft for consensus. |
-| **Shared Code**   | `shared`                | Contains common code used by multiple services, most importantly the protobuf definitions for the gRPC APIs.                            |
-| **Client Libraries** | `clientlibs`            | Generated client libraries for JavaScript and Python that allow easy interaction with the Vectron API.                                   |
+| Component | Location | Current Role |
+|---|---|---|
+| API Gateway | `apigateway` | Public API, auth/rate-limit middleware, routes requests to PD/workers, exposes management + feedback endpoints |
+| Placement Driver | `placementdriver` | Raft-backed control plane (workers, shards, collections, assignment/rebalance) |
+| Worker | `worker` | Stateful data plane (multi-Raft shards, Pebble persistence, HNSW search) |
+| Auth Service | `auth/service` | User + API key lifecycle, JWT handling, SDK auth metadata via etcd |
+| Reranker | `reranker` | Rerank gRPC service (rule strategy active; llm/rl stubs) |
+| Auth Frontend | `auth/frontend` | React management/account console |
+| Shared Protos | `shared/proto` | Source of truth for API contracts |
+| Client SDKs | `clientlibs/go`, `clientlibs/python`, `clientlibs/js` | Go/Python/JS clients generated/maintained with proto contracts |
 
-## 3. Build Process
+## 3. External API Entry Point
 
-The project uses a combination of a `Makefile` and a shell script (`generate-all.sh`) to manage the build process.
+The primary user-facing API is `VectronService` in:
 
-*   **`generate-all.sh`:** This script is responsible for generating Go, JavaScript, and Python code from the `.proto` files. It uses `protoc` with various plugins to create gRPC server and client code, as well as the gRPC-gateway for the RESTful API.
-*   **`Makefile`:** This file provides simple targets for building the individual Go services and a main `build` target to compile all services. The compiled binaries are placed in the `bin` directory.
+- `shared/proto/apigateway/apigateway.proto`
 
-## 4. How the System Works Together (Initial Hypothesis)
+Core operations currently exposed:
 
-1.  A client makes a request to the RESTful API exposed by the `apigateway`.
-2.  The `apigateway` authenticates the request, possibly by communicating with the `auth` service.
-3.  The `apigateway` translates the RESTful request into a gRPC call and forwards it to the appropriate service, likely the `placementdriver` or a `worker`.
-4.  The `placementdriver` determines which `worker`(s) should handle the request and forwards it accordingly.
-5.  The `worker`(s) process the request (e.g., indexing data, performing a search) and return a response.
-6.  The response is propagated back through the chain to the client.
+- collection lifecycle (`CreateCollection`, `DeleteCollection`, `ListCollections`, `GetCollectionStatus`)
+- vector lifecycle (`Upsert`, `Get`, `Delete`)
+- search (`Search`, `SearchStream`)
+- user plan update (`UpdateUserProfile`)
+- feedback (`SubmitFeedback`)
 
-This is a preliminary overview based on the project structure. The detailed documentation for each component will provide a more in-depth understanding of the system.
+## 4. Runtime Topology
+
+Typical flow:
+
+1. Client calls API Gateway (gRPC or HTTP gateway).
+2. Gateway validates identity via Auth Service.
+3. Gateway resolves shard/worker placement via Placement Driver.
+4. Gateway forwards data/search RPCs to worker replicas.
+5. Workers execute writes via shard Raft proposals and reads via shard state.
+6. Optional reranking path: Gateway calls Reranker for final result ordering.
+
+## 5. Build and Tooling
+
+Current build orchestration:
+
+- `Makefile`: service builds for Linux/Windows
+- `generate-all.sh`: proto generation across services/SDKs
+- `go.work`: multi-module workspace
+
+Primary binaries:
+
+- `bin/placementdriver`
+- `bin/worker`
+- `bin/apigateway`
+- `bin/authsvc`
+- `bin/reranker`
+
+## 6. Documentation Conventions
+
+- Treat `shared/proto/*` and service entrypoints (`cmd/*/main.go`) as authoritative.
+- Use `docs/CURRENT_STATE.md` for current implementation details.
+- Older planning/proposal markdown files may describe non-current states.

@@ -1,69 +1,44 @@
-# API Gateway + Reranker Integration
+# API Gateway - Reranker Integration (Current)
 
-The API Gateway now integrates with the Reranker service to provide enhanced search results that go beyond simple vector similarity.
+Last updated: 2026-02-08
 
-## Architecture
+## 1. Integration Summary
 
-```
-Client Request
-      ↓
-  API Gateway
-      ↓
-  Worker Service (vector search)
-      ↓
-  Reranker Service (rule-based enhancement)
-      ↓
-  Enhanced Results
-      ↓
-     Client
-```
+API Gateway can optionally call the Reranker service after worker search results are collected.
 
-## Configuration
+- gateway owns rerank toggle and timeout policy
+- reranker returns reordered candidates
+- gateway maps reranked output back to public `SearchResponse`
 
-Set the reranker service address via environment variable:
+## 2. Control Flags
 
-```bash
-export RERANKER_SERVICE_ADDR=localhost:50051
-```
+From `apigateway/cmd/apigateway/config.go`:
 
-## Complete Flow
+- `RERANK_ENABLED` (default `false`)
+- `RERANK_TIMEOUT_MS` (default `75`)
+- `RERANK_COLLECTIONS` (collection allowlist)
+- `RERANK_TOP_N_OVERRIDES`
+- `RERANK_TIMEOUT_OVERRIDES`
+- `RERANK_WARMUP_ENABLED` and related warmup settings
+- `RERANKER_SERVICE_ADDR` (default `localhost:50051`)
 
-1. **Client sends search request** to API Gateway
-2. **API Gateway** forwards request to Worker Service with increased `top_k` (2x requested amount)
-3. **Worker Service** returns vector similarity results
-4. **API Gateway** sends results to Reranker Service with:
-   - Candidate IDs and similarity scores
-   - Metadata from search results
-5. **Reranker Service** applies rule-based reranking:
-   - Boosts exact matches
-   - Applies title relevance
-   - Considers metadata signals
-6. **API Gateway** returns reranked results to client
+## 3. Current Strategy Reality
 
-## Features
+From `reranker/cmd/reranker/main.go`:
 
-- **Automatic Integration**: All search requests are automatically enhanced
-- **Graceful Degradation**: If reranker fails, returns original vector results
-- **Performance Optimization**: Requests more results from worker for better reranking
-- **Flexible Configuration**: Easy to configure reranker address
-- **Error Handling**: Robust error handling with fallback to vector results
+- `rule` strategy is implemented and default
+- `llm` and `rl` currently fall back to stub behavior
 
-## Usage
+## 4. Expected Request Path
 
-Start all services:
+1. Client calls gateway `Search`.
+2. Gateway gathers worker candidates.
+3. If reranking is enabled and applicable, gateway calls `RerankService.Rerank`.
+4. Gateway returns reranked top results.
 
-```bash
-# 1. Start Placement Driver
-cd placementdriver && ./bin/placementdriver
+## 5. Source of Truth
 
-# 2. Start Worker Service  
-cd worker && ./bin/worker
-
-# 3. Start Reranker Service
-cd reranker && ./bin/reranker --strategy=rule --port=50051
-
-# 4. Start API Gateway
-cd apigateway && RERANKER_SERVICE_ADDR=localhost:50051 ./bin/apigateway
-```
-
-Now all search requests will automatically benefit from intelligent reranking!
+- `apigateway/cmd/apigateway/main.go`
+- `apigateway/cmd/apigateway/config.go`
+- `reranker/cmd/reranker/main.go`
+- `shared/proto/reranker/reranker.proto`
