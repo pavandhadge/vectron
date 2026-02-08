@@ -133,6 +133,7 @@ func Start(nodeID, clusterID uint64, raftAddr, grpcAddr, dataDir string, initial
 }
 
 func main() {
+	runtimeutil.LoadServiceEnv("placementdriver")
 	runtimeutil.ConfigureGOMAXPROCS("placementdriver")
 	startSelfDumpProfiles("placementdriver")
 	flag.Parse()

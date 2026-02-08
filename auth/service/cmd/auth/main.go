@@ -50,7 +50,7 @@ var (
 	httpTLSKeyFile    string
 )
 
-func init() {
+func loadConfigFromEnv() {
 	if os.Getenv("GRPC_PORT") != "" {
 		grpcPort = os.Getenv("GRPC_PORT")
 	}
@@ -83,7 +83,9 @@ func init() {
 }
 
 func main() {
+	runtimeutil.LoadServiceEnv("auth")
 	runtimeutil.ConfigureGOMAXPROCS("auth")
+	loadConfigFromEnv()
 	// Initialize etcd client
 	etcdCli, err := etcdclient.NewClient([]string{etcdEndpoints}, 5*time.Second)
 	if err != nil {

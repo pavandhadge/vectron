@@ -29,6 +29,7 @@ const (
 )
 
 func main() {
+	runtimeutil.LoadServiceEnv("reranker")
 	runtimeutil.ConfigureGOMAXPROCS("reranker")
 	// Parse command-line flags
 	port := flag.String("port", getEnv("RERANKER_PORT", defaultPort), "gRPC server port")

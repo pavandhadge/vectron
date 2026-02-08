@@ -33,32 +33,49 @@ trap cleanup EXIT
 # --- Configuration ---
 echo "🚀 Starting all Vectron services..."
 
-# Ports
-export PD_GRPC_1=10001
-export PD_RAFT_1=10002
-export PD_GRPC_2=10003
-export PD_RAFT_2=10004
-export PD_GRPC_3=10005
-export PD_RAFT_3=10006
-export WORKER_GRPC_1=10007
-export WORKER_RAFT_1=11007
-export WORKER_GRPC_2=10014
-export WORKER_RAFT_2=11014
-export AUTH_GRPC=10008
-export AUTH_HTTP=10009
-export APIGATEWAY_GRPC=10010
-export FRONTEND_PORT=10011
-export RERANKER_PORT=10013
-export FEEDBACK_DB_PATH="/tmp/vectron/feedback.db"
-export DISTRIBUTED_CACHE_ADDR="127.0.0.1:6379"
+# Ports (cluster topology for local dev)
+PD_GRPC_1=10001
+PD_RAFT_1=10002
+PD_GRPC_2=10003
+PD_RAFT_2=10004
+PD_GRPC_3=10005
+PD_RAFT_3=10006
+WORKER_GRPC_1=10007
+WORKER_RAFT_1=11007
+WORKER_GRPC_2=10014
+WORKER_RAFT_2=11014
+FRONTEND_PORT=10011
 
 # Endpoints
-export ETCD_ENDPOINTS="127.0.0.1:2379"
-export PD_ADDRS="127.0.0.1:${PD_GRPC_1},127.0.0.1:${PD_GRPC_2},127.0.0.1:${PD_GRPC_3}"
-export AUTH_SERVICE_ADDR="127.0.0.1:${AUTH_GRPC}"
+ETCD_ENDPOINTS="127.0.0.1:2379"
 
-# Secrets
-export JWT_SECRET="dev-secret-key-that-is-not-so-secret"
+# Env helpers (read values for display only; services load their own env files)
+env_val() {
+    local file="$1"
+    local key="$2"
+    if [ ! -f "$file" ]; then
+        return 1
+    fi
+    awk -F= -v k="$key" '
+        $0 ~ /^[[:space:]]*#/ {next}
+        $0 ~ /^[[:space:]]*$/ {next}
+        $1 == k {
+            v=$2
+            for (i=3; i<=NF; i++) v=v"="$i
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+            gsub(/^"|"$/, "", v)
+            gsub(/^'\''|'\''$/, "", v)
+            print v
+            exit
+        }
+    ' "$file"
+}
+
+AUTH_GRPC="$(env_val env/auth.env GRPC_PORT)"
+AUTH_HTTP="$(env_val env/auth.env HTTP_PORT)"
+APIGW_GRPC_ADDR="$(env_val env/apigateway.env GRPC_ADDR)"
+APIGW_HTTP_ADDR="$(env_val env/apigateway.env HTTP_ADDR)"
+RERANKER_PORT="$(env_val env/reranker.env RERANKER_PORT)"
 
 # --- Build Binaries ---
 echo "🔧 Building service binaries..."
@@ -161,7 +178,6 @@ run_bg /tmp/vectron-worker1.log ./bin/worker \
     --node-id=1 \
     --grpc-addr="127.0.0.1:${WORKER_GRPC_1}" \
     --raft-addr="127.0.0.1:${WORKER_RAFT_1}" \
-    --pd-addrs="${PD_ADDRS}" \
     --data-dir="${WORKER_DATA_DIR_1}"
 
 WORKER_DATA_DIR_2=$(mktemp -d /tmp/worker_dev_2.XXXXXX)
@@ -169,39 +185,23 @@ run_bg /tmp/vectron-worker2.log ./bin/worker \
     --node-id=2 \
     --grpc-addr="127.0.0.1:${WORKER_GRPC_2}" \
     --raft-addr="127.0.0.1:${WORKER_RAFT_2}" \
-    --pd-addrs="${PD_ADDRS}" \
     --data-dir="${WORKER_DATA_DIR_2}"
 sleep 2
 
 # 4. Start Auth Service
 echo "▶️  Starting Auth service..."
-run_bg /tmp/vectron-auth.log env GRPC_PORT=":${AUTH_GRPC}" HTTP_PORT=":${AUTH_HTTP}" ./bin/authsvc
+run_bg /tmp/vectron-auth.log ./bin/authsvc
 sleep 2
 
 # 5. Start Reranker Service
 echo "▶️  Starting Reranker service..."
 run_bg /tmp/vectron-reranker.log \
-  env \
-  RULE_EXACT_MATCH_BOOST=0.3 \
-  RULE_TITLE_BOOST=0.2 \
-  RULE_METADATA_BOOSTS="verified:0.3,featured:0.2" \
-  RULE_METADATA_PENALTIES="deprecated:0.5" \
-  ./bin/reranker \
-  --port="${RERANKER_PORT}" \
-  --strategy="rule" \
-  --cache="memory"
+  ./bin/reranker
 sleep 2
 
 # 6. Start API Gateway
 echo "▶️  Starting API Gateway service..."
 run_bg /tmp/vectron-apigw.log \
-  env \
-  GRPC_ADDR="127.0.0.1:${APIGATEWAY_GRPC}" \
-  HTTP_ADDR="127.0.0.1:10012" \
-  PLACEMENT_DRIVER="${PD_ADDRS}" \
-  AUTH_SERVICE_ADDR="${AUTH_SERVICE_ADDR}" \
-  RERANKER_SERVICE_ADDR="127.0.0.1:${RERANKER_PORT}" \
-  DISTRIBUTED_CACHE_ADDR="${DISTRIBUTED_CACHE_ADDR}" \
   ./bin/apigateway
 sleep 2
 
@@ -213,8 +213,10 @@ echo "▶️  Starting Frontend development server..."
     npm install | tee -a /tmp/vectron-frontend-install.log
 
     # Export environment variables for the frontend
-    export VITE_AUTH_API_BASE_URL="http://localhost:${AUTH_HTTP}"
-    export VITE_APIGATEWAY_API_BASE_URL="http://localhost:10012"
+    AUTH_HTTP_PORT="${AUTH_HTTP#:}"
+    APIGW_HTTP_PORT="${APIGW_HTTP_ADDR##*:}"
+    export VITE_AUTH_API_BASE_URL="http://localhost:${AUTH_HTTP_PORT}"
+    export VITE_APIGATEWAY_API_BASE_URL="http://localhost:${APIGW_HTTP_PORT}"
     export VITE_PLACEMENT_DRIVER_API_BASE_URL="http://localhost:${PD_GRPC_1}"
 
     npm run dev -- --port ${FRONTEND_PORT}
@@ -224,17 +226,19 @@ echo " "
 echo "🎉 All services are running!"
 echo "-----------------------------------"
 echo "Vectron Frontend      > http://localhost:${FRONTEND_PORT}"
-echo "Auth Service (HTTP)   > http://localhost:${AUTH_HTTP}"
-echo "API Gateway (HTTP)    > http://localhost:10012"
-echo "API Gateway (gRPC)    > 127.0.0.1:${APIGATEWAY_GRPC}"
+AUTH_HTTP_PORT="${AUTH_HTTP#:}"
+APIGW_HTTP_PORT="${APIGW_HTTP_ADDR##*:}"
+echo "Auth Service (HTTP)   > http://localhost:${AUTH_HTTP_PORT}"
+echo "API Gateway (HTTP)    > http://localhost:${APIGW_HTTP_PORT}"
+echo "API Gateway (gRPC)    > ${APIGW_GRPC_ADDR}"
 echo "Placement Driver      > 127.0.0.1:${PD_GRPC_1}"
 echo "Worker Node 1         > 127.0.0.1:${WORKER_GRPC_1} (raft ${WORKER_RAFT_1})"
 echo "Worker Node 2         > 127.0.0.1:${WORKER_GRPC_2} (raft ${WORKER_RAFT_2})"
 echo "Reranker Service      > 127.0.0.1:${RERANKER_PORT}"
 echo "-----------------------------------"
 echo "Frontend Environment Variables:"
-echo "VITE_AUTH_API_BASE_URL=http://localhost:${AUTH_HTTP}"
-echo "VITE_APIGATEWAY_API_BASE_URL=http://localhost:10012"
+echo "VITE_AUTH_API_BASE_URL=http://localhost:${AUTH_HTTP_PORT}"
+echo "VITE_APIGATEWAY_API_BASE_URL=http://localhost:${APIGW_HTTP_PORT}"
 echo "VITE_PLACEMENT_DRIVER_API_BASE_URL=http://localhost:${PD_GRPC_1}"
 echo "-----------------------------------"
 echo "Logs are being written to /tmp/vectron-*.log"

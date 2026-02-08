@@ -212,13 +212,18 @@ func startSearchOnly(nodeID uint64, raftAddr, grpcAddr string, pdAddrs []string,
 }
 
 func main() {
+	runtimeutil.LoadServiceEnv("worker")
 	runtimeutil.ConfigureGOMAXPROCS("worker")
 	startSelfDumpProfiles("worker")
 	// Define and parse command-line flags.
+	defaultPDAddrs := os.Getenv("PD_ADDRS")
+	if defaultPDAddrs == "" {
+		defaultPDAddrs = "localhost:6001"
+	}
 	var (
 		grpcAddr      = flag.String("grpc-addr", "localhost:9090", "gRPC server address")
 		raftAddr      = flag.String("raft-addr", "localhost:9191", "Raft communication address")
-		pdAddrs       = flag.String("pd-addrs", "localhost:6001", "Comma-separated list of Placement Driver gRPC addresses")
+		pdAddrs       = flag.String("pd-addrs", defaultPDAddrs, "Comma-separated list of Placement Driver gRPC addresses")
 		nodeID        = flag.Uint64("node-id", 1, "Worker Node ID (must be > 0)")
 		workerDataDir = flag.String("data-dir", "./worker-data", "Parent directory for all worker data")
 	)

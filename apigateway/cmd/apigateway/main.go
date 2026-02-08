@@ -60,7 +60,7 @@ func fnv32(s string) uint32 {
 	return h.Sum32()
 }
 
-var cfg = LoadConfig()
+var cfg Config
 
 var (
 	gatewayLogSampleCounter uint64
@@ -4625,8 +4625,10 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 // ================ MAIN ================
 
 func main() {
+	runtimeutil.LoadServiceEnv("apigateway")
 	runtimeutil.ConfigureGOMAXPROCS("apigateway")
 	startSelfDumpProfiles("apigateway")
+	cfg = LoadConfig()
 	_, authConn := Start(cfg, nil)
 	defer authConn.Close()
 

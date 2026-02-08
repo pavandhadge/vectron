@@ -7,7 +7,7 @@ Thumbs.db
 *.swo
 *.tmp
 *.log
-
+env
 #testing
 pd-data
 worker-data
