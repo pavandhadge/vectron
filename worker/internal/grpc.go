@@ -807,10 +807,22 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 		if limit <= 0 {
 			limit = 10
 		}
+		dedupeEnabled := os.Getenv("VECTRON_WORKER_DEDUPE_BROADCAST") == "1"
 		topKHeap := getSearchHeap()
 		heap.Init(topKHeap)
+		var bestScores map[string]float32
+		if dedupeEnabled {
+			bestScores = make(map[string]float32, limit*2)
+		}
 		for local := range resultsCh {
 			for _, item := range *local {
+				if dedupeEnabled {
+					if best, ok := bestScores[item.id]; ok && best >= item.score {
+						continue
+					}
+					bestScores[item.id] = item.score
+					continue
+				}
 				if topKHeap.Len() < limit {
 					heap.Push(topKHeap, item)
 					continue
@@ -821,6 +833,18 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 				}
 			}
 			putSearchItemSlice(local)
+		}
+		if dedupeEnabled {
+			for id, score := range bestScores {
+				if topKHeap.Len() < limit {
+					heap.Push(topKHeap, searchHeapItem{id: id, score: score})
+					continue
+				}
+				if topKHeap.Len() > 0 && score > (*topKHeap)[0].score {
+					(*topKHeap)[0] = searchHeapItem{id: id, score: score}
+					heap.Fix(topKHeap, 0)
+				}
+			}
 		}
 
 		resultCount := topKHeap.Len()

@@ -6,12 +6,14 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/pavandhadge/vectron/shared/runtimeutil"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	_ "google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/keepalive"
@@ -35,10 +37,17 @@ func splitOrigins(origins string) []string {
 }
 
 var (
-	grpcPort      string = ":8081"
-	httpPort      string = ":8082"
-	etcdEndpoints string = "localhost:2379"
-	jwtSecret     string
+	grpcPort          string = ":8081"
+	httpPort          string = ":8082"
+	etcdEndpoints     string = "localhost:2379"
+	jwtSecret         string
+	grpcTLSEnabled    bool
+	grpcTLSCertFile   string
+	grpcTLSKeyFile    string
+	grpcTLSServerName string
+	httpTLSEnabled    bool
+	httpTLSCertFile   string
+	httpTLSKeyFile    string
 )
 
 func init() {
@@ -51,6 +60,13 @@ func init() {
 	if os.Getenv("ETCD_ENDPOINTS") != "" {
 		etcdEndpoints = os.Getenv("ETCD_ENDPOINTS")
 	}
+	grpcTLSEnabled = getEnvAsBool("GRPC_TLS_ENABLED", false)
+	grpcTLSCertFile = os.Getenv("GRPC_TLS_CERT_FILE")
+	grpcTLSKeyFile = os.Getenv("GRPC_TLS_KEY_FILE")
+	grpcTLSServerName = os.Getenv("GRPC_TLS_SERVER_NAME")
+	httpTLSEnabled = getEnvAsBool("HTTP_TLS_ENABLED", false)
+	httpTLSCertFile = os.Getenv("HTTP_TLS_CERT_FILE")
+	httpTLSKeyFile = os.Getenv("HTTP_TLS_KEY_FILE")
 
 	// JWT_SECRET is REQUIRED for production. The service will fail to start without it.
 	// In production, this should be loaded from a secure secret management system
@@ -111,7 +127,7 @@ func runGrpcServer(store *etcdclient.Client) error {
 	rateLimiter.SetLimit("/vectron.auth.v1.AuthService/CreateSDKJWT", 10, time.Minute) // 10 SDK JWTs per minute
 	go rateLimiter.Cleanup(5 * time.Minute)                                            // Cleanup old entries every 5 minutes
 
-	s := grpc.NewServer(
+	opts := []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(
 			rateLimiter.Unary(),
 			authInterceptor.Unary(),
@@ -124,10 +140,21 @@ func runGrpcServer(store *etcdclient.Client) error {
 			MinTime:             10 * time.Second,
 			PermitWithoutStream: true,
 		}),
-		grpc.ReadBufferSize(64*1024),
-		grpc.WriteBufferSize(64*1024),
+		grpc.ReadBufferSize(64 * 1024),
+		grpc.WriteBufferSize(64 * 1024),
 		grpc.MaxConcurrentStreams(1024),
-	)
+	}
+	if grpcTLSEnabled && grpcTLSCertFile != "" && grpcTLSKeyFile != "" {
+		creds, err := credentials.NewServerTLSFromFile(grpcTLSCertFile, grpcTLSKeyFile)
+		if err != nil {
+			return err
+		}
+		opts = append(opts, grpc.Creds(creds))
+	} else if grpcTLSEnabled {
+		log.Printf("WARNING: gRPC TLS enabled but cert/key missing; starting without TLS")
+	}
+
+	s := grpc.NewServer(opts...)
 
 	authServer := authhandler.NewAuthServer(store, jwtSecret)
 	authpb.RegisterAuthServiceServer(s, authServer)
@@ -141,8 +168,18 @@ func runHttpServer() error {
 	defer cancel()
 
 	mux := runtime.NewServeMux()
+	clientCreds := insecure.NewCredentials()
+	if grpcTLSEnabled && grpcTLSCertFile != "" && grpcTLSKeyFile != "" {
+		creds, err := credentials.NewClientTLSFromFile(grpcTLSCertFile, grpcTLSServerName)
+		if err != nil {
+			return err
+		}
+		clientCreds = creds
+	} else if grpcTLSEnabled {
+		log.Printf("WARNING: gRPC TLS enabled but cert/key missing; gateway will use insecure gRPC")
+	}
 	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(clientCreds),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                20 * time.Second,
 			Timeout:             5 * time.Second,
@@ -203,5 +240,20 @@ func runHttpServer() error {
 	}
 
 	log.Printf("HTTP server listening at %s", httpPort)
+	if httpTLSEnabled && httpTLSCertFile != "" && httpTLSKeyFile != "" {
+		log.Printf("HTTP TLS enabled (cert=%s key=%s)", httpTLSCertFile, httpTLSKeyFile)
+		return http.ListenAndServeTLS(httpPort, httpTLSCertFile, httpTLSKeyFile, corsHandler(mux))
+	} else if httpTLSEnabled {
+		log.Printf("WARNING: HTTP TLS enabled but cert/key missing; starting without TLS")
+	}
 	return http.ListenAndServe(httpPort, corsHandler(mux))
+}
+
+func getEnvAsBool(key string, fallback bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
+	}
+	return fallback
 }

@@ -9,6 +9,7 @@ import (
 	"math"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -122,7 +123,7 @@ func (s *Strategy) Rerank(ctx context.Context, req *internal.RerankInput) (*inte
 			}
 			results = append(results, internal.ScoredCandidate{
 				ID:            candidate.ID,
-				RerankScore:   candidate.Score,    // Use original score as rerank score
+				RerankScore:   candidate.Score, // Use original score as rerank score
 				OriginalScore: candidate.Score,
 				Explanation:   "no query provided, sorted by original score",
 			})
@@ -147,6 +148,11 @@ func (s *Strategy) Rerank(ctx context.Context, req *internal.RerankInput) (*inte
 	// Score each candidate
 	scored := make([]scoredCandidate, len(req.Candidates))
 	for i, candidate := range req.Candidates {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
 		score := s.scoreCandidate(candidate, queryTokens, docFreqs, len(req.Candidates))
 		scored[i] = scoredCandidate{
 			candidate: candidate,
@@ -218,6 +224,9 @@ func (s *Strategy) calculateTFIDF(candidate internal.Candidate, queryTokens []st
 	// Concatenate all text fields from metadata
 	content := s.getCandidateText(candidate)
 	contentTokens := s.tokenize(content)
+	if len(contentTokens) == 0 {
+		return 0
+	}
 
 	// Calculate term frequencies in document
 	termFreqs := make(map[string]int)
@@ -251,6 +260,9 @@ func (s *Strategy) calculateTFIDF(candidate internal.Candidate, queryTokens []st
 
 // calculateKeywordBoosts checks for exact and fuzzy matches.
 func (s *Strategy) calculateKeywordBoosts(candidate internal.Candidate, queryTokens []string) float32 {
+	if len(queryTokens) == 0 {
+		return 0
+	}
 	content := s.getCandidateText(candidate)
 	title := candidate.Metadata["title"]
 
@@ -325,8 +337,12 @@ func (s *Strategy) calculateRecencyBoost(candidate internal.Candidate) float32 {
 	// Try parsing as RFC3339 timestamp
 	timestamp, err := time.Parse(time.RFC3339, timestampStr)
 	if err != nil {
-		// Try Unix timestamp
-		return 0 // Skip if can't parse
+		// Try Unix timestamp (seconds or milliseconds)
+		if ts, parseErr := parseUnixTimestamp(timestampStr); parseErr == nil {
+			timestamp = ts
+		} else {
+			return 0 // Skip if can't parse
+		}
 	}
 
 	daysSince := time.Since(timestamp).Hours() / 24
@@ -342,6 +358,9 @@ func (s *Strategy) calculateRecencyBoost(candidate internal.Candidate) float32 {
 // calculateDocumentFrequencies counts how many docs contain each query term.
 func (s *Strategy) calculateDocumentFrequencies(candidates []internal.Candidate, queryTokens []string) map[string]int {
 	docFreqs := make(map[string]int)
+	if len(queryTokens) == 0 {
+		return docFreqs
+	}
 
 	for _, token := range queryTokens {
 		for _, candidate := range candidates {
@@ -413,13 +432,15 @@ func (s *Strategy) explainScore(candidate internal.Candidate, queryTokens []stri
 
 	// Check for exact matches
 	query := strings.Join(queryTokens, " ")
-	if s.containsIgnoreCase(content, query) {
+	if query != "" && s.containsIgnoreCase(content, query) {
 		reasons = append(reasons, "exact query match")
 	}
 
 	// Check title match
-	if title := candidate.Metadata["title"]; title != "" && s.containsIgnoreCase(title, query) {
-		reasons = append(reasons, "query in title")
+	if query != "" {
+		if title := candidate.Metadata["title"]; title != "" && s.containsIgnoreCase(title, query) {
+			reasons = append(reasons, "query in title")
+		}
 	}
 
 	// Check metadata boosts
@@ -458,4 +479,21 @@ func floatToString(f float32) string {
 
 func intToString(i int) string {
 	return fmt.Sprintf("%d", i)
+}
+
+func parseUnixTimestamp(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, fmt.Errorf("empty timestamp")
+	}
+	// Try integer parse
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return time.Time{}, err
+	}
+	// Heuristic: >1e12 is milliseconds
+	if parsed > 1e12 {
+		return time.UnixMilli(parsed), nil
+	}
+	return time.Unix(parsed, 0), nil
 }

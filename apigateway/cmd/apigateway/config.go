@@ -13,9 +13,18 @@ import (
 // Config holds all the configuration settings for the API Gateway.
 type Config struct {
 	GRPCAddr                      string          // Address for the gRPC server to listen on.
+	GRPCTLSEnabled                bool            // Enable TLS for gRPC server.
+	GRPCTLSCertFile               string          // TLS cert file path for gRPC server.
+	GRPCTLSKeyFile                string          // TLS key file path for gRPC server.
+	GRPCTLSServerName             string          // Optional server name override for gRPC client TLS.
 	HTTPAddr                      string          // Address for the HTTP/JSON gateway to listen on.
+	HTTPTLSEnabled                bool            // Enable TLS for HTTP/JSON gateway.
+	HTTPTLSCertFile               string          // TLS cert file path for HTTP/JSON gateway.
+	HTTPTLSKeyFile                string          // TLS key file path for HTTP/JSON gateway.
 	PlacementDriver               string          // Address of the placement driver service.
 	JWTSecret                     string          // Secret key for signing and verifying JWT tokens.
+	ManagementAuthEnabled         bool            // Require auth for management endpoints.
+	ManagementAuthAllowSDK        bool            // Allow SDK JWTs for management endpoints.
 	AuthServiceAddr               string          // Address of the Auth service.
 	RerankerServiceAddr           string          // Address of the Reranker service.
 	FeedbackDBPath                string          // Path to the feedback SQLite database.
@@ -23,6 +32,7 @@ type Config struct {
 	SearchLinearizable            bool            // Whether search reads should be linearizable.
 	RerankTimeoutMs               int             // Timeout for reranking (milliseconds).
 	RerankEnabled                 bool            // Global rerank enable switch.
+	RerankMode                    string          // Rerank strategy mode (rule/llm/rl).
 	RerankCollections             map[string]bool // Collection allowlist for reranking (empty = allow all when enabled).
 	RerankTopNOverrides           map[string]int  // Per-collection TopN overrides.
 	RerankTimeoutOverrides        map[string]int  // Per-collection timeout overrides (ms).
@@ -60,9 +70,18 @@ type Config struct {
 func LoadConfig() Config {
 	cfg := Config{
 		GRPCAddr:                      getEnv("GRPC_ADDR", ":8081"),
+		GRPCTLSEnabled:                getEnvAsBool("GRPC_TLS_ENABLED", false),
+		GRPCTLSCertFile:               getEnv("GRPC_TLS_CERT_FILE", ""),
+		GRPCTLSKeyFile:                getEnv("GRPC_TLS_KEY_FILE", ""),
+		GRPCTLSServerName:             getEnv("GRPC_TLS_SERVER_NAME", ""),
 		HTTPAddr:                      getEnv("HTTP_ADDR", ":8080"),
+		HTTPTLSEnabled:                getEnvAsBool("HTTP_TLS_ENABLED", false),
+		HTTPTLSCertFile:               getEnv("HTTP_TLS_CERT_FILE", ""),
+		HTTPTLSKeyFile:                getEnv("HTTP_TLS_KEY_FILE", ""),
 		PlacementDriver:               getEnv("PLACEMENT_DRIVER", "placement:6300"),
 		JWTSecret:                     getEnv("JWT_SECRET", "CHANGE_ME_IN_PRODUCTION"),
+		ManagementAuthEnabled:         getEnvAsBool("MANAGEMENT_AUTH_ENABLED", true),
+		ManagementAuthAllowSDK:        getEnvAsBool("MANAGEMENT_AUTH_ALLOW_SDK", false),
 		AuthServiceAddr:               getEnv("AUTH_SERVICE_ADDR", "auth:50051"),          // Default Auth service address
 		RerankerServiceAddr:           getEnv("RERANKER_SERVICE_ADDR", "localhost:50051"), // Default Reranker service address
 		FeedbackDBPath:                getEnv("FEEDBACK_DB_PATH", "./data/feedback.db"),   // Default feedback database path
@@ -70,6 +89,7 @@ func LoadConfig() Config {
 		SearchLinearizable:            getEnvAsBool("SEARCH_LINEARIZABLE", false),
 		RerankTimeoutMs:               getEnvAsInt("RERANK_TIMEOUT_MS", 75),
 		RerankEnabled:                 getEnvAsBool("RERANK_ENABLED", false),
+		RerankMode:                    normalizeRerankMode(getEnv("RERANK_MODE", "rule")),
 		RerankCollections:             parseBoolSet(getEnv("RERANK_COLLECTIONS", "")),
 		RerankTopNOverrides:           parseKVIntMap(getEnv("RERANK_TOP_N_OVERRIDES", "")),
 		RerankTimeoutOverrides:        parseKVIntMap(getEnv("RERANK_TIMEOUT_OVERRIDES", "")),
@@ -220,4 +240,14 @@ func parseConsistencyOverrides(value string) map[string]bool {
 		}
 	}
 	return out
+}
+
+func normalizeRerankMode(value string) string {
+	mode := strings.ToLower(strings.TrimSpace(value))
+	switch mode {
+	case "rule", "llm", "rl":
+		return mode
+	default:
+		return "rule"
+	}
 }

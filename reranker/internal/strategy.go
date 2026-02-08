@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -47,9 +48,9 @@ type Candidate struct {
 
 // RerankOutput represents the output from a reranking strategy.
 type RerankOutput struct {
-	Results   []ScoredCandidate
-	Latency   time.Duration
-	Metadata  map[string]string // Strategy-specific metadata
+	Results  []ScoredCandidate
+	Latency  time.Duration
+	Metadata map[string]string // Strategy-specific metadata
 }
 
 // ScoredCandidate represents a candidate with its reranking score.
@@ -89,6 +90,21 @@ func CacheKey(query string, candidateIDs []string) string {
 	data := query + "|" + strings.Join(sorted, ",")
 	hash := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(hash[:])
+}
+
+// CacheKeyWithOptions generates a cache key that incorporates strategy-relevant options.
+// Currently this includes a normalized "mode" option when present.
+func CacheKeyWithOptions(query string, candidateIDs []string, options map[string]string) string {
+	mode := ""
+	if options != nil {
+		if v, ok := options["mode"]; ok {
+			mode = strings.ToLower(strings.TrimSpace(v))
+		}
+	}
+	if mode == "" {
+		return CacheKey(query, candidateIDs)
+	}
+	return CacheKey(query+"|mode="+mode, candidateIDs)
 }
 
 // StrategyFactory creates strategy instances based on configuration.
@@ -146,6 +162,14 @@ func ValidateRerankInput(input *RerankInput) error {
 	}
 	if input.TopN <= 0 {
 		return &ValidationError{Field: "top_n", Message: "top_n must be positive"}
+	}
+	for i, c := range input.Candidates {
+		if strings.TrimSpace(c.ID) == "" {
+			return &ValidationError{Field: fmt.Sprintf("candidates[%d].id", i), Message: "id cannot be empty"}
+		}
+		if math.IsNaN(float64(c.Score)) || math.IsInf(float64(c.Score), 0) {
+			return &ValidationError{Field: fmt.Sprintf("candidates[%d].score", i), Message: "score must be a finite number"}
+		}
 	}
 	if input.TopN > len(input.Candidates) {
 		input.TopN = len(input.Candidates) // Auto-adjust

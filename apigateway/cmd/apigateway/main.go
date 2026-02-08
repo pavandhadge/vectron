@@ -28,6 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	runtime "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/pavandhadge/vectron/shared/runtimeutil"
 
@@ -44,6 +45,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/keepalive"
@@ -90,7 +92,6 @@ func adaptiveConcurrency(multiplier, maxCap int) int {
 	}
 	return limit
 }
-
 
 func totalMemoryBytes() uint64 {
 	data, err := os.ReadFile("/proc/meminfo")
@@ -204,10 +205,14 @@ const (
 )
 
 func grpcClientOptions(enableCompression bool, maxRecvMB, maxSendMB int) []grpc.DialOption {
+	return grpcClientOptionsWithCreds(insecure.NewCredentials(), enableCompression, maxRecvMB, maxSendMB)
+}
+
+func grpcClientOptionsWithCreds(creds credentials.TransportCredentials, enableCompression bool, maxRecvMB, maxSendMB int) []grpc.DialOption {
 	maxRecv := maxRecvMB * 1024 * 1024
 	maxSend := maxSendMB * 1024 * 1024
 	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(creds),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                20 * time.Second,
 			Timeout:             5 * time.Second,
@@ -263,6 +268,10 @@ type SearchCacheEntry struct {
 // SearchCache provides LRU caching for search results with TTL
 type SearchCache struct {
 	shards []*TinyLFUCache
+}
+
+type searchCacheKeys struct {
+	normal uint64
 }
 
 type DistributedCache struct {
@@ -860,6 +869,175 @@ func (h *searchResultHeap) Pop() interface{} {
 	return item
 }
 
+type searchAggEntry struct {
+	score   float32
+	payload map[string]string
+}
+
+type searchAggregator struct {
+	limit   int
+	entries map[string]searchAggEntry
+	heap    *searchAggHeap
+}
+
+var searchAggregatorPool = sync.Pool{
+	New: func() interface{} {
+		agg := &searchAggregator{
+			entries: make(map[string]searchAggEntry),
+			heap:    &searchAggHeap{},
+		}
+		heap.Init(agg.heap)
+		return agg
+	},
+}
+
+func newSearchAggregator(limit int) *searchAggregator {
+	agg := searchAggregatorPool.Get().(*searchAggregator)
+	agg.reset(limit)
+	return agg
+}
+
+func putSearchAggregator(agg *searchAggregator) {
+	if agg == nil {
+		return
+	}
+	agg.reset(0)
+	searchAggregatorPool.Put(agg)
+}
+
+func (a *searchAggregator) reset(limit int) {
+	a.limit = limit
+	for k := range a.entries {
+		delete(a.entries, k)
+	}
+	*a.heap = (*a.heap)[:0]
+	heap.Init(a.heap)
+}
+
+func (a *searchAggregator) add(results []*pb.SearchResult) {
+	if a.limit <= 0 {
+		return
+	}
+	for _, result := range results {
+		if result == nil || result.Id == "" {
+			continue
+		}
+		if existing, ok := a.entries[result.Id]; ok && result.Score <= existing.score {
+			continue
+		}
+		a.entries[result.Id] = searchAggEntry{
+			score:   result.Score,
+			payload: result.Payload,
+		}
+		heap.Push(a.heap, searchAggItem{id: result.Id, score: result.Score})
+		a.compact()
+	}
+}
+
+func (a *searchAggregator) snapshot(limit int) []*pb.SearchResult {
+	if limit <= 0 || len(a.entries) == 0 {
+		return nil
+	}
+	results := make([]*pb.SearchResult, 0, len(a.entries))
+	for _, item := range *a.heap {
+		entry, ok := a.entries[item.id]
+		if !ok || entry.score != item.score {
+			continue
+		}
+		results = append(results, &pb.SearchResult{
+			Id:      item.id,
+			Score:   entry.score,
+			Payload: entry.payload,
+		})
+	}
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].Score == results[j].Score {
+			return results[i].Id < results[j].Id
+		}
+		return results[i].Score > results[j].Score
+	})
+	if len(results) > limit {
+		results = results[:limit]
+	}
+	return results
+}
+
+func (a *searchAggregator) compact() {
+	if a.limit <= 0 {
+		return
+	}
+	for a.heap.Len() > a.limit {
+		// Discard stale heap items first.
+		for a.heap.Len() > 0 {
+			item := (*a.heap)[0]
+			entry, ok := a.entries[item.id]
+			if ok && entry.score == item.score {
+				break
+			}
+			heap.Pop(a.heap)
+		}
+		if a.heap.Len() <= a.limit {
+			break
+		}
+		item := heap.Pop(a.heap).(searchAggItem)
+		entry, ok := a.entries[item.id]
+		if ok && entry.score == item.score {
+			delete(a.entries, item.id)
+		}
+	}
+}
+
+type searchAggItem struct {
+	id    string
+	score float32
+}
+
+type searchAggHeap []searchAggItem
+
+func (h searchAggHeap) Len() int { return len(h) }
+func (h searchAggHeap) Less(i, j int) bool {
+	if h[i].score == h[j].score {
+		return h[i].id > h[j].id
+	}
+	return h[i].score < h[j].score
+}
+func (h searchAggHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h *searchAggHeap) Push(x interface{}) {
+	*h = append(*h, x.(searchAggItem))
+}
+func (h *searchAggHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	item := old[n-1]
+	*h = old[:n-1]
+	return item
+}
+
+var searchResultSlicePool = sync.Pool{
+	New: func() interface{} {
+		s := make([]*pb.SearchResult, 0, 64)
+		return &s
+	},
+}
+
+func getSearchResultSlice(n int) *[]*pb.SearchResult {
+	buf := searchResultSlicePool.Get().(*[]*pb.SearchResult)
+	if cap(*buf) < n {
+		*buf = make([]*pb.SearchResult, 0, n)
+	} else {
+		*buf = (*buf)[:0]
+	}
+	return buf
+}
+
+func putSearchResultSlice(buf *[]*pb.SearchResult) {
+	if buf == nil {
+		return
+	}
+	*buf = (*buf)[:0]
+	searchResultSlicePool.Put(buf)
+}
+
 func snapshotTopResults(topResults *searchResultHeap, limit int) *pb.SearchResponse {
 	if topResults.Len() == 0 {
 		return &pb.SearchResponse{}
@@ -928,6 +1106,10 @@ func NewRerankWarmupCache(ttl time.Duration, maxSize int) *RerankWarmupCache {
 
 // computeSearchCacheKey generates a cache key from search request
 func computeSearchCacheKey(req *pb.SearchRequest) uint64 {
+	return computeSearchCacheKeyWithMode(req, cfg.RerankMode, cfg.RerankEnabled)
+}
+
+func computeSearchCacheKeyWithMode(req *pb.SearchRequest, rerankMode string, rerankEnabled bool) uint64 {
 	// Use collection + topK + vector hash as key (fast hash)
 	var h maphash.Hash
 	h.SetSeed(cacheHashSeed)
@@ -938,14 +1120,21 @@ func computeSearchCacheKey(req *pb.SearchRequest) uint64 {
 	}
 	h.WriteString(req.Collection)
 	h.WriteString(req.Query)
+	if rerankEnabled && req.Query != "" {
+		h.WriteString(rerankMode)
+	}
 	binary.LittleEndian.PutUint32(buf[:], uint32(req.TopK))
 	h.Write(buf[:])
 	return h.Sum64()
 }
 
-func (s *gatewayServer) getSearchCache(ctx context.Context, req *pb.SearchRequest) (*pb.SearchResponse, bool) {
+func (s *gatewayServer) getSearchCache(ctx context.Context, req *pb.SearchRequest, keys *searchCacheKeys) (*pb.SearchResponse, bool) {
 	if !cfg.SearchCacheEnabled || s.searchCache == nil {
 		return nil, false
+	}
+	key := computeSearchCacheKey(req)
+	if keys != nil {
+		keys.normal = key
 	}
 	if cached, found := s.searchCache.Get(req); found {
 		return cached, true
@@ -953,7 +1142,6 @@ func (s *gatewayServer) getSearchCache(ctx context.Context, req *pb.SearchReques
 	if s.distributedCache == nil || !cfg.DistributedCacheSearchEnabled {
 		return nil, false
 	}
-	key := computeSearchCacheKey(req)
 	if cached, found := s.distributedCache.GetSearch(ctx, key); found {
 		s.searchCache.Set(req, cached)
 		return cached, true
@@ -961,7 +1149,7 @@ func (s *gatewayServer) getSearchCache(ctx context.Context, req *pb.SearchReques
 	return nil, false
 }
 
-func (s *gatewayServer) setSearchCache(ctx context.Context, req *pb.SearchRequest, resp *pb.SearchResponse) {
+func (s *gatewayServer) setSearchCache(ctx context.Context, req *pb.SearchRequest, resp *pb.SearchResponse, keys *searchCacheKeys) {
 	if resp == nil {
 		return
 	}
@@ -970,7 +1158,13 @@ func (s *gatewayServer) setSearchCache(ctx context.Context, req *pb.SearchReques
 	}
 	s.searchCache.Set(req, resp)
 	if s.distributedCache != nil && cfg.DistributedCacheSearchEnabled {
-		key := computeSearchCacheKey(req)
+		key := uint64(0)
+		if keys != nil {
+			key = keys.normal
+		}
+		if key == 0 {
+			key = computeSearchCacheKey(req)
+		}
 		s.distributedCache.SetSearch(ctx, key, resp, 0)
 	}
 }
@@ -1061,6 +1255,9 @@ func (s *gatewayServer) startRerankWarmup(key uint64, req *pb.SearchRequest, can
 	if s.rerankWarmupCache == nil || s.rerankWarmupSem == nil {
 		return
 	}
+	if len(candidates) == 0 {
+		return
+	}
 
 	s.rerankWarmupMu.Lock()
 	if _, exists := s.rerankWarmupInFlight[key]; exists {
@@ -1082,6 +1279,9 @@ func (s *gatewayServer) startRerankWarmup(key uint64, req *pb.SearchRequest, can
 
 	candidatesCopy := make([]*reranker.Candidate, len(candidates))
 	copy(candidatesCopy, candidates)
+	if rerankTopN <= 0 || rerankTopN > len(candidatesCopy) {
+		rerankTopN = len(candidatesCopy)
+	}
 
 	go func() {
 		defer func() {
@@ -1095,6 +1295,7 @@ func (s *gatewayServer) startRerankWarmup(key uint64, req *pb.SearchRequest, can
 			Query:      req.Query,
 			Candidates: candidatesCopy,
 			TopN:       int32(rerankTopN),
+			Options:    map[string]string{"mode": cfg.RerankMode},
 		}
 
 		rerankCtx := context.Background()
@@ -2806,20 +3007,21 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 	var warmupKey uint64
 	warmupKeySet := false
 	if cfg.RerankWarmupEnabled && s.rerankWarmupCache != nil {
-		warmupKey = computeSearchCacheKey(req)
+		warmupKey = computeSearchCacheKeyWithMode(req, cfg.RerankMode, cfg.RerankEnabled)
 		warmupKeySet = true
 		if cached, found := s.rerankWarmupCache.Get(warmupKey); found {
 			if logEnabled {
 				log.Printf("search cache_hit=warmup collection=%s topK=%d vecDim=%d total=%s",
 					req.Collection, req.TopK, len(req.Vector), time.Since(startTotal))
 			}
-			s.setSearchCache(ctx, req, cached)
+			s.setSearchCache(ctx, req, cached, nil)
 			return cached, nil
 		}
 	}
 
 	// Check cache for identical queries to avoid redundant computation
-	if cached, found := s.getSearchCache(ctx, req); found {
+	var keys searchCacheKeys
+	if cached, found := s.getSearchCache(ctx, req, &keys); found {
 		if logEnabled {
 			log.Printf("search cache_hit=search collection=%s topK=%d vecDim=%d total=%s",
 				req.Collection, req.TopK, len(req.Vector), time.Since(startTotal))
@@ -2827,7 +3029,10 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 		return cached, nil
 	}
 
-	flightKey := computeSearchCacheKey(req)
+	flightKey := keys.normal
+	if flightKey == 0 {
+		flightKey = computeSearchCacheKey(req)
+	}
 	if resp, err, shared := s.waitForInFlight(ctx, flightKey); shared {
 		return resp, err
 	}
@@ -2851,11 +3056,12 @@ func (s *gatewayServer) SearchStream(req *pb.SearchRequest, stream pb.VectronSer
 		req.TopK = 10
 	}
 
-	if cached, found := s.getSearchCache(stream.Context(), req); found {
+	var keys searchCacheKeys
+	if cached, found := s.getSearchCache(stream.Context(), req, &keys); found {
 		return stream.Send(cached)
 	}
 
-	baseResp, metadataByID, err := s.searchStreamUncached(stream.Context(), req, stream)
+	baseResp, _, err := s.searchStreamUncached(stream.Context(), req, stream)
 	if err != nil {
 		return err
 	}
@@ -2868,22 +3074,19 @@ func (s *gatewayServer) SearchStream(req *pb.SearchRequest, stream pb.VectronSer
 
 	candidates := make([]*reranker.Candidate, len(baseResp.Results))
 	for i, result := range baseResp.Results {
-		metadata := result.Payload
-		if metadataByID != nil {
-			if m, ok := metadataByID[result.Id]; ok {
-				metadata = m
-			}
-		}
 		candidates[i] = &reranker.Candidate{
 			Id:       result.Id,
 			Score:    result.Score,
-			Metadata: metadata,
+			Metadata: result.Payload,
 		}
 	}
 
 	rerankTopN := int(req.TopK)
 	if v, ok := cfg.RerankTopNOverrides[req.Collection]; ok && v > 0 {
 		rerankTopN = v
+	}
+	if rerankTopN <= 0 || rerankTopN > len(baseResp.Results) {
+		rerankTopN = len(baseResp.Results)
 	}
 	rerankTimeoutMs := cfg.RerankTimeoutMs
 	if v, ok := cfg.RerankTimeoutOverrides[req.Collection]; ok && v > 0 {
@@ -2894,6 +3097,7 @@ func (s *gatewayServer) SearchStream(req *pb.SearchRequest, stream pb.VectronSer
 		Query:      req.Query,
 		Candidates: candidates,
 		TopN:       int32(rerankTopN),
+		Options:    map[string]string{"mode": cfg.RerankMode},
 	}
 
 	rerankCtx := stream.Context()
@@ -2910,19 +3114,14 @@ func (s *gatewayServer) SearchStream(req *pb.SearchRequest, stream pb.VectronSer
 
 	rerankedResults := make([]*pb.SearchResult, len(rerankResp.Results))
 	for i, result := range rerankResp.Results {
-		var payload map[string]string
-		if metadataByID != nil {
-			payload = metadataByID[result.Id]
-		}
 		rerankedResults[i] = &pb.SearchResult{
-			Id:      result.Id,
-			Score:   result.RerankScore,
-			Payload: payload,
+			Id:    result.Id,
+			Score: result.RerankScore,
 		}
 	}
 
 	finalResp := &pb.SearchResponse{Results: rerankedResults}
-	s.setSearchCache(stream.Context(), req, finalResp)
+	s.setSearchCache(stream.Context(), req, finalResp, &keys)
 	return stream.Send(finalResp)
 }
 
@@ -3068,11 +3267,6 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 			workerAddresses = preferred
 		}
 	}
-	if !linearizable && cfg.PreferSearchOnlyWorkers {
-		if preferred := s.filterPreferSearchOnly(ctx, workerAddresses); len(preferred) > 0 {
-			workerAddresses = preferred
-		}
-	}
 	if !cfg.SearchFanoutEnabled && len(workerAddresses) > 1 {
 		if addr := pickAddressByKey(workerAddresses, routeKey); addr != "" {
 			workerAddresses = []string{addr}
@@ -3132,40 +3326,22 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 			return nil, nil, status.Errorf(codes.Internal, "worker %s search failed: %v", workerAddr, err)
 		}
 
-		topResults := &searchResultHeap{}
-		heap.Init(topResults)
 		workerSearchResponse := translator.FromWorkerSearchResponse(res)
-		for _, r := range workerSearchResponse.Results {
-			if candidateLimit <= 0 {
-				continue
-			}
-			if topResults.Len() < candidateLimit {
-				heap.Push(topResults, r)
-				continue
-			}
-			if topResults.Len() > 0 && r.Score > (*topResults)[0].Score {
-				(*topResults)[0] = r
-				heap.Fix(topResults, 0)
-			}
-		}
-
-		finalSnapshot := snapshotTopResults(topResults, int(req.TopK))
+		aggregator := newSearchAggregator(int(req.TopK))
+		aggregator.add(workerSearchResponse.Results)
+		finalSnapshot := &pb.SearchResponse{Results: aggregator.snapshot(int(req.TopK))}
+		putSearchAggregator(aggregator)
 		if err := stream.Send(finalSnapshot); err != nil {
 			return nil, nil, err
 		}
-		s.setSearchCache(ctx, req, finalSnapshot)
+		s.setSearchCache(ctx, req, finalSnapshot, nil)
 
-		metadataByID := make(map[string]map[string]string, len(finalSnapshot.Results))
-		for _, result := range finalSnapshot.Results {
-			if result.Payload != nil {
-				metadataByID[result.Id] = result.Payload
-			}
-		}
-		return finalSnapshot, metadataByID, nil
+		return finalSnapshot, nil, nil
 	}
 
 	type workerResult struct {
 		results []*pb.SearchResult
+		buf     *[]*pb.SearchResult
 		err     error
 	}
 
@@ -3216,11 +3392,13 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 					heap.Fix(localHeap, 0)
 				}
 			}
-			var localResults []*pb.SearchResult
 			if localHeap.Len() > 0 {
-				localResults = append([]*pb.SearchResult(nil), (*localHeap)...)
+				buf := getSearchResultSlice(localHeap.Len())
+				*buf = append(*buf, (*localHeap)...)
+				resultsCh <- workerResult{results: *buf, buf: buf}
+			} else {
+				resultsCh <- workerResult{results: nil}
 			}
-			resultsCh <- workerResult{results: localResults}
 		}(addr)
 	}
 
@@ -3229,8 +3407,7 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 		close(resultsCh)
 	}()
 
-	topResults := &searchResultHeap{}
-	heap.Init(topResults)
+	aggregator := newSearchAggregator(int(req.TopK))
 	var errs []error
 	received := 0
 	stableRounds := 0
@@ -3244,21 +3421,11 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 			continue
 		}
 		received++
-		for _, r := range result.results {
-			if candidateLimit <= 0 {
-				continue
-			}
-			if topResults.Len() < candidateLimit {
-				heap.Push(topResults, r)
-				continue
-			}
-			if topResults.Len() > 0 && r.Score > (*topResults)[0].Score {
-				(*topResults)[0] = r
-				heap.Fix(topResults, 0)
-			}
+		aggregator.add(result.results)
+		if result.buf != nil {
+			putSearchResultSlice(result.buf)
 		}
-
-		snapshot := snapshotTopResults(topResults, int(req.TopK))
+		snapshot := &pb.SearchResponse{Results: aggregator.snapshot(int(req.TopK))}
 		if err := stream.Send(snapshot); err != nil {
 			return nil, nil, err
 		}
@@ -3268,32 +3435,28 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 			stableRounds = 0
 		}
 		lastSnapshot = snapshot
-		if topResults.Len() >= int(req.TopK) && received >= earlyStopMinWorkers && stableRounds >= earlyStopStableRounds {
+		if len(snapshot.Results) >= int(req.TopK) && received >= earlyStopMinWorkers && stableRounds >= earlyStopStableRounds {
 			cancelEarly()
 			break
 		}
 	}
 
-	if topResults.Len() == 0 && len(errs) > 0 {
+	if len(aggregator.entries) == 0 && len(errs) > 0 {
+		putSearchAggregator(aggregator)
 		if allowPartial {
 			return nil, nil, status.Errorf(codes.DeadlineExceeded, "search timed out before any results were returned: %v", errs[0])
 		}
 		return nil, nil, status.Errorf(codes.Internal, "failed to search all workers: %v", errs[0])
 	}
 
-	if topResults.Len() > 0 {
-		finalSnapshot := snapshotTopResults(topResults, int(req.TopK))
-		s.setSearchCache(ctx, req, finalSnapshot)
+	if len(aggregator.entries) > 0 {
+		finalSnapshot := &pb.SearchResponse{Results: aggregator.snapshot(int(req.TopK))}
+		s.setSearchCache(ctx, req, finalSnapshot, nil)
 	}
 
-	finalSnapshot := snapshotTopResults(topResults, int(req.TopK))
-	metadataByID := make(map[string]map[string]string, len(finalSnapshot.Results))
-	for _, result := range finalSnapshot.Results {
-		if result.Payload != nil {
-			metadataByID[result.Id] = result.Payload
-		}
-	}
-	return finalSnapshot, metadataByID, nil
+	finalSnapshot := &pb.SearchResponse{Results: aggregator.snapshot(int(req.TopK))}
+	putSearchAggregator(aggregator)
+	return finalSnapshot, nil, nil
 }
 
 func (s *gatewayServer) filterPreferSearchOnly(ctx context.Context, addrs []string) []string {
@@ -3520,27 +3683,11 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		}
 
 		mergeStart := time.Now()
-		topResults := &searchResultHeap{}
-		heap.Init(topResults)
 		workerSearchResponse := translator.FromWorkerSearchResponse(res)
-		for _, result := range workerSearchResponse.Results {
-			if candidateLimit <= 0 {
-				continue
-			}
-			if topResults.Len() < candidateLimit {
-				heap.Push(topResults, result)
-				continue
-			}
-			if topResults.Len() > 0 && result.Score > (*topResults)[0].Score {
-				(*topResults)[0] = result
-				heap.Fix(topResults, 0)
-			}
-		}
-
-		results = make([]*pb.SearchResult, topResults.Len())
-		for i := len(results) - 1; i >= 0; i-- {
-			results[i] = heap.Pop(topResults).(*pb.SearchResult)
-		}
+		aggregator := newSearchAggregator(candidateLimit)
+		aggregator.add(workerSearchResponse.Results)
+		results = aggregator.snapshot(candidateLimit)
+		putSearchAggregator(aggregator)
 		searchResponse = &pb.SearchResponse{Results: results}
 		if logEnabled {
 			mergeDur = time.Since(mergeStart)
@@ -3567,7 +3714,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 			if len(searchResponse.Results) > int(req.TopK) {
 				searchResponse.Results = searchResponse.Results[:req.TopK]
 			}
-			s.setSearchCache(ctx, req, searchResponse)
+			s.setSearchCache(ctx, req, searchResponse, nil)
 			return searchResponse, nil
 		}
 
@@ -3593,6 +3740,9 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		if v, ok := cfg.RerankTopNOverrides[req.Collection]; ok && v > 0 {
 			rerankTopN = v
 		}
+		if rerankTopN <= 0 || rerankTopN > len(searchResponse.Results) {
+			rerankTopN = len(searchResponse.Results)
+		}
 
 		rerankTimeoutMs := cfg.RerankTimeoutMs
 		if v, ok := cfg.RerankTimeoutOverrides[req.Collection]; ok && v > 0 {
@@ -3612,7 +3762,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 			if len(searchResponse.Results) > int(req.TopK) {
 				searchResponse.Results = searchResponse.Results[:req.TopK]
 			}
-			s.setSearchCache(ctx, req, searchResponse)
+			s.setSearchCache(ctx, req, searchResponse, nil)
 			return searchResponse, nil
 		}
 
@@ -3620,6 +3770,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 			Query:      req.Query,
 			Candidates: candidates,
 			TopN:       int32(rerankTopN),
+			Options:    map[string]string{"mode": cfg.RerankMode},
 		}
 
 		rerankCtx := ctx
@@ -3637,7 +3788,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 			if len(searchResponse.Results) > int(req.TopK) {
 				searchResponse.Results = searchResponse.Results[:req.TopK]
 			}
-			s.setSearchCache(ctx, req, searchResponse)
+			s.setSearchCache(ctx, req, searchResponse, nil)
 			return searchResponse, nil
 		}
 
@@ -3658,7 +3809,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		finalResponse := &pb.SearchResponse{
 			Results: rerankedResults,
 		}
-		s.setSearchCache(ctx, req, finalResponse)
+		s.setSearchCache(ctx, req, finalResponse, nil)
 		return finalResponse, nil
 	}
 
@@ -3667,7 +3818,11 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		mu   sync.Mutex
 		errs []error
 	)
-	resultsCh := make(chan []*pb.SearchResult, len(workerAddresses))
+	type workerResults struct {
+		results []*pb.SearchResult
+		buf     *[]*pb.SearchResult
+	}
+	resultsCh := make(chan workerResults, len(workerAddresses))
 
 	searchSem := make(chan struct{}, envIntDefault("VECTRON_GW_SEARCH_CONCURRENCY", adaptiveConcurrency(2, 32)))
 	useBatcher := s.workerSearchBatcher != nil && len(workerAddresses) > 1
@@ -3721,9 +3876,12 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 				}
 			}
 			if localHeap.Len() > 0 {
-				localResults := append([]*pb.SearchResult(nil), (*localHeap)...)
-				resultsCh <- localResults
+				buf := getSearchResultSlice(localHeap.Len())
+				*buf = append(*buf, (*localHeap)...)
+				resultsCh <- workerResults{results: *buf, buf: buf}
+				return
 			}
+			resultsCh <- workerResults{results: nil}
 		}(addr)
 	}
 	wg.Wait()
@@ -3732,25 +3890,16 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		workerDur = time.Since(workerStart)
 	}
 
-	topResults := &searchResultHeap{}
-	heap.Init(topResults)
+	aggregator := newSearchAggregator(candidateLimit)
 	for local := range resultsCh {
-		for _, result := range local {
-			if candidateLimit <= 0 {
-				continue
-			}
-			if topResults.Len() < candidateLimit {
-				heap.Push(topResults, result)
-				continue
-			}
-			if topResults.Len() > 0 && result.Score > (*topResults)[0].Score {
-				(*topResults)[0] = result
-				heap.Fix(topResults, 0)
-			}
+		aggregator.add(local.results)
+		if local.buf != nil {
+			putSearchResultSlice(local.buf)
 		}
 	}
 
-	if len(errs) > 0 && topResults.Len() == 0 {
+	if len(errs) > 0 && len(aggregator.entries) == 0 {
+		putSearchAggregator(aggregator)
 		// If partial results aren't allowed or we have nothing, return error.
 		if !allowPartial {
 			return nil, status.Errorf(codes.Internal, "failed to search all workers: %v", errs[0])
@@ -3763,11 +3912,9 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 	}
 
 	mergeStart := time.Now()
-	results = make([]*pb.SearchResult, topResults.Len())
-	for i := len(results) - 1; i >= 0; i-- {
-		results[i] = heap.Pop(topResults).(*pb.SearchResult)
-	}
+	results = aggregator.snapshot(candidateLimit)
 	searchResponse = &pb.SearchResponse{Results: results}
+	putSearchAggregator(aggregator)
 	if logEnabled {
 		mergeDur = time.Since(mergeStart)
 	}
@@ -3796,7 +3943,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		if len(searchResponse.Results) > int(req.TopK) {
 			searchResponse.Results = searchResponse.Results[:req.TopK]
 		}
-		s.setSearchCache(ctx, req, searchResponse)
+		s.setSearchCache(ctx, req, searchResponse, nil)
 		return searchResponse, nil
 	}
 
@@ -3841,7 +3988,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		if len(searchResponse.Results) > int(req.TopK) {
 			searchResponse.Results = searchResponse.Results[:req.TopK]
 		}
-		s.setSearchCache(ctx, req, searchResponse)
+		s.setSearchCache(ctx, req, searchResponse, nil)
 		return searchResponse, nil
 	}
 
@@ -3849,6 +3996,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		Query:      req.Query, // Pass the query from the API Gateway's SearchRequest
 		Candidates: candidates,
 		TopN:       int32(rerankTopN),
+		Options:    map[string]string{"mode": cfg.RerankMode},
 	}
 
 	rerankCtx := ctx
@@ -3869,7 +4017,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 			searchResponse.Results = searchResponse.Results[:req.TopK]
 		}
 		// Cache the results before returning
-		s.setSearchCache(ctx, req, searchResponse)
+		s.setSearchCache(ctx, req, searchResponse, nil)
 		return searchResponse, nil
 	}
 
@@ -3891,7 +4039,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		Results: rerankedResults,
 	}
 	// Cache the results before returning
-	s.setSearchCache(ctx, req, finalResponse)
+	s.setSearchCache(ctx, req, finalResponse, nil)
 	return finalResponse, nil
 }
 
@@ -4118,6 +4266,63 @@ func (rr *responseRecorder) WriteHeader(code int) {
 	rr.ResponseWriter.WriteHeader(code)
 }
 
+type managementClaims struct {
+	UserID string `json:"user_id"`
+	APIKey string `json:"api_key"`
+	Plan   string `json:"plan"`
+	jwt.RegisteredClaims
+}
+
+func managementAuthMiddleware(authClient authpb.AuthServiceClient, jwtSecret string, enabled bool, allowSDK bool, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !enabled {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			http.Error(w, "missing Authorization header", http.StatusUnauthorized)
+			return
+		}
+
+		tokenStr := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer"))
+		if tokenStr == "" {
+			http.Error(w, "invalid Authorization format", http.StatusUnauthorized)
+			return
+		}
+
+		claims := &managementClaims{}
+		token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
+			return []byte(jwtSecret), nil
+		}, jwt.WithLeeway(5*time.Second))
+		if err != nil || !token.Valid {
+			http.Error(w, "invalid or expired token", http.StatusUnauthorized)
+			return
+		}
+
+		if claims.APIKey != "" {
+			if !allowSDK {
+				http.Error(w, "sdk tokens not allowed for management endpoints", http.StatusForbidden)
+				return
+			}
+			if authClient == nil {
+				http.Error(w, "auth service unavailable", http.StatusUnauthorized)
+				return
+			}
+			authDetails, err := authClient.GetAuthDetailsForSDK(r.Context(), &authpb.GetAuthDetailsForSDKRequest{
+				ApiKeyId: claims.APIKey,
+			})
+			if err != nil || !authDetails.Success {
+				http.Error(w, "invalid sdk token", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 // managementHandlers returns a handler for management endpoints
 func managementHandlers(mgr *management.Manager) http.Handler {
 	mux := http.NewServeMux()
@@ -4303,6 +4508,15 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 		interceptors = append(interceptors, middleware.LoggingInterceptor)
 	}
 	grpcOpts := grpcServerOptions(config.GRPCMaxRecvMB, config.GRPCMaxSendMB)
+	if config.GRPCTLSEnabled && config.GRPCTLSCertFile != "" && config.GRPCTLSKeyFile != "" {
+		creds, err := credentials.NewServerTLSFromFile(config.GRPCTLSCertFile, config.GRPCTLSKeyFile)
+		if err != nil {
+			log.Fatalf("Failed to load gRPC TLS certs: %v", err)
+		}
+		grpcOpts = append(grpcOpts, grpc.Creds(creds))
+	} else if config.GRPCTLSEnabled {
+		log.Printf("WARNING: gRPC TLS enabled but cert/key missing; starting without TLS")
+	}
 	if len(interceptors) > 0 {
 		grpcOpts = append(grpcOpts, grpc.ChainUnaryInterceptor(interceptors...))
 	}
@@ -4311,8 +4525,21 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 
 	// Set up the HTTP/JSON gateway to proxy requests to the gRPC server.
 	mux := runtime.NewServeMux()
+	gatewayGRPCAddr := config.GRPCAddr
+	if strings.HasPrefix(gatewayGRPCAddr, ":") {
+		gatewayGRPCAddr = "localhost" + gatewayGRPCAddr
+	}
 	opts := grpcClientOptions(config.GRPCEnableCompression, config.GRPCMaxRecvMB, config.GRPCMaxSendMB)
-	if err := pb.RegisterVectronServiceHandlerFromEndpoint(context.Background(), mux, config.GRPCAddr, opts); err != nil {
+	if config.GRPCTLSEnabled && config.GRPCTLSCertFile != "" && config.GRPCTLSKeyFile != "" {
+		creds, err := credentials.NewClientTLSFromFile(config.GRPCTLSCertFile, config.GRPCTLSServerName)
+		if err != nil {
+			log.Fatalf("Failed to load gRPC client TLS cert: %v", err)
+		}
+		opts = grpcClientOptionsWithCreds(creds, config.GRPCEnableCompression, config.GRPCMaxRecvMB, config.GRPCMaxSendMB)
+	} else if config.GRPCTLSEnabled {
+		log.Printf("WARNING: gRPC TLS enabled but cert/key missing; gateway will use insecure gRPC")
+	}
+	if err := pb.RegisterVectronServiceHandlerFromEndpoint(context.Background(), mux, gatewayGRPCAddr, opts); err != nil {
 		log.Fatalf("Failed to register VectronServiceHandlerFromEndpoint: %v", err)
 	}
 
@@ -4336,12 +4563,19 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 	}()
 
 	// Create a combined HTTP handler that routes to either management or gRPC gateway
+	securedManagement := managementAuthMiddleware(
+		authClient,
+		config.JWTSecret,
+		config.ManagementAuthEnabled,
+		config.ManagementAuthAllowSDK,
+		managementHandlers(managementMgr),
+	)
 	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Check if this is a management endpoint
 		if strings.HasPrefix(r.URL.Path, "/v1/system/") ||
 			strings.HasPrefix(r.URL.Path, "/v1/admin/") ||
 			strings.HasPrefix(r.URL.Path, "/v1/alerts") {
-			managementHandlers(managementMgr).ServeHTTP(w, r)
+			securedManagement.ServeHTTP(w, r)
 		} else {
 			mux.ServeHTTP(w, r)
 		}
@@ -4370,7 +4604,17 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 		log.Printf("Vectron HTTP API (curl)      → %s", config.HTTPAddr)
 		log.Printf("Management endpoints         → %s/v1/system/health, %s/v1/admin/...", config.HTTPAddr, config.HTTPAddr)
 		log.Printf("Using placement driver           → %s", config.PlacementDriver)
-		if err := http.ListenAndServe(config.HTTPAddr, finalHandler); err != nil && err != http.ErrServerClosed {
+		var err error
+		if config.HTTPTLSEnabled && config.HTTPTLSCertFile != "" && config.HTTPTLSKeyFile != "" {
+			log.Printf("HTTP TLS enabled (cert=%s key=%s)", config.HTTPTLSCertFile, config.HTTPTLSKeyFile)
+			err = http.ListenAndServeTLS(config.HTTPAddr, config.HTTPTLSCertFile, config.HTTPTLSKeyFile, finalHandler)
+		} else if config.HTTPTLSEnabled {
+			log.Printf("WARNING: HTTP TLS enabled but cert/key missing; starting without TLS")
+			err = http.ListenAndServe(config.HTTPAddr, finalHandler)
+		} else {
+			err = http.ListenAndServe(config.HTTPAddr, finalHandler)
+		}
+		if err != nil && err != http.ErrServerClosed {
 			log.Fatalf("HTTP server failed to serve: %v", err)
 		}
 	}()

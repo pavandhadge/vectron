@@ -22,6 +22,12 @@ type GrpcServer struct {
 
 // NewGrpcServer creates a new gRPC server instance.
 func NewGrpcServer(strategy Strategy, cache Cache, logger Logger, metrics MetricsCollector) *GrpcServer {
+	if logger == nil {
+		logger = noopLogger{}
+	}
+	if metrics == nil {
+		metrics = noopMetrics{}
+	}
 	return &GrpcServer{
 		strategy: strategy,
 		cache:    cache,
@@ -33,6 +39,9 @@ func NewGrpcServer(strategy Strategy, cache Cache, logger Logger, metrics Metric
 // Rerank implements the main reranking RPC.
 func (s *GrpcServer) Rerank(ctx context.Context, req *pb.RerankRequest) (*pb.RerankResponse, error) {
 	start := time.Now()
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "request is nil")
+	}
 
 	// Convert proto request to internal format
 	input := &RerankInput{
@@ -60,7 +69,7 @@ func (s *GrpcServer) Rerank(ctx context.Context, req *pb.RerankRequest) (*pb.Rer
 	}
 
 	// Check cache
-	cacheKey := CacheKey(req.GetQuery(), candidateIDs)
+	cacheKey := CacheKeyWithOptions(req.GetQuery(), candidateIDs, req.GetOptions())
 	if s.cache != nil {
 		if cached, ok := s.cache.Get(cacheKey); ok {
 			s.metrics.RecordCacheHit(s.strategy.Name())
@@ -80,10 +89,14 @@ func (s *GrpcServer) Rerank(ctx context.Context, req *pb.RerankRequest) (*pb.Rer
 		return nil, status.Errorf(codes.Internal, "reranking failed: %v", err)
 	}
 
+	if output == nil {
+		s.metrics.RecordError(s.strategy.Name(), "rerank_nil_output")
+		return nil, status.Error(codes.Internal, "reranking failed: empty output")
+	}
+
 	// Store in cache
 	if s.cache != nil {
-		ttl := 24 * time.Hour // Default TTL, should be configurable
-		s.cache.Set(cacheKey, output, ttl)
+		s.cache.Set(cacheKey, output, 0)
 	}
 
 	// Record metrics

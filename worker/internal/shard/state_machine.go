@@ -3,10 +3,10 @@ package shard
 import (
 	"archive/zip"
 	"bytes"
-	"errors"
 	"encoding/binary"
 	"encoding/gob"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -295,6 +296,18 @@ func readLastApplied(dir string) (uint64, error) {
 	return strconv.ParseUint(string(bytes.TrimSpace(data)), 10, 64)
 }
 
+func envBool(key string, fallback bool) bool {
+	val := strings.TrimSpace(os.Getenv(key))
+	if val == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(val)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
 // NewStateMachine creates a new shard StateMachine.
 func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dimension int32, distance string, walHub *storage.WALHub) (*StateMachine, error) {
 	dbPath := filepath.Join(workerDataDir, fmt.Sprintf("shard-%d", clusterID))
@@ -302,6 +315,7 @@ func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dime
 	dim := int(dimension)
 	durabilityProfile := ParseDurabilityProfile()
 	writeSpeedMode := os.Getenv("VECTRON_WRITE_SPEED_MODE") == "1"
+	disablePrealloc := envBool("VECTRON_DISABLE_DISK_PREALLOC", false)
 	syncInterval := 500 * time.Millisecond
 	syncMaxInterval := 2 * time.Second
 	if durabilityProfile == "relaxed" {
@@ -319,6 +333,8 @@ func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dime
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			writeBufferSize = n * 1024 * 1024
 		}
+	} else if disablePrealloc {
+		writeBufferSize = 1 * 1024 * 1024
 	}
 	if writeSpeedMode {
 		if durabilityProfile != "relaxed" {

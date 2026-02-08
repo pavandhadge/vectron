@@ -299,6 +299,9 @@ func startSelfDumpProfiles(role string) {
 
 func applyLogDBProfile(nhc *config.NodeHostConfig) {
 	profile := strings.ToLower(strings.TrimSpace(os.Getenv("VECTRON_LOGDB_PROFILE")))
+	if profile == "" && envBool("VECTRON_DISABLE_DISK_PREALLOC", false) {
+		profile = "tiny"
+	}
 	switch profile {
 	case "":
 		// Default to small to avoid large LogDB preallocation on light workloads.
@@ -373,6 +376,15 @@ func envIntDefault(key string, fallback int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return fallback
+}
+
+func envBool(key string, fallback bool) bool {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
 		}
 	}
 	return fallback

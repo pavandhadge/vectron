@@ -2,6 +2,7 @@ package shard
 
 import (
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +30,7 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 	}
 	indexBatchSize := 4096
 	indexQueueSize := 200000
+	autoTune := os.Getenv("VECTRON_INDEX_AUTO_TUNE") == "1"
 	if v := os.Getenv("VECTRON_INDEX_BATCH_SIZE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			indexBatchSize = n
@@ -37,6 +39,15 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 	if v := os.Getenv("VECTRON_INDEX_QUEUE_SIZE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			indexQueueSize = n
+		}
+	}
+	if autoTune {
+		tunedBatch, tunedQueue := autoTuneIndexSizing()
+		if os.Getenv("VECTRON_INDEX_BATCH_SIZE") == "" {
+			indexBatchSize = tunedBatch
+		}
+		if os.Getenv("VECTRON_INDEX_QUEUE_SIZE") == "" {
+			indexQueueSize = tunedQueue
 		}
 	}
 	if v := os.Getenv("VECTRON_INDEX_FLUSH_MS"); v != "" {
@@ -99,6 +110,25 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 		WarmupMaxVectors:         10000,
 		WarmupDelay:              5 * time.Second,
 	}
+}
+
+func autoTuneIndexSizing() (int, int) {
+	procs := runtime.GOMAXPROCS(0)
+	tunedBatch := 1024 * procs
+	if tunedBatch < 2048 {
+		tunedBatch = 2048
+	}
+	if tunedBatch > 8192 {
+		tunedBatch = 8192
+	}
+	tunedQueue := 25000 * procs
+	if tunedQueue < 50000 {
+		tunedQueue = 50000
+	}
+	if tunedQueue > 400000 {
+		tunedQueue = 400000
+	}
+	return tunedBatch, tunedQueue
 }
 
 // ParseDurabilityProfile reads the durability profile from env.
