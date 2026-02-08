@@ -11,6 +11,7 @@ This document reflects the repository state as of February 8, 2026, based on cur
 - `shared/proto/*`
 - `Makefile`
 - `ENV_SAMPLE.env`
+- `env/*.env`
 
 ## 1. Active Services
 
@@ -85,6 +86,7 @@ API Gateway (`apigateway/cmd/apigateway/config.go`):
 - connects to `PLACEMENT_DRIVER`, `AUTH_SERVICE_ADDR`, `RERANKER_SERVICE_ADDR`
 - feedback DB path via `FEEDBACK_DB_PATH`
 - rich cache/rerank toggles via env vars (see `ENV_SAMPLE.env`)
+- env file search order: `.env.apigateway`, `apigateway.env`, `env/apigateway.env`
 
 Placement Driver (`placementdriver/cmd/placementdriver/main.go`):
 
@@ -96,20 +98,30 @@ Worker (`worker/cmd/worker/main.go`):
 
 - default gRPC `localhost:9090`
 - default raft `localhost:9191`
-- PD addrs via `-pd-addrs`
+- PD addrs via `-pd-addrs` (default from `PD_ADDRS` if set)
 - supports `VECTRON_SEARCH_ONLY=1`
+- env file search order: `.env.worker`, `worker.env`, `env/worker.env`
 
 Auth Service (`auth/service/cmd/auth/main.go`):
 
 - gRPC default `:8081`, HTTP default `:8082`
 - etcd default `localhost:2379`
 - `JWT_SECRET` is required and must be >= 32 characters
+- env file search order: `.env.auth`, `auth.env`, `env/auth.env`
 
 Reranker (`reranker/cmd/reranker/main.go`):
 
 - default port `50051`
 - default strategy `rule`
 - `llm` and `rl` options currently fall back to stub implementations
+- env file search order: `.env.reranker`, `reranker.env`, `env/reranker.env`
+
+Placement Driver (`placementdriver/cmd/placementdriver/main.go`):
+
+- default gRPC `localhost:6001`
+- default raft `localhost:7001`
+- supports multi-node bootstrap with `-initial-members`
+- env file search order: `.env.placementdriver`, `placementdriver.env`, `env/placementdriver.env`
 
 ## 5. Management Console Reality Check
 

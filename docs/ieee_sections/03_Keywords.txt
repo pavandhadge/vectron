@@ -1,0 +1,1 @@
+Keywords—vector database, approximate nearest neighbor, HNSW, Raft, sharding, distributed systems, durability, caching, reranking, control plane, API gateway

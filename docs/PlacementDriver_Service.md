@@ -12,7 +12,7 @@ Placement Driver (PD) is the control plane for Vectron.
 - routes collection/vector ownership queries
 - supports worker drain/remove and rebalance operations
 
-## 2. Runtime Defaults
+## 2. Runtime Defaults and Env Loading
 
 From `placementdriver/cmd/placementdriver/main.go`:
 
@@ -29,6 +29,13 @@ Service starts:
 - shard reconciler
 - rebalance manager
 - graceful shutdown handlers
+
+Env files are loaded on startup in this order (first match wins):
+1. `.env.placementdriver`
+2. `placementdriver.env`
+3. `env/placementdriver.env`
+
+Most PD tuning variables are documented in `ENV_SAMPLE.env`.
 
 ## 3. API Surface
 

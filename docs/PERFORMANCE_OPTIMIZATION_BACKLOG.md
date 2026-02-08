@@ -9,7 +9,7 @@ This backlog reflects the current codebase and active profiling documents:
 
 ## 1. Completed / Landed
 
-- Added broad env-driven tuning surface across gateway/worker/PD (`ENV_SAMPLE.env`).
+- Added broad env-driven tuning surface across gateway/worker/PD (`ENV_SAMPLE.env`), now loaded via per-service env files.
 - Added search and routing cache controls in gateway.
 - Added worker and gateway profiling dump hooks (`PPROF_*`).
 - Added batching/streaming paths in worker and gateway for heavy data/search operations.
@@ -33,7 +33,7 @@ This backlog reflects the current codebase and active profiling documents:
 
 ## 5. References
 
-- `ENV_SAMPLE.env`
+- `ENV_SAMPLE.env` (tunables reference; active configs load from per-service env files)
 - `profile-benchmark.sh`
 - `tests/benchmark/*`
 - `PERF_PROFILE_FINDINGS.md`

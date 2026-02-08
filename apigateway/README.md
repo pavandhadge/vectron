@@ -71,16 +71,30 @@ The public API is formally defined in `proto/apigateway/apigateway.proto`. It pr
 
 ## Configuration
 
-The service is configured using environment variables:
+The service reads environment variables from a service-specific env file on startup:
 
-| Variable           | Description                                              | Default                   |
-| ------------------ | -------------------------------------------------------- | ------------------------- |
-| `GRPC_ADDR`        | Address for the gRPC server to listen on.                | `:8081`                   |
-| `HTTP_ADDR`        | Address for the HTTP/JSON gateway to listen on.          | `:8080`                   |
-| `PLACEMENT_DRIVER` | Comma-separated list of placement driver node addresses. | `placement:6300`          |
-| `JWT_SECRET`       | Secret key for signing and verifying JWT tokens.         | `CHANGE_ME_IN_PRODUCTION` |
-| `RateLimitRPS`     | Global requests-per-second limit for the rate limiter.   | `100`                     |
-| `GRPC_ENABLE_COMPRESSION` | Enable gzip compression for gRPC clients.        | `false`                   |
+Search order (first match wins):
+1. `.env.apigateway`
+2. `apigateway.env`
+3. `env/apigateway.env`
+
+Environment variables can also be provided by the process manager (systemd, k8s, etc).
+
+Key variables:
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `GRPC_ADDR` | Address for the gRPC server to listen on. | `:8081` |
+| `HTTP_ADDR` | Address for the HTTP/JSON gateway to listen on. | `:8080` |
+| `PLACEMENT_DRIVER` | Comma-separated list of placement driver node addresses. | `placement:6300` |
+| `AUTH_SERVICE_ADDR` | Auth service gRPC address. | `auth:50051` |
+| `RERANKER_SERVICE_ADDR` | Reranker service gRPC address. | `localhost:50051` |
+| `FEEDBACK_DB_PATH` | SQLite feedback DB path. | `./data/feedback.db` |
+| `JWT_SECRET` | Secret key for signing/validating JWT tokens. | `CHANGE_ME_IN_PRODUCTION` |
+| `RATE_LIMIT_RPS` | Global requests-per-second limit for the rate limiter. | `100` |
+| `GRPC_ENABLE_COMPRESSION` | Enable gzip compression for gRPC clients. | `false` |
+
+Additional performance/caching/rerank toggles are documented in `ENV_SAMPLE.env`.
 
 ## Building and Running
 

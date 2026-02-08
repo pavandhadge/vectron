@@ -52,6 +52,7 @@ Why:
 How it manifests:
 
 - large env-driven tuning surface (`ENV_SAMPLE.env`)
+- per-service env files for explicit control (`.env.<service>`, `<service>.env`, or `env/<service>.env`)
 - consistency, cache, fanout, rerank, and storage controls
 
 ### 2.4 Consistency Is a Policy, Not a Dogma

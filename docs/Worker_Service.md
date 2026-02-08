@@ -25,13 +25,13 @@ Search-only mode (`VECTRON_SEARCH_ONLY=1`):
 - no local raft ownership
 - serves search from streamed/index-synced state
 
-## 3. Runtime Defaults
+## 3. Runtime Defaults and Env Loading
 
 From `worker/cmd/worker/main.go`:
 
 - `-grpc-addr` default `localhost:9090`
 - `-raft-addr` default `localhost:9191`
-- `-pd-addrs` default `localhost:6001`
+- `-pd-addrs` default `PD_ADDRS` if set, otherwise `localhost:6001`
 - `-node-id` default `1`
 - `-data-dir` default `./worker-data`
 
@@ -40,6 +40,11 @@ Common gRPC sizing env vars:
 - `GRPC_MAX_RECV_MB` (default 256)
 - `GRPC_MAX_SEND_MB` (default 256)
 - `GRPC_MAX_STREAMS` (default 1024)
+
+Env files are loaded on startup in this order (first match wins):
+1. `.env.worker`
+2. `worker.env`
+3. `env/worker.env`
 
 Many storage/index tuning vars are documented in `ENV_SAMPLE.env`.
 

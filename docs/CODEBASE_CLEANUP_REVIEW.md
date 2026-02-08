@@ -8,7 +8,7 @@ This is an updated cleanup posture document (not a historical review).
 
 - Core service structure is coherent across modules (`apigateway`, `worker`, `placementdriver`, `auth/service`, `reranker`).
 - Proto contracts are centralized under `shared/proto`.
-- Runtime tuning variables are documented in `ENV_SAMPLE.env`.
+- Runtime tuning variables are documented in `ENV_SAMPLE.env`, and service configs load from `.env.<service>`, `<service>.env`, or `env/<service>.env`.
 
 ## 2. Documentation Cleanup Status
 

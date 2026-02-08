@@ -15,7 +15,7 @@ The API Gateway is the public entry point for Vectron.
 - stores feedback in SQLite
 - exposes management endpoints for the auth frontend console
 
-## 2. Runtime Defaults
+## 2. Runtime Defaults and Env Loading
 
 From `apigateway/cmd/apigateway/config.go`:
 
@@ -26,6 +26,11 @@ From `apigateway/cmd/apigateway/config.go`:
 - `RERANKER_SERVICE_ADDR=localhost:50051`
 - `FEEDBACK_DB_PATH=./data/feedback.db`
 - `RATE_LIMIT_RPS=100`
+
+Env files are loaded on startup in this order (first match wins):
+1. `.env.apigateway`
+2. `apigateway.env`
+3. `env/apigateway.env`
 
 Additional performance/caching/rerank env vars are documented in `ENV_SAMPLE.env`.
 

@@ -40,7 +40,16 @@ This folder is maintained as current-state documentation.
 - `shared/proto/placementdriver/placementdriver.proto`
 - `shared/proto/worker/worker.proto`
 - `shared/proto/reranker/reranker.proto`
-- `ENV_SAMPLE.env`
+- `ENV_SAMPLE.env` (reference list of tunables)
+
+## Environment Configuration (Current)
+
+Each service loads its own env file on startup. Search order (first match wins):
+- `.env.<service>`
+- `<service>.env`
+- `env/<service>.env`
+
+The repo ships `env/*.env` for local development. You can also place `.env.<service>` or `<service>.env` in the repo root.
 
 ## Rule
 

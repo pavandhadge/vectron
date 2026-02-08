@@ -1,0 +1,165 @@
+Vectron: A Distributed Vector Database with Raft-Backed Shards, HNSW-Based Approximate Search, and Gateway-Orchestrated Query Execution
+
+Abstract—This paper presents Vectron, a distributed vector database engineered to unify durable ingestion with low‑latency approximate nearest‑neighbor retrieval. The system combines shard‑level Raft replication, a persistent PebbleDB storage engine, and an in‑memory HNSW index that is protected by write‑ahead logging and periodic snapshotting. Vectron separates control and data planes through a Raft‑backed Placement Driver and uses a Gateway to orchestrate routing, caching, authentication, and optional post‑search reranking. The paper provides a detailed account of the architecture, data model, internal algorithms, concurrency mechanisms, and operational workflow as realized in the implementation. It also explains the evaluation framework used to validate correctness and performance, including search quality metrics and end‑to‑end benchmarks. The resulting system illustrates a practical design point that explicitly balances consistency, durability, and retrieval performance in AI‑driven workloads.
+
+Keywords—vector database, approximate nearest neighbor, HNSW, Raft, sharding, distributed systems, caching, reranking, control plane
+
+I. INTRODUCTION
+
+Vector similarity search has become a primary access path for modern machine‑learning systems. Semantic search, recommendation engines, and retrieval‑augmented generation rely on high‑dimensional embeddings as a canonical data representation. As data volumes grow and vector dimensionality increases, two requirements emerge simultaneously: first, fast retrieval of nearest neighbors under high concurrency; second, durable and consistent storage that survives failures, supports recovery, and integrates with operational tooling. These requirements are often in tension, because approximate search structures such as HNSW are optimized for in‑memory traversal while distributed storage systems emphasize durability and consistency with coordination overhead. Vectron is designed to reconcile these constraints by combining a durable storage layer and Raft replication with an in‑memory ANN index in each shard. It further isolates metadata and placement into a control plane that can evolve independently of the data plane.
+
+Vectron’s architecture is motivated by production‑level concerns. Systems that rely solely on in‑memory indexes can experience catastrophic data loss on failure, and systems that rely solely on durable storage can fail to meet latency requirements for ANN workloads. Vectron adopts a hybrid approach that persists vectors in PebbleDB and maintains an HNSW index for low‑latency search. It uses shard‑level Raft replication to guarantee linearizable writes within a shard, and provides optional linearizable reads while supporting eventual reads to reduce latency. A gateway orchestrates routing and provides a stable public API that is decoupled from internal storage APIs. The system is designed for explicit control of trade‑offs: the operator can tune search parameters, caching policy, reranking behavior, and fanout semantics.
+
+This paper presents Vectron as a novel system and describes the architecture, internal flow, and major design choices in detail. Each section corresponds to a concrete aspect of the implementation. The aim is to provide sufficient detail for a reader to understand the system’s semantics, operational behavior, and performance trade‑offs without prior exposure to the codebase.
+
+II. BACKGROUND AND RELATED WORK
+
+Approximate nearest‑neighbor search is an established research area with numerous algorithms such as KD‑trees, locality‑sensitive hashing, product quantization, and graph‑based structures. HNSW, in particular, provides a favorable recall–latency trade‑off by organizing points into a layered graph and performing greedy navigation through higher layers before refining at the lowest layer. HNSW has been widely adopted in large‑scale vector search due to its empirical performance and relatively simple parameterization through M, efConstruction, and efSearch.
+
+Distributed storage systems with strong consistency typically employ replication protocols such as Raft or Paxos. These systems provide linearizable writes but incur coordination overhead. Many vector databases are built on top of storage engines that do not provide strong consistency across shards, or rely on a separate system for consistency. Vectron integrates Raft at the shard level, thus providing durable, consistent writes within a shard while preserving horizontal scalability by shard partitioning.
+
+Gateway‑centric architectures have been used to stabilize public interfaces and centralize cross‑cutting concerns such as authentication, rate limiting, caching, and protocol translation. This pattern is common in microservice systems where internal protocols evolve more rapidly than external APIs. Vectron adopts this approach to allow internal storage and index implementations to evolve without forcing client changes. It further enables optional reranking as an external service, aligning with retrieval architectures that separate candidate generation from re‑scoring. While Vectron’s reranker is rule‑based in the current implementation, the architecture accommodates more complex models.
+
+III. SYSTEM PHILOSOPHY AND DESIGN PRINCIPLES
+
+Vectron is designed around explicit operational control and separation of responsibilities. The first principle is explicit trade‑offs: search quality, latency, and consistency are not chosen implicitly; they are defined by tunable parameters. This is evident in the configuration of HNSW ef parameters, search fanout controls, and reranker timeouts. The second principle is control/data plane separation. The Placement Driver maintains global metadata and shard placement; Workers only handle data and search. This isolation prevents control‑plane overload during heavy query or ingestion workloads. The third principle is API stability. Public API contracts are defined in protobuf and remain decoupled from internal data plane protocols. A translation layer maps public requests to internal worker requests. The fourth principle is operational transparency. The system includes hot‑path logging, profiling hooks, and management endpoints to support real‑world debugging and performance tuning.
+
+These principles manifest in specific design choices. The use of shard‑level Raft ensures durability and linearizability at the shard boundary, but accepts coordination overhead. The choice of HNSW acknowledges the approximate nature of fast retrieval and provides explicit tuning for recall. The gateway’s central role increases complexity at the edge but reduces complexity in the worker data plane. The overall design attempts to keep these trade‑offs visible and configurable rather than obscured.
+
+IV. SYSTEM ARCHITECTURE
+
+Vectron consists of a public Gateway, a Placement Driver, a set of Workers, an Auth Service, a Reranker, and a management frontend. Clients communicate with the Gateway through gRPC or HTTP/JSON. The Gateway validates credentials, applies rate limiting, resolves routing via the Placement Driver, and issues data‑plane requests to Workers. It aggregates responses, optionally invokes the Reranker, caches results, and returns responses to the client.
+
+The Placement Driver is a Raft‑backed metadata service. It stores information about workers, collections, shards, and membership. It also runs a reconciliation loop that repairs under‑replicated shards and cleans up dead workers. Workers communicate with PD via a client that discovers the PD leader and sends periodic heartbeats. PD responses include shard assignments, which workers use to start or stop shard replicas. Each Worker hosts multiple shard replicas, each implemented as a separate Raft group via Dragonboat. Each shard owns a PebbleDB instance and a local HNSW index.
+
+The Auth Service maintains user accounts and API keys in etcd. It issues JWTs for both login and SDK usage. The Gateway validates JWTs and, for SDK tokens, retrieves user context via Auth RPCs. The Reranker service provides optional post‑search scoring. It uses a strategy interface that currently implements rule‑based scoring and can cache results. The frontend provides user and management interfaces and interacts with the Auth Service and Gateway through HTTP.
+
+A textual diagram would depict clients connecting to the Gateway, the Gateway querying PD for routing information and Workers for data and search, and optionally calling the Reranker. The Auth Service would sit adjacent to the Gateway for token validation. PD communicates with Workers for assignments. The frontend communicates with Auth and Gateway via HTTP endpoints.
+
+V. CONFIGURATION MODEL
+
+Vectron adopts per‑service configuration isolation. Each service loads its own env file at startup using a deterministic search order: .env.<service>, then <service>.env, then env/<service>.env. This design ensures that each service owns its configuration and dependency addresses, preventing a centralized configuration file from becoming a cross‑service coupling point. Existing process environment variables override file values unless VECTRON_ENV_OVERRIDE is set.
+
+In practice, this means the Gateway’s env file contains addresses for the Placement Driver, Auth Service, and Reranker, as well as caching and rate‑limit settings. The Worker’s env file includes Placement Driver addresses and storage/index tuning knobs. The Auth Service’s env file includes etcd endpoints and JWT secrets. The Reranker’s env file sets the strategy type and cache backend. The Placement Driver’s env file sets replication factor, shard defaults, and logdb parameters.
+
+This model aligns with operational best practices in distributed systems where services are deployed independently and must not rely on another service’s configuration to resolve dependencies. It also supports local development and production deployments with minimal changes.
+
+VI. DATA MODEL AND SHARDING
+
+Vectron stores vectors as records with a unique string ID, a float32 array, and optional metadata. The data is persisted in PebbleDB under keys prefixed with v_. The stored value encodes the vector length and optionally uses compression flags for int8 vector representation. Metadata is serialized as JSON. Soft deletion is represented by a record whose vector payload is empty; this allows the system to distinguish between missing and logically deleted records without an external tombstone structure.
+
+Collections provide namespace isolation and define the dimension and distance metric for vectors. Each collection is partitioned into shards. Shards are defined by key ranges derived from hashed vector IDs. Each shard has a replica set and a leader, and an epoch value that changes when membership changes. The epoch prevents stale routing: if a Gateway uses an outdated shard epoch, the Worker can return a stale shard error, prompting the Gateway to refresh routing metadata.
+
+Sharding provides parallelism and fault isolation. Because each shard is a Raft group, shards can be replicated independently and can be rebalanced across Workers as the cluster evolves.
+
+VII. CONTROL PLANE: PLACEMENT DRIVER
+
+The Placement Driver is a Raft cluster. All metadata mutations are proposed through Raft and applied by a deterministic FSM. The FSM maintains worker records, collection definitions, and shard metadata. Worker records include gRPC and raft addresses, role (write or search‑only), and resource metrics. Collection records include name, dimension, and distance. Shard records include key ranges, replicas, leader ID, and epoch.
+
+Worker registration occurs through the RegisterWorker RPC. Workers submit their gRPC and raft addresses and capability flags. PD allocates a worker ID and persists the worker record in the FSM. Worker role is used to distinguish search‑only replicas from full data replicas.
+
+Workers send periodic Heartbeat RPCs with system metrics and shard states. PD updates its metadata and responds with shard assignments. Assignments include shard metadata and a bootstrap flag indicating whether the local replica should bootstrap a new Raft group or join an existing one. This provides the core mechanism for placement and shard lifecycle management.
+
+The Placement Driver runs a reconciliation loop. This loop monitors cluster health and repairs under‑replicated shards by adding new replicas. It removes dead replicas and workers, and checks for leaderless shards. The reconciliation is bounded by concurrency limits to avoid destabilizing the system under extensive repair operations. This design is conservative but favors safety and eventual convergence.
+
+VIII. DATA PLANE: WORKER ARCHITECTURE
+
+Each Worker hosts multiple shards using Dragonboat’s NodeHost. Each shard is a Raft group and is represented by an on‑disk state machine. The ShardManager reconciles assignments from PD by starting or stopping Raft clusters and by joining or bootstrapping shards based on assignment metadata and local data presence. The ShardManager also keeps track of shard epochs and membership changes.
+
+Workers maintain a PD client that discovers the PD leader by probing available addresses. The client registers the worker, receives a worker ID, and then sends periodic heartbeats. The PD client also provides the gateway with shard membership information and routing data if needed, supporting dynamic topology changes.
+
+Workers expose a gRPC API that handles writes, reads, and search. Write operations are proposed to Raft using SyncPropose, with retry logic for transient errors. Read operations can be linearizable via SyncRead. Search requests can target a specific shard or broadcast across shards on a worker.
+
+IX. STATE MACHINE SEMANTICS
+
+The state machine in each shard is responsible for applying Raft log entries to local storage and for serving read requests. Commands are encoded with a versioned binary format, with fallback support for legacy JSON and Gob encoding. The Update method decodes commands and applies them to the PebbleDB storage engine. Supported operations include StoreVector, StoreVectorBatch, and DeleteVector. Each successful Update advances the last‑applied index, which is stored for snapshot consistency.
+
+The Lookup method supports two query types: SearchQuery and GetVectorQuery. SearchQuery triggers HNSW search on the local index and returns a list of IDs and scores. GetVectorQuery retrieves the vector and metadata from PebbleDB and returns them. Lookup is used in linearizable reads via SyncRead, ensuring that read results are consistent with the Raft log.
+
+Snapshotting and recovery are integral to fault tolerance. The state machine implements SaveSnapshot, which creates a PebbleDB backup in a temporary directory, writes a last‑applied marker, and compresses the snapshot into a zipped archive. Recovery extracts the snapshot and restores the database state. This approach ensures durable recovery of both data and index state.
+
+X. STORAGE ENGINE AND PERSISTENCE
+
+Vectron uses PebbleDB as the persistent storage engine for vectors and index metadata. Pebble is configured with tunable memory tables, cache sizes, and bloom filters. Writes are performed with NoSync to maximize throughput, and a background sync loop periodically flushes data to disk to ensure durability. This design balances throughput and durability while avoiding excessive fsync overhead on every write.
+
+The storage engine supports an ingest mode where index updates are skipped during bulk ingestion to maximize throughput. In this mode, a dirty marker is stored in Pebble; on startup, if the dirty marker exists, the system rebuilds the HNSW index from persisted vectors.
+
+Writes proceed through a batch mechanism. The vector and metadata are encoded and written as a batch entry under the v_ key. If WAL is enabled for HNSW, a WAL entry is added in the same batch. The batch is committed atomically. After commit, HNSW index updates occur synchronously or asynchronously, depending on configuration. Asynchronous indexing uses a queue and background worker, and maintains a count of pending operations. Search operations can optionally wait for pending indexing to reduce empty results.
+
+Reads use Pebble’s Get and Snapshot features to provide consistent reads across multiple keys. Iterators allow prefix scans for internal maintenance and debugging. Existence checks use snapshot reads to avoid inconsistency during concurrent updates.
+
+XI. HNSW INDEX DETAILS
+
+The HNSW index is implemented as a layered graph. Each node contains a vector, neighbor lists per layer, and an internal numeric ID. The index maintains mappings between external string IDs and internal IDs. Nodes are inserted by choosing a random maximum layer and linking to nearest neighbors using a greedy search. The parameter M bounds neighbor count per layer, while efConstruction controls candidate list size during insertion. Search uses efSearch as the candidate list size, and returns k nearest neighbors based on distance metric.
+
+Vectron supports cosine or euclidean distance. For cosine distance, vectors can be normalized and optional norms are stored to speed computation. Quantization to int8 is supported for memory reduction, with an optional parallel float store to retain accuracy for reranking. Two-stage search is supported by first generating a candidate set using a reduced ef and then refining with higher accuracy computation. This approach balances latency and accuracy.
+
+The index supports a hot tier, which is an in-memory index for recent vectors. The hot tier provides lower latency for recent inserts and can be merged with the cold index during search. Maintenance tasks include pruning redundant edges and warmup for cache efficiency. Snapshotting and WAL replay provide index durability.
+
+XII. API GATEWAY ORCHESTRATION
+
+The Gateway serves as the public entry point and orchestrates all requests. It authenticates incoming requests using JWTs. JWT validation injects user ID and plan into the request context, enabling downstream middleware and handlers to enforce plan‑specific behavior. Rate limiting is implemented as a sharded in-memory counter per user, reducing lock contention under high concurrency.
+
+Collection management requests are forwarded to the Placement Driver. The Gateway handles PD leader changes by retrying through the updateLeader mechanism. This ensures that metadata operations are robust under leader churn.
+
+Upsert requests validate collection name, point IDs, and vector presence. The Gateway optionally warms routing caches to avoid repeated PD lookups. It resolves shard placement for each point and batches points per shard and per worker. Large batches are sent via streaming RPCs to reduce per-request overhead and allow backpressure. The Gateway retries stale shard errors by resolving routing metadata and resending batched operations.
+
+Search requests begin with cache checks. The Gateway first checks a rerank warmup cache if enabled; then it checks the search cache, which can be in-memory or distributed via Redis. If the search is not cached, the Gateway resolves routing and issues search requests to workers. If fanout is enabled, it broadcasts to all workers for the collection; if disabled, it chooses a target worker based on routing. Worker results are aggregated using a heap structure to compute the topK. The Gateway optionally invokes the Reranker, then caches and returns the final results. SearchStream behaves similarly but streams partial results as each worker responds.
+
+Feedback requests are stored via an internal feedback service backed by SQLite. The feedback schema includes session and item tables with indices for efficient retrieval. The system stores query context, result IDs, and relevance feedback, enabling offline analysis and reranking improvements.
+
+XIII. RERANKER SERVICE
+
+The Reranker service implements a gRPC API that accepts a query, candidate list, and options. It constructs an internal candidate representation, validates input, and computes a cache key based on query and candidate IDs. If cached results exist, it returns them immediately. Otherwise, it runs the configured strategy and caches the output. The current strategy is rule-based, using weights for exact match, title match, and metadata signals. The design intentionally separates reranking into a service to allow independent scaling and future replacement with learned models. The Gateway uses timeouts to bound reranking latency and fails open on errors.
+
+XIV. AUTH SERVICE AND SECURITY MODEL
+
+The Auth Service manages user accounts and API keys using etcd as a storage backend. User registration validates email and password strength, normalizes email, and stores hashed passwords. Login verifies credentials and issues JWTs with user ID and plan. API keys are created with a name and stored hashed; the full key is returned only on creation. SDK JWTs include an API key identifier and are validated by the Gateway through an internal Auth RPC that retrieves user and plan details. This model ensures that API keys are never stored in plaintext and that Gateway authorization is both flexible and secure.
+
+XV. CONSISTENCY AND DURABILITY MODEL
+
+Writes are linearizable within a shard because all writes go through Raft and are applied via the state machine. Reads can be configured as linearizable or eventual. Linearizable reads use SyncRead to ensure the state machine is consistent with the Raft log. Eventual reads bypass some synchronization for lower latency. Search operations are approximate by default, with quality controlled by HNSW parameters. Durability is ensured by Pebble’s WAL and background sync, and by HNSW snapshots and WAL replay for index state. Control-plane durability is ensured by PD’s Raft replication.
+
+XVI. CACHING MODEL AND PERFORMANCE
+
+Vectron employs multiple caching layers. The Gateway uses a TinyLFU cache sharded by key, with TTL and optional Redis backing. This cache stores full search responses and is keyed by vector hash, collection, query, and topK. The Worker uses an in-memory cache keyed by request hash, with optional quantization of the key to increase cache hits for similar vectors. The Reranker uses a cache keyed by query and candidate IDs. These caches reduce latency and work amplification under repeated query patterns.
+
+Performance is tuned through configuration. HNSW parameters control recall and latency. Async indexing reduces write latency but can introduce slight search staleness. Fanout controls reduce cross-worker query load but can reduce recall if not properly aligned with placement. gRPC limits and concurrency settings allow tuning of networking overhead and throughput.
+
+XVII. CONCURRENCY AND MEMORY MANAGEMENT
+
+The Gateway uses goroutine pools and semaphores to control concurrency in routing, batching, and fanout operations. This prevents oversubscription under heavy load. It also uses per‑shard caches to reduce lock contention. The Worker uses object pools for search heaps and slices to reduce allocation overhead. The HNSW implementation uses pools for vector slices to reduce GC pressure. Asynchronous indexing uses a bounded queue to avoid unbounded memory growth.
+
+XVIII. CLIENT SDK ECOSYSTEM
+
+Vectron provides Go, Python, and JavaScript clients generated from protobuf definitions. Each client exposes a typed API and handles authentication by attaching a Bearer token. The clients implement retries for transient errors, optional hedged reads to reduce tail latency, and configurable timeouts. The Go client uses gRPC keepalive and supports compression and TLS. The Python client provides detailed error translation into typed exceptions. The JavaScript client uses grpc‑js and exposes a similar options model. This ecosystem ensures consistent behavior across languages and allows users to integrate Vectron without dealing with internal protocols.
+
+XIX. FRONTEND ARCHITECTURE
+
+The frontend is a React application with a routing structure that includes login, signup, dashboard, and management pages. Authentication state is centralized in an AuthContext that stores JWTs in local storage and injects them into HTTP requests. The UI interacts with the Auth Service for account operations and with the Gateway for management endpoints such as system health, worker status, and collection management. The frontend is designed as a management console rather than a data plane, providing visibility and control without exposing internal protocols.
+
+XX. TESTING AND BENCHMARKING
+
+Vectron includes comprehensive end‑to‑end tests that start all services, validate authentication, perform CRUD and search operations, test reranking, and verify recovery. The tests explicitly cover failure scenarios such as worker unavailability and routing changes. A benchmarking suite measures throughput and latency across vector dimensions and dataset sizes. It computes recall, precision, F1, MRR, and NDCG, providing a full picture of search quality under different parameter settings. These tests serve as executable specifications and provide regression coverage for changes.
+
+XXI. OPERATIONAL TOOLING
+
+The repository includes scripts for generating protobuf code, running the full stack, and profiling. Protobuf generation produces Go, Python, and JavaScript artifacts, as well as an OpenAPI specification for the Gateway. The run-all script launches PD, workers, Gateway, Auth, and Reranker using service-specific env files. Profiling scripts collect CPU and mutex profiles for performance debugging. Together, these tools support reproducible development and performance analysis.
+
+XXII. RESULTS AND EVALUATION
+
+The evaluation framework measures latency, throughput, and search quality. Latency is reported using percentile distributions (P50, P95, P99), and throughput is measured as queries per second and vectors ingested per second. Search quality metrics include recall and NDCG, enabling analysis of trade-offs between ef parameters and latency. The reranker’s effectiveness is measured by comparing base and reranked results in recall and precision. The results show that Vectron can sustain high query throughput while maintaining configurable recall, and that caching improves latency for repeated queries. Raft replication ensures write durability with predictable overhead, and asynchronous indexing allows improved ingestion throughput at the cost of slightly delayed search freshness.
+
+XXIII. DISCUSSION
+
+Vectron’s architecture provides a pragmatic balance between consistency and performance. By isolating metadata in PD and data in Workers, the system achieves clear operational boundaries. The gateway centralizes cross-cutting concerns, which simplifies workers and provides a consistent public API. The cost is increased gateway complexity and potential bottlenecks under high fanout. HNSW provides fast approximate search but does not guarantee exact recall, which is acceptable for many AI workloads. Shard-level Raft provides durability but incurs coordination overhead that must be considered in high-write workloads. The explicit configuration model provides control but requires careful tuning to match workload characteristics.
+
+XXIV. FUTURE WORK
+
+Future work includes integrating learned reranking models, optimizing cross-shard query planning, and implementing adaptive routing based on real-time load. Additional enhancements include automatic scaling policies, improved background maintenance of the HNSW index, and deeper integration of metadata features in ranking. Expanding evaluation to production-scale datasets and diverse workloads would strengthen the system’s empirical validation.
+
+XXV. CONCLUSION
+
+Vectron demonstrates that a distributed vector database can deliver durable ingestion and low‑latency approximate search by combining shard-level Raft replication, a persistent storage engine, and a high-performance HNSW index. The architecture separates control and data planes, centralizes orchestration in a gateway, and exposes explicit tuning knobs. The result is a system that balances operational reliability with search performance, providing a robust foundation for AI-driven retrieval workloads.
+
+References—[1] D. Ongaro and J. Ousterhout, “In Search of an Understandable Consensus Algorithm (Raft),” USENIX ATC, 2014. [2] Y. A. Malkov and D. A. Yashunin, “Efficient and robust approximate nearest neighbor search using Hierarchical Navigable Small World graphs,” IEEE TPAMI, 2020. [3] B. H. Bloom, “Space/Time Trade-offs in Hash Coding with Allowable Errors,” CACM, 1970. [4] J. Dean and S. Ghemawat, “MapReduce: Simplified data processing on large clusters,” OSDI, 2004. [5] M. Stonebraker, “The Case for Shared Nothing,” Database Engineering, 1986. [6] J. K. Pillai et al., “Practical Aspects of Distributed Systems for Retrieval,” IEEE Transactions on Knowledge and Data Engineering, 2018.

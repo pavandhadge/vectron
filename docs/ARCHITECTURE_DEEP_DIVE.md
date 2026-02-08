@@ -276,7 +276,7 @@ Why this design:
 
 ### 6.3 Runtime Tuning Surface
 
-`ENV_SAMPLE.env` exposes large tuning coverage for:
+`ENV_SAMPLE.env` lists tunables; active configs are loaded from per-service env files (`.env.<service>`, `<service>.env`, or `env/<service>.env`) for:
 
 - gRPC sizing
 - cache TTL/capacity

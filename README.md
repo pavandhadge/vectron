@@ -14,6 +14,9 @@ make build
 # Generate protobuf code
 bash generate-all.sh
 
+# Configure env files (per-service)
+# Place .env.<service> or <service>.env in repo root, or use env/<service>.env
+
 # Run services (see docs for full setup)
 ./bin/placementdriver --node-id=1 --grpc-addr=localhost:6001 --raft-addr=localhost:7001
 ./bin/worker --node-id=1 --grpc-addr=localhost:9090 --pd-addrs=localhost:6001

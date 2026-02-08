@@ -1,0 +1,7 @@
+Future Work—Vectron’s architecture enables several extensions. A natural direction is to integrate learned reranking models, including transformer-based models or hybrid approaches that combine metadata and query features. Such integration would benefit from additional feature extraction and cache management, but the existing reranker interface provides a clean integration point.
+
+Cross-shard query planning is another direction. The current system relies on fanout and aggregation to compute global topK results. Future work could incorporate shard-level statistics or learned routing to reduce fanout and improve tail latency. Adaptive routing based on real-time worker load and latency metrics could further reduce variance under high load.
+
+Automated scaling policies could be integrated into the Placement Driver, using workload and capacity metrics to make placement decisions. Dynamic shard splitting or merging could be explored to balance data and query hotspots. The HNSW index maintenance could be extended with incremental compaction, adaptive pruning, or background rebalancing to optimize memory usage.
+
+Evaluation could be expanded to production-scale datasets and diverse workloads to validate performance and operational robustness. This would also provide empirical guidance for parameter defaults and automatic tuning strategies.

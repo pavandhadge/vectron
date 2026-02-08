@@ -51,7 +51,12 @@ The `worker`'s internal gRPC API is defined in `proto/worker/worker.proto`. It p
 
 ## Configuration and Running
 
-The worker is configured via command-line flags. It requires the addresses of the `placementdriver` cluster to register itself and begin receiving shard assignments.
+The worker loads environment variables from a service-specific env file on startup. Search order (first match wins):
+1. `.env.worker`
+2. `worker.env`
+3. `env/worker.env`
+
+The worker is configured via command-line flags. It requires the addresses of the `placementdriver` cluster to register itself and begin receiving shard assignments. If `PD_ADDRS` is set, it becomes the default for `-pd-addrs`.
 
 **Example: Starting a Worker Node**
 

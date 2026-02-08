@@ -16,7 +16,7 @@ Auth Service manages identity and credentials for Vectron.
 
 Storage backend: etcd.
 
-## 2. Runtime Defaults and Requirements
+## 2. Runtime Defaults, Env Loading, and Requirements
 
 From `auth/service/cmd/auth/main.go`:
 
@@ -29,6 +29,11 @@ Hard requirement:
 
 - `JWT_SECRET` must be set and length >= 32.
 - Service exits on startup if this is not satisfied.
+
+Env files are loaded on startup in this order (first match wins):
+1. `.env.auth`
+2. `auth.env`
+3. `env/auth.env`
 
 ## 3. Security Model
 
