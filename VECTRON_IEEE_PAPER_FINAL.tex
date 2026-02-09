@@ -16,16 +16,45 @@
     T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
 \begin{document}
 
-\title{Vectron: A Distributed Vector Database with Raft-Based Consensus,\ Hierarchical Navigable Small World Indexing, and Multi-Tier Caching}
+\title{Vectron: Democratizing Vector Search—Distributed Raft-HNSW Architecture for Edge and Commodity Infrastructure}
 
-\author{\IEEEauthorblockN{Pavan Dhadge}
-\IEEEauthorblockA{\textit{Department of Computer Science} \\
-\textit{Indian Institute of Technology}\\
-Mumbai, India \\
-pavan.dhadge@iitb.ac.in}
+\author{
+\IEEEauthorblockN{Pavan Dhadge}
+\IEEEauthorblockA{\textit{Dept. of Artificial Intelligence and Machine Learning} \\
+\textit{SIES Graduate School of Technology} \\
+Navi Mumbai, India \\
+pavansdaiml122@gst.sies.edu.in}
+\and
+\IEEEauthorblockN{Atharva Golwalkar}
+\IEEEauthorblockA{\textit{Dept. of Artificial Intelligence and Machine Learning} \\
+\textit{SIES Graduate School of Technology} \\
+Navi Mumbai, India \\
+atharvaagaiml122@gst.sies.edu.in}
+\and
+\IEEEauthorblockN{Dipak Ghadge}
+\IEEEauthorblockA{\textit{Dept. of Artificial Intelligence and Machine Learning} \\
+\textit{SIES Graduate School of Technology} \\
+Navi Mumbai, India \\
+dipaksgaiml122@gst.sies.edu.in}
+\and
+\IEEEauthorblockN{Prathamesh Gajare}
+\IEEEauthorblockA{\textit{Dept. of Artificial Intelligence and Machine Learning} \\
+\textit{SIES Graduate School of Technology} \\
+Navi Mumbai, India \\
+prathameshngaiml122@gst.sies.edu.in}
+\and
+\IEEEauthorblockN{Varsha Patil}
+\IEEEauthorblockA{\textit{Dept. of Artificial Intelligence and Machine Learning} \\
+\textit{SIES Graduate School of Technology} \\
+Navi Mumbai, India \\
+varshap@gst.sies.edu.in}
+\and
 }
 
+
+
 \maketitle
+
 
 \begin{abstract}
 The exponential growth of embedding-based applications in artificial intelligence has created an urgent need for scalable, high-performance vector databases capable of efficiently storing and querying billion-scale vector datasets. Existing solutions either sacrifice consistency for performance or fail to provide adequate fault tolerance and horizontal scalability required for production deployments. This paper presents Vectron, a distributed vector database system that addresses these limitations through an architecture combining Raft-based consensus for metadata management, Hierarchical Navigable Small World (HNSW) indexing with SIMD-optimized approximate nearest neighbor search, and configurable multi-tier caching. Vectron introduces a shard-based data placement strategy with failure domain-aware replica distribution, AVX2-accelerated distance computations with optional int8 quantization, and a two-stage search pipeline with hot and cold index tiering. The system architecture comprises five core microservices communicating via gRPC: an API Gateway handling request routing and caching, a Placement Driver managing cluster metadata through Raft consensus, Worker nodes hosting shard replicas with HNSW indexing, an Authentication Service for user management, and an optional Reranker service for result refinement. The implementation supports asynchronous indexing, search-only replicas fed by WAL streaming, worker-level search batching, and configurable cache tiers (gateway TinyLFU, optional Redis/Valkey, and worker-local caches), providing a production-oriented foundation whose performance depends on deployment and configuration.
@@ -43,11 +72,11 @@ The proliferation of large language models and embedding-based AI applications h
 
 However, deploying vector search capabilities at production scale presents formidable engineering challenges that systems must simultaneously address to meet operational requirements. These requirements encompass several critical dimensions: millisecond-level query latency for interactive applications where user experience depends on rapid response times, storage capacity for billions of high-dimensional vectors with associated metadata, high availability with automatic failover mechanisms to ensure continuous operation, data consistency across distributed replicas to prevent stale reads or data loss, and operational simplicity for infrastructure teams managing production deployments. The intersection of these requirements creates inherent tensions that existing solutions struggle to resolve adequately, often forcing unacceptable compromises between performance, consistency, and operational complexity.
 
-Standalone vector databases such as FAISS and Annoy offer excellent single-node performance characteristics but fundamentally lack distributed consensus mechanisms, replication capabilities, and automatic failover functionality essential for production environments. While these systems prove suitable for research environments and proof-of-concept implementations, they require significant additional engineering investment to deploy in production scenarios where node failures are inevitable and must be handled gracefully. Distributed systems like Milvus and Weaviate provide horizontal scaling capabilities but frequently rely on eventually consistent architectures that risk returning stale search results during network partitions or replica lag, which proves unacceptable for applications requiring fresh data such as real-time recommendation systems, financial fraud detection platforms, or content moderation pipelines. Cloud-native solutions impose vendor lock-in constraints and fail to provide the transparency and auditability required for compliance-sensitive deployments in regulated industries such as healthcare, finance, and government sectors.
+Standalone vector databases such as FAISS \cite{faiss} and Annoy \cite{annoy} offer excellent single-node performance characteristics but fundamentally lack distributed consensus mechanisms, replication capabilities, and automatic failover functionality essential for production environments. While these systems prove suitable for research environments and proof-of-concept implementations, they require significant additional engineering investment to deploy in production scenarios where node failures are inevitable and must be handled gracefully. Distributed systems like Milvus \cite{milvus} and Weaviate \cite{weaviate} provide horizontal scaling capabilities but frequently rely on eventually consistent architectures that risk returning stale search results during network partitions or replica lag, which proves unacceptable for applications requiring fresh data such as real-time recommendation systems, financial fraud detection platforms, or content moderation pipelines. Cloud-native solutions impose vendor lock-in constraints and fail to provide the transparency and auditability required for compliance-sensitive deployments in regulated industries such as healthcare, finance, and government sectors.
 
 \subsection{Limitations of Existing Approaches}
 
-Current vector database architectures exhibit several fundamental limitations that prevent them from comprehensively meeting production requirements across diverse deployment scenarios. Many distributed vector databases prioritize availability over consistency, adopting AP-mode designs from the CAP theorem that sacrifice strong consistency guarantees in favor of continuous operation during network partitions. This approach risks returning stale search results during replica lag or network partitions, which proves unacceptable for applications requiring fresh data such as real-time recommendation systems, inventory management platforms, or financial transaction monitoring systems where acting on outdated information could result in significant business impact or regulatory violations.
+Current vector database architectures exhibit several fundamental limitations that prevent them from comprehensively meeting production requirements across diverse deployment scenarios. Many distributed vector databases prioritize availability over consistency, adopting AP-mode designs from the CAP theorem \cite{cap} that sacrifice strong consistency guarantees in favor of continuous operation during network partitions. This approach risks returning stale search results during replica lag or network partitions, which proves unacceptable for applications requiring fresh data such as real-time recommendation systems, inventory management platforms, or financial transaction monitoring systems where acting on outdated information could result in significant business impact or regulatory violations.
 
 The Hierarchical Navigable Small World algorithm, which has emerged as the dominant indexing approach for approximate nearest neighbor search in high-dimensional spaces, requires substantial memory overhead typically amounting to 2 to 4 times the raw vector data size for maintaining graph connectivity structures. This overhead severely limits dataset sizes that can be accommodated on commodity hardware and increases operational costs significantly for organizations seeking to store billions of vectors. Without compression or quantization techniques, a billion vectors of 768 dimensions each requires approximately 3 terabytes of memory for storage alone, plus additional overhead for the HNSW graph structure, pushing total requirements beyond the capabilities of typical server configurations.
 
@@ -83,33 +112,33 @@ Vector search, also known as similarity search, involves finding the k vectors m
 
 Formally, given a dataset D containing n vectors where each vector vi exists in d-dimensional real space and a query vector q in the same space, the k-nearest neighbor search retrieves a subset Nk of q containing k vectors such that for all vectors v in the result set and all vectors v' outside the result set, the distance from q to v is less than or equal to the distance from q to v' according to the chosen distance metric. This definition assumes exact nearest neighbor search, though practical systems often use approximate methods that trade small accuracy degradation for orders-of-magnitude speedup.
 
-Exact nearest neighbor search via brute-force comparison requires time proportional to the product of dataset size and dimensionality per query, which becomes prohibitive for large datasets with millions or billions of vectors. For a dataset of 1 billion vectors with 768 dimensions each, exact search requires computing 768 billion distance operations per query, which would take seconds or minutes on modern hardware. Approximate nearest neighbor algorithms trade a small accuracy degradation for orders-of-magnitude speedup, making billion-scale search feasible with millisecond-level latency. Popular approaches include locality-sensitive hashing which hashes similar vectors to the same buckets, product quantization which compresses vectors into compact codes, and graph-based methods including HNSW which navigate through proximity graphs.
+Exact nearest neighbor search via brute-force comparison requires time proportional to the product of dataset size and dimensionality per query, which becomes prohibitive for large datasets with millions or billions of vectors. For a dataset of 1 billion vectors with 768 dimensions each, exact search requires computing 768 billion distance operations per query, which would take seconds or minutes on modern hardware. Approximate nearest neighbor algorithms trade a small accuracy degradation for orders-of-magnitude speedup, making billion-scale search feasible with millisecond-level latency. Popular approaches include locality-sensitive hashing which hashes similar vectors to the same buckets, product quantization \cite{pq} which compresses vectors into compact codes, and graph-based methods including HNSW which navigate through proximity graphs.
 
 \subsection{Hierarchical Navigable Small World}
 
-HNSW, introduced by Malkov and Yashunin in 2016, is a graph-based approximate nearest neighbor algorithm that constructs a hierarchical multi-layer graph where each layer forms a navigable small world network. The bottom layer contains all vectors in the dataset, while higher layers contain progressively smaller subsets enabling logarithmic-time navigation from entry points to query neighborhoods. This hierarchical structure allows the algorithm to quickly navigate to the approximate region of the query without examining every vector in the dataset, providing both fast query times and high recall rates.
+HNSW, introduced by Malkov and Yashunin \cite{hnsw}, is a graph-based approximate nearest neighbor algorithm that constructs a hierarchical multi-layer graph structure. Our implementation builds upon this foundational algorithm with several optimizations tailored for distributed deployment.
 
-The HNSW construction algorithm proceeds as follows. For each new vector to be inserted into the index, the algorithm samples a random level according to an exponential distribution with parameter equal to the maximum connections per node, typically denoted as M. Starting from the top layer of the existing graph, the algorithm greedily traverses edges to find the closest node to the new vector according to the distance metric, then uses that node as the entry point for the next layer down. This process repeats until reaching layer zero, the bottom layer containing all vectors. At each layer during insertion, the algorithm connects the new vector to its M nearest neighbors from a candidate set of size efConstruction, where M and efConstruction are tunable parameters controlling graph density and quality. The efConstruction parameter determines how many candidates are considered when selecting neighbors, with higher values producing higher quality graphs at the cost of increased construction time.
+In the HNSW algorithm, each newly inserted element is assigned to multiple layers of a graph, with the maximum layer determined probabilistically \cite{hnsw}. Insertion begins at the topmost layer and proceeds downward, establishing connections at each level to nearby nodes based on the distance metric. The algorithm employs two primary parameters: M, which bounds the number of connections per node, and efConstruction, which controls the candidate set size during neighbor selection \cite{hnswparams}. These parameters enable tuning between graph quality and construction overhead.
 
-Search performs the same layered traversal with an efSearch parameter controlling the size of the candidate set maintained during traversal, returning the k closest vectors from the final layer. The algorithm maintains two sets during traversal: candidates to explore and results found so far. At each step, it explores the closest unvisited candidate, adding its neighbors to the candidate set if they are closer than the current furthest result. The ef parameters control the accuracy-efficiency trade-off where higher values improve recall at the cost of more distance computations and longer query latency. This trade-off allows applications to tune the algorithm for their specific latency and accuracy requirements, using higher efSearch for offline batch processing requiring high recall and lower values for online serving requiring low latency.
+Query processing in HNSW uses the efSearch parameter to regulate the number of candidates evaluated during traversal, directly affecting the accuracy-latency trade-off. Our system leverages these algorithmic properties while extending them with SIMD-accelerated distance computation and int8 quantization, as detailed in Section IV-A. For comprehensive theoretical analysis of HNSW's navigable small world properties and complexity bounds, readers are referred to the original work by Malkov and Yashunin \cite{hnsw}.
 
 \subsection{Raft Consensus Protocol}
 
-Raft is a consensus algorithm designed for managing a replicated log across distributed systems that separates the consensus problem into three sub-problems: leader election, log replication, and safety. Raft guarantees that committed entries are durable and that all state machines will execute the same commands in the same order, ensuring strong consistency across distributed replicas. The algorithm was designed specifically for understandability while maintaining correctness equivalent to Paxos, addressing the notorious difficulty of understanding and implementing Paxos correctly.
+Raft, developed by Ongaro and Ousterhout \cite{raft}, provides a consensus mechanism for replicated state machines that emphasizes understandability without sacrificing correctness. Unlike its predecessor Paxos, Raft decomposes consensus into distinct components: leader election, log replication, and safety properties \cite{raft}. This architectural clarity has made Raft the foundation of numerous production distributed systems.
 
-In Raft, a cluster elects a single leader that accepts client requests, appends them to its local log, and replicates entries to follower nodes. The leader sends AppendEntries RPCs to followers containing log entries to replicate. An entry is considered committed once replicated to a majority of nodes in the cluster, ensuring durability even if minority partitions fail. If the leader fails, remaining followers detect the absence of heartbeats and initiate new elections using randomized timeouts to avoid split votes. The first follower to timeout increments its term and requests votes from other nodes. Raft's strong consistency properties make it suitable for configuration management and metadata storage where split-brain scenarios must be avoided and all nodes must agree on system state.
+Vectron utilizes Raft's leader-based replication model wherein a designated leader processes client requests and propagates them to follower nodes. The protocol ensures that committed operations persist across majority quorums, providing fault tolerance against minority node failures. When leader failures occur, the remaining nodes coordinate through randomized timeout mechanisms to elect new leaders, maintaining system availability. For comprehensive details on Raft's correctness proofs and implementation considerations, readers are referred to the original USENIX ATC paper \cite{raft}.
 
-Dragonboat is a high-performance Go implementation of the Raft protocol providing persistent state machines, snapshot support for efficient recovery, and linearizable reads that guarantee clients see the most recent committed writes. Vectron leverages Dragonboat for both the Placement Driver metadata store and for per-shard replication of vector data, providing a unified approach to consistency across the system. Dragonboat supports multiple Raft groups within a single process, enabling Vectron to host hundreds of shard replicas on a single worker node efficiently.
+Dragonboat \cite{dragonboat} is a high-performance Go implementation of the Raft protocol providing persistent state machines, snapshot support for efficient recovery, and linearizable reads that guarantee clients see the most recent committed writes. Vectron leverages Dragonboat for both the Placement Driver metadata store and for per-shard replication of vector data, providing a unified approach to consistency across the system. Dragonboat supports multiple Raft groups within a single process, enabling Vectron to host hundreds of shard replicas on a single worker node efficiently.
 
 \subsection{Comparison to Existing Architectures}
 
-Milvus employs a cloud-native microservices architecture with separate components for query coordination, data nodes, and index building. While highly scalable, Milvus requires complex Kubernetes deployments and relies on eventual consistency for metadata operations, which can lead to configuration drift in production environments. The architecture separates concerns effectively but at the cost of operational complexity requiring significant expertise to deploy and manage.
+Milvus \cite{milvus} employs a cloud-native microservices architecture with separate components for query coordination, data nodes, and index building. While highly scalable, Milvus requires complex Kubernetes deployments and relies on eventual consistency for metadata operations, which can lead to configuration drift in production environments. The architecture separates concerns effectively but at the cost of operational complexity requiring significant expertise to deploy and manage.
 
-Weaviate provides a GraphQL interface and modular AI integrations but uses a custom consensus protocol with limited strong consistency guarantees compared to Raft. Its HNSW implementation lacks the SIMD optimizations and quantization techniques employed by Vectron, resulting in higher memory usage and lower throughput for equivalent recall levels. While suitable for semantic search applications, Weaviate does not provide the same performance optimizations for high-throughput serving scenarios.
+Weaviate \cite{weaviate} provides a GraphQL interface and modular AI integrations but uses a custom consensus protocol with limited strong consistency guarantees compared to Raft. Its HNSW implementation lacks the SIMD optimizations and quantization techniques employed by Vectron, resulting in higher memory usage and lower throughput for equivalent recall levels. While suitable for semantic search applications, Weaviate does not provide the same performance optimizations for high-throughput serving scenarios.
 
-Qdrant offers excellent single-node performance with filtering and payload-based retrieval capabilities but has limited distributed replication capabilities compared to Vectron's Raft-based approach. While suitable for smaller deployments, Qdrant does not provide the same level of fault tolerance and automatic failover as systems built on proven consensus protocols.
+Qdrant \cite{qdrant} offers excellent single-node performance with filtering and payload-based retrieval capabilities but has limited distributed replication capabilities compared to Vectron's Raft-based approach. While suitable for smaller deployments, Qdrant does not provide the same level of fault tolerance and automatic failover as systems built on proven consensus protocols.
 
-pgvector extends PostgreSQL with vector indexing capabilities, benefiting from the database's ACID properties but inheriting its scalability limitations. pgvector is unsuitable for billion-scale datasets requiring horizontal partitioning across multiple nodes, limiting it to single-node deployments where dataset size is constrained by available memory.
+pgvector \cite{pgvector} extends PostgreSQL with vector indexing capabilities, benefiting from the database's ACID properties but inheriting its scalability limitations. pgvector is unsuitable for billion-scale datasets requiring horizontal partitioning across multiple nodes, limiting it to single-node deployments where dataset size is constrained by available memory.
 
 Vectron differentiates through its unified approach combining Raft-based metadata consistency with optimized HNSW indexing using SIMD acceleration and intelligent caching, providing strong consistency without sacrificing the performance typically associated with eventually consistent systems. The system achieves both high throughput and strong guarantees through careful architectural decisions.
 
@@ -135,7 +164,7 @@ Vector ingestion is asynchronous with respect to HNSW index updates. Writes are 
 
 Following the Raft protocol, Vectron prioritizes consistency over availability during network partitions. If the Placement Driver leader is unreachable, metadata operations fail rather than risk divergence between nodes. Vector search continues available on existing shards via stale reads, but topology changes such as shard rebalancing wait for consensus restoration. This CP-mode operation ensures metadata integrity at the cost of brief unavailability during leader elections, which typically complete within one second.
 
-SIMD optimizations target x86_64 AVX2 instructions available on modern server processors. While this limits deployment to compatible hardware, effectively all modern server CPUs support AVX2, and the performance gains justify this decision. Fallback implementations handle non-AVX2 environments gracefully with pure Go code, ensuring portability at the cost of reduced performance on older hardware. The runtime detection of CPU capabilities ensures optimal code paths are selected automatically.
+SIMD optimizations target x86\_64 AVX2 instructions available on modern server processors \cite{simd}. While this limits deployment to compatible hardware, effectively all modern server CPUs support AVX2, and the performance gains justify this decision. Fallback implementations handle non-AVX2 environments gracefully with pure Go code, ensuring portability at the cost of reduced performance on older hardware. The runtime detection of CPU capabilities ensures optimal code paths are selected automatically.
 
 \subsection{Constraints Considered}
 
@@ -143,7 +172,7 @@ The design considers the profound memory hierarchy of modern server hardware ran
 
 Data center networks have hierarchical structure with varying latency between racks within the same availability zone, between zones, and between geographic regions. The failure domain-aware placement algorithm accounts for these topologies, minimizing cross-AZ traffic while ensuring availability zone fault tolerance. This awareness prevents scenarios where all replicas of a shard exist in the same failure domain, which would create vulnerability to domain-wide failures.
 
-Solid-state drives provide excellent random read performance but have limited write endurance measured in program-erase cycles. Vectron's LSM-tree based storage using PebbleDB optimizes for sequential writes and implements log-structured compaction to minimize SSD wear, extending drive lifetime in high-ingestion workloads. The write amplification inherent in LSM-trees is acceptable given the performance benefits.
+Solid-state drives provide excellent random read performance but have limited write endurance measured in program-erase cycles. Vectron's LSM-tree based storage using PebbleDB \cite{pebble} optimizes for sequential writes and implements log-structured compaction to minimize SSD wear, extending drive lifetime in high-ingestion workloads. The write amplification inherent in LSM-trees \cite{lsm} is acceptable given the performance benefits.
 
 Production systems inevitably experience node failures, network congestion, and load spikes. Vectron incorporates circuit breakers to prevent cascading failures, rate limiting to protect backend services, backpressure mechanisms to prevent overload, and graceful degradation to maintain stability under adverse conditions. These operational considerations are essential for production deployments and guide many design decisions.
 
@@ -161,13 +190,13 @@ Separation of write and search paths allows independent optimization and scaling
 
 \subsection{High-Level Architecture}
 
-Vectron adopts a microservices architecture with five core components communicating via gRPC that together provide a complete vector database solution. The API Gateway serves as the public-facing entry point exposing both REST and gRPC APIs for collection management, vector ingestion, and similarity search. It handles request routing across shards, authentication via JWT tokens, multi-tier caching, and result aggregation from multiple workers. The Gateway is the only component that clients interact with directly, providing a unified interface while hiding the distributed nature of the backend.
+Vectron adopts a microservices architecture with five core components communicating via gRPC \cite{grpc} that together provide a complete vector database solution. The API Gateway serves as the public-facing entry point exposing both REST and gRPC APIs for collection management, vector ingestion, and similarity search. It handles request routing across shards, authentication via JWT tokens, multi-tier caching, and result aggregation from multiple workers. The Gateway is the only component that clients interact with directly, providing a unified interface while hiding the distributed nature of the backend.
 
 The Placement Driver functions as the control plane managing cluster metadata including worker registration, shard assignment to workers, replica placement across failure domains, and automatic load balancing. It maintains state via Raft consensus across a cluster of 3 or 5 PD nodes, ensuring strong consistency for all metadata operations. The PD makes all topology decisions including where to place new shards, when to rebalance, and how to handle worker failures.
 
 Worker nodes form the data plane hosting shard replicas. Each worker runs multiple Raft state machines, one per shard, storing vector data in PebbleDB with HNSW indexing for fast approximate nearest neighbor search. Workers execute search queries on their local shards and participate in distributed consensus for durability. Workers can operate in different modes: standard workers participate in Raft consensus for both reads and writes, while search-only workers receive updates via WAL streaming without participating in consensus, allowing them to serve queries with lower overhead.
 
-The Authentication Service handles user authentication through email and password with bcrypt hashing, JWT token issuance with configurable expiration, API key management for programmatic access, and access control enforcement. It stores user credentials in etcd with proper hashing and never stores passwords in plaintext. The service provides both gRPC and HTTP interfaces for flexibility.
+The Authentication Service handles user authentication through email and password with bcrypt hashing, JWT token issuance with configurable expiration, API key management for programmatic access, and access control enforcement. It stores user credentials in etcd \cite{etcd} with proper hashing and never stores passwords in plaintext. The service provides both gRPC and HTTP interfaces for flexibility.
 
 The Reranker is an optional service for post-processing search results using a rule-based strategy to improve relevance beyond vector similarity. It can boost results based on metadata matching and keyword overlap. The Reranker exposes a pluggable strategy interface, with additional ML-based strategies left as future work.
 
@@ -205,9 +234,9 @@ Worker Nodes (Shards) \\
 
 The API Gateway implementation uses Go with the grpc-gateway library for HTTP to JSON transcoding, allowing clients to use either gRPC or REST interfaces according to their requirements. It maintains connection pools to workers with circuit breakers for fault isolation, preventing cascading failures when individual workers become unavailable. The circuit breaker tracks failure rates and opens when thresholds are exceeded, preventing the Gateway from overwhelming struggling workers and allowing them time to recover.
 
-The request router uses consistent hashing to map vector IDs to shards using the FNV-1a hash function, which provides good distribution and avalanche properties ensuring that similar IDs are distributed randomly across shards. Queries without explicit IDs broadcast to all shards in a collection to ensure complete coverage, as the query vector could be closest to vectors in any shard. The Gateway uses cached routing information from the Placement Driver to minimize coordination overhead.
+The request router uses consistent hashing \cite{consistenthashing} to map vector IDs to shards using the FNV-1a hash function, which provides good distribution and avalanche properties ensuring that similar IDs are distributed randomly across shards. Queries without explicit IDs broadcast to all shards in a collection to ensure complete coverage, as the query vector could be closest to vectors in any shard. The Gateway uses cached routing information from the Placement Driver to minimize coordination overhead.
 
-The search cache implements a TinyLFU admission policy across 128 sharded caches to minimize lock contention. TinyLFU tracks access frequency, admitting new entries only if they have been accessed multiple times or if their frequency exceeds the least frequent cached item. This prevents cache pollution from one-time queries that would otherwise evict frequently accessed entries. Cache keys incorporate the collection name, query text (when present), a hash of the raw float32 query vector, top-k, and rerank mode. Cache TTL and size are configurable; by default, TTLs must be explicitly set to avoid immediate expiration.
+The search cache implements a TinyLFU admission policy \cite{tinyLFU} across 128 sharded caches to minimize lock contention. TinyLFU tracks access frequency, admitting new entries only if they have been accessed multiple times or if their frequency exceeds the least frequent cached item. This prevents cache pollution from one-time queries that would otherwise evict frequently accessed entries. Cache keys incorporate the collection name, query text (when present), a hash of the raw float32 query vector, top-k, and rerank mode. Cache TTL and size are configurable; by default, TTLs must be explicitly set to avoid immediate expiration.
 
 The result aggregator merges partial results from multiple shards using a min-heap to efficiently compute global top-k results without sorting all returned candidates. This algorithm maintains a heap of size k and processes results from each shard, achieving O(n log k) complexity where n is the total number of candidates. To reduce RPC overhead under high concurrency, the Gateway can batch worker search requests into short micro-batches.
 
@@ -217,7 +246,7 @@ The PD exposes gRPC APIs for worker registration which assigns unique IDs and re
 
 Worker nodes are the workhorses of the system, each hosting multiple shard replicas. A worker's architecture includes the NodeHost from Dragonboat managing multiple Raft groups, one per shard, handling log replication and leader election. The Shard Manager controls lifecycle operations starting and stopping shard replicas based on assignments from the Placement Driver, initializing PebbleDB instances and HNSW indices as needed. Each shard has a State Machine storing vectors in PebbleDB and maintaining HNSW index structures in memory, applying committed Raft entries to storage. The gRPC Server handles StoreVector, Search, BatchSearch, and administrative RPCs from the API Gateway with proper authentication and authorization checks.
 
-The storage layer uses PebbleDB, a Go-native LSM-tree key-value store optimized for SSDs that provides excellent write performance and efficient range scans. The storage schema uses keys prefixed with \texttt{v\_} followed by the vector ID to store vector data and opaque metadata bytes, a snapshot key (e.g., \texttt{\_hnsw\_index}) for serialized HNSW state, and a write-ahead log prefix (e.g., \texttt{\_hnsw\_wal\_}) for index replay and streaming to search-only replicas.
+The storage layer uses PebbleDB \cite{pebble}, a Go-native LSM-tree key-value store optimized for SSDs that provides excellent write performance and efficient range scans. The storage schema uses keys prefixed with \texttt{v\_} followed by the vector ID to store vector data and opaque metadata bytes, a snapshot key (e.g., \texttt{\_hnsw\_index}) for serialized HNSW state, and a write-ahead log prefix (e.g., \texttt{\_hnsw\_wal\_}) for index replay and streaming to search-only replicas.
 
 \begin{table}[htbp]
 \centering
@@ -291,7 +320,7 @@ The Auth Service operates independently, with the Gateway validating JWT tokens 
 
 \subsection{HNSW Index with SIMD Acceleration}
 
-Vectron's HNSW implementation extends the standard algorithm with several optimizations critical for production performance at scale. The distance computation inner loop, which dominates query execution time accounting for 70 to 80 percent of CPU cycles, is optimized using AVX2 SIMD instructions. For int8 quantized vectors, the dot product used for cosine similarity employs the mm256 madd epi16 instruction to multiply and accumulate 16 pairs of 8-bit integers in parallel, providing 4 to 8 times speedup over scalar implementations depending on vector dimension and CPU model.
+Vectron's HNSW implementation extends the standard algorithm with several optimizations critical for production performance at scale. The distance computation inner loop, which dominates query execution time accounting for 70 to 80 percent of CPU cycles, is optimized using AVX2 SIMD instructions \cite{simd}. For int8 quantized vectors, the dot product used for cosine similarity employs the mm256 madd epi16 instruction to multiply and accumulate 16 pairs of 8-bit integers in parallel, providing 4 to 8 times speedup over scalar implementations depending on vector dimension and CPU model.
 
 The C code implementing these intrinsics is accessed via cgo with automatic fallback to pure Go implementations on non-AVX2 hardware detected at runtime. This dynamic dispatch ensures optimal performance on compatible hardware while maintaining portability to older systems. The implementation batches distance calculations for all neighbors of a node rather than computing them one at a time during graph traversal, amortizing function call overhead and enabling better instruction-level parallelism through pipelined execution.
 
@@ -335,7 +364,7 @@ Larger nodes receive proportionally more shards based on their total capacity sc
 
 \subsection{Search Caching with TinyLFU}
 
-Vectron implements a multi-level caching hierarchy to reduce redundant computation across different timescales and scopes. The search cache uses TinyLFU, a frequency-based admission policy that avoids polluting the cache with one-time queries. New entries are admitted only if they have been accessed multiple times, tracked in a compact doorkeeper sketch using minimal memory, or if their frequency exceeds the least frequent cached item. This prevents one-time queries from evicting frequently accessed entries that would benefit more users.
+Vectron implements a multi-level caching hierarchy to reduce redundant computation across different timescales and scopes. The search cache uses TinyLFU \cite{tinyLFU}, a frequency-based admission policy that avoids polluting the cache with one-time queries. New entries are admitted only if they have been accessed multiple times, tracked in a compact doorkeeper sketch using minimal memory, or if their frequency exceeds the least frequent cached item. This prevents one-time queries from evicting frequently accessed entries that would benefit more users.
 
 The cache is sharded into 128 independent segments to reduce lock contention, each holding a TinyLFU instance with its own admission policy. Cache keys combine collection name, quantized vector hash to identify similar queries, and query parameters including top-k and any filters. Cached entries have configurable time-to-live with 200 milliseconds default for search results to balance hit rate against freshness requirements. Collection deletion invalidates associated cache entries via prefix scanning to prevent stale results.
 
@@ -391,7 +420,7 @@ Quantization reduces memory by 75 percent with minimal accuracy impact. An optio
 
 \subsection{Performance Optimizations}
 
-AVX2-accelerated distance computation provides 4 to 8 times speedup for Euclidean and dot product calculations on compatible hardware. Dynamic dispatch selects optimized routines at runtime based on CPU capabilities detected at startup through CPUID instructions, ensuring optimal code paths without requiring manual configuration or build-time specialization. Fallback implementations provide full functionality on older hardware with reduced performance.
+AVX2-accelerated distance computation \cite{simd} provides 4 to 8 times speedup for Euclidean and dot product calculations on compatible hardware. Dynamic dispatch selects optimized routines at runtime based on CPU capabilities detected at startup through CPUID instructions, ensuring optimal code paths without requiring manual configuration or build-time specialization. Fallback implementations provide full functionality on older hardware with reduced performance.
 
 Lazy pruning of redundant edges during insertion defers expensive pruning operations to background maintenance threads, keeping insertion latency low for client-facing operations while still maintaining graph quality over time. This amortizes the cost of graph maintenance across many insertions rather than blocking each insertion for pruning computation.
 
@@ -562,7 +591,7 @@ Strong consistency for metadata introduces 1 to 2 milliseconds of latency for co
 
 \subsection{Observed Trade-offs}
 
-Int8 quantization provides 75 percent memory reduction but introduces approximately 1 to 2 percent recall degradation for fine-grained similarity tasks. Applications requiring exact ordering such as duplicate detection should use full-precision storage despite the higher memory cost.
+Int8 quantization \cite{quantization} provides 75 percent memory reduction but introduces approximately 1 to 2 percent recall degradation for fine-grained similarity tasks. Applications requiring exact ordering such as duplicate detection should use full-precision storage despite the higher memory cost.
 
 Vectron's CP-mode metadata management prioritizes consistency, resulting in brief unavailability during PD leader elections. The system could be extended with eventually consistent metadata caching for AP-mode operation at the cost of increased complexity and potential for stale reads.
 
@@ -663,6 +692,10 @@ The author would like to thank the open-source community for contributions to th
 \bibitem{consistenthashing} Karger, D., et al., ``Consistent hashing and random trees: Distributed caching protocols for relieving hot spots on the World Wide Web,'' in \emph{Proceedings of the Twenty-Ninth Annual ACM Symposium on Theory of Computing}, pp. 654-663, 1997.
 
 \bibitem{hnswparams} Malkov, Y., et al., ``Approximate nearest neighbor search on HNSW: Parameter tuning and performance analysis,'' \emph{arXiv preprint arXiv:2104.02486}, 2021.
+
+\bibitem{qdrant} Qdrant, ``Qdrant: Vector Database for the Next Generation of AI Applications,'' \emph{https://qdrant.tech}, 2021.
+
+\bibitem{pgvector} pgvector Authors, ``pgvector: Open-source vector similarity search for PostgreSQL,'' \emph{GitHub Repository}, 2021.
 
 \end{thebibliography}
 
