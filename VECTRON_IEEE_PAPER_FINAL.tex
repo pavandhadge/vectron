@@ -28,7 +28,7 @@ pavan.dhadge@iitb.ac.in}
 \maketitle
 
 \begin{abstract}
-The exponential growth of embedding-based applications in artificial intelligence has created an urgent need for scalable, high-performance vector databases capable of efficiently storing and querying billion-scale vector datasets. Existing solutions either sacrifice consistency for performance or fail to provide adequate fault tolerance and horizontal scalability required for production deployments. This paper presents Vectron, a distributed vector database system that addresses these limitations through a novel architecture combining Raft-based consensus for metadata management, Hierarchical Navigable Small World (HNSW) indexing with SIMD-optimized approximate nearest neighbor search, and a comprehensive multi-tier caching hierarchy. Vectron introduces several technical innovations including a shard-based data placement strategy with failure domain-aware replica distribution, AVX2-accelerated vector distance computations with int8 quantization for memory efficiency, a two-stage search pipeline with hot and cold index tiering, and comprehensive operational tooling for production deployment. The system architecture comprises five core microservices communicating via gRPC: an API Gateway handling request routing and caching, a Placement Driver managing cluster metadata through Raft consensus, Worker nodes hosting shard replicas with HNSW indexing, an Authentication Service for user management, and an optional Reranker service for result refinement. Experimental evaluation demonstrates that Vectron achieves sub-10ms P99 latency for top-k vector search on datasets exceeding 10 million vectors while maintaining strong consistency guarantees and automatic failover capabilities. The system sustains over 50,000 queries per second per node with 99.9 percent recall at top-10, outperforming existing open-source alternatives by factors of 2 to 3 in throughput while reducing memory consumption by 40 percent through quantization techniques.
+The exponential growth of embedding-based applications in artificial intelligence has created an urgent need for scalable, high-performance vector databases capable of efficiently storing and querying billion-scale vector datasets. Existing solutions either sacrifice consistency for performance or fail to provide adequate fault tolerance and horizontal scalability required for production deployments. This paper presents Vectron, a distributed vector database system that addresses these limitations through an architecture combining Raft-based consensus for metadata management, Hierarchical Navigable Small World (HNSW) indexing with SIMD-optimized approximate nearest neighbor search, and configurable multi-tier caching. Vectron introduces a shard-based data placement strategy with failure domain-aware replica distribution, AVX2-accelerated distance computations with optional int8 quantization, and a two-stage search pipeline with hot and cold index tiering. The system architecture comprises five core microservices communicating via gRPC: an API Gateway handling request routing and caching, a Placement Driver managing cluster metadata through Raft consensus, Worker nodes hosting shard replicas with HNSW indexing, an Authentication Service for user management, and an optional Reranker service for result refinement. The implementation supports asynchronous indexing, search-only replicas fed by WAL streaming, worker-level search batching, and configurable cache tiers (gateway TinyLFU, optional Redis/Valkey, and worker-local caches), providing a production-oriented foundation whose performance depends on deployment and configuration.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -59,21 +59,21 @@ The operational complexity inherent in production deployments requiring continuo
 
 Vectron addresses these limitations through a principled systems architecture that makes explicit, well-reasoned trade-offs guided by production requirements rather than theoretical ideals. The system employs Raft consensus for all metadata operations including collection creation, shard assignment, and replica placement, ensuring that all nodes agree on system topology even during network partitions. This eliminates configuration drift and split-brain scenarios that plague eventually consistent systems, where different nodes may have divergent views of cluster state leading to inconsistent behavior or data loss.
 
-The system implements HNSW with multiple performance optimizations including AVX2 SIMD instructions for distance computation, int8 quantization reducing memory requirements by 75 percent, and a novel two-stage search algorithm that balances speed and accuracy according to application requirements. These optimizations enable billion-scale datasets on commodity hardware while maintaining sub-10ms query latency suitable for interactive applications. The quantization technique converts float32 representations to int8 with minimal accuracy loss, while SIMD acceleration provides 4 to 8 times speedup for the distance computations that dominate query execution time.
+The system implements HNSW with multiple performance optimizations including AVX2 SIMD instructions for distance computation, int8 quantization reducing memory requirements by 75 percent, and a novel two-stage search algorithm that balances speed and accuracy according to application requirements. These optimizations enable billion-scale datasets on commodity hardware while targeting millisecond-level query latency in tested configurations. The quantization technique converts float32 representations to int8 with minimal accuracy loss, while SIMD acceleration provides 4 to 8 times speedup for the distance computations that dominate query execution time.
 
-Vectron implements a comprehensive four-tier caching strategy that includes worker-local search caches for frequently accessed vectors, gateway request coalescing to batch identical concurrent queries, distributed Redis for cross-instance consistency, and hot and cold index tiering that caches frequently accessed vectors in memory while maintaining the full dataset on disk. This caching hierarchy significantly reduces redundant computation and network round-trips, improving both latency and throughput while reducing load on backend services. The TinyLFU admission policy used in gateway caches prevents pollution from one-time queries while maximizing hit rates for popular content.
+Vectron implements a multi-tier caching and batching strategy that includes worker-local search caches, a gateway in-memory TinyLFU cache sharded for concurrency, and an optional distributed Redis/Valkey cache for cross-instance sharing. The system also maintains a hot HNSW index for recently ingested vectors alongside the primary index, with optional mmap-backed vector storage for the cold tier. A worker-level micro-batcher aggregates search RPCs to reduce per-request overhead. These features reduce redundant computation and network round-trips while keeping cache behavior configurable via TTL and size settings.
 
 The shard replica placement algorithm considers rack, zone, and region topology explicitly, ensuring that a single datacenter failure cannot cause data unavailability. This failure domain awareness provides the fault tolerance required for production deployments across multiple availability zones, where correlated failures affecting entire physical locations must be anticipated and mitigated. The algorithm spreads replicas across failure domains while balancing load according to node capacity, ensuring optimal resource utilization.
 
 \subsection{Contributions}
 
-This paper presents the design and implementation of Vectron, a production-ready distributed vector database achieving sub-10ms P99 search latency at billion-vector scale with strong consistency guarantees. The system demonstrates that strong consistency and high performance are not mutually exclusive when architected appropriately with careful attention to algorithmic efficiency and hardware utilization. The paper provides detailed descriptions of the system architecture, algorithms, and implementation decisions that enable these characteristics.
+This paper presents the design and implementation of Vectron, a distributed vector database that combines Raft-based metadata management with per-shard Raft replication for vector data, configurable read consistency, and microservice decomposition for operational clarity. The paper provides detailed descriptions of the system architecture, algorithms, and implementation decisions that enable these characteristics.
 
-The paper introduces novel optimizations for HNSW indexing including SIMD-accelerated distance computation with dynamic dispatch to select optimal routines based on CPU capabilities detected at runtime, quantized vector storage with optional float32 fallback for exact reranking when maximum accuracy is required, and a hot and cold index tiering strategy that caches frequently accessed vectors in memory while maintaining full dataset persistence on disk. These optimizations collectively provide both memory efficiency and query performance superior to standard HNSW implementations.
+The paper details Vectron's HNSW implementation, including SIMD-accelerated distance computation with runtime feature detection, int8 quantized storage for cosine-normalized vectors, optional float32 reranking via a two-stage search, asynchronous indexing, and a hot index tier for recent writes with optional mmap-backed vector storage in the primary index.
 
-The paper describes a comprehensive multi-tier caching architecture that reduces end-to-end latency through request coalescing, result caching with TinyLFU admission policies that avoid cache pollution from one-time queries, and intelligent routing that preferentially directs queries to specialized search-only nodes that do not participate in write operations. This architecture addresses the thundering herd problem and improves cache hit rates significantly.
+The paper describes a multi-tier caching and routing design, including gateway TinyLFU caching (sharded for concurrency), optional distributed Redis/Valkey caching, worker-local search caches, worker-level search batching, and search-only replicas fed by WAL streaming. These features target lower fan-out and reduced tail latency while keeping behavior configurable.
 
-The paper provides extensive experimental evaluation demonstrating Vectron's performance characteristics across multiple dimensions including latency percentiles under various load conditions, throughput scaling with added workers, recall accuracy compared to exact nearest neighbor search, and fault tolerance behavior during node failures. The evaluation compares Vectron against Milvus and Weaviate on standard benchmarks, demonstrating significant improvements in throughput, latency, and memory efficiency.
+The repository includes benchmark and profiling harnesses for measuring latency, throughput, and cache behavior under configurable workloads; results are deployment-dependent and not treated as fixed claims in this paper.
 
 \section{Background and Related Work}
 
@@ -117,7 +117,7 @@ Vectron differentiates through its unified approach combining Raft-based metadat
 
 \subsection{Design Goals}
 
-Vectron's architecture is guided by five primary design goals that reflect lessons learned from production vector database deployments at scale. Metadata operations including collection creation, shard assignment, and replica configuration use strong consistency via Raft consensus. This prevents split-brain scenarios and ensures all nodes agree on system topology at all times. Vector data itself is eventually consistent within shards, allowing for high-throughput ingestion while maintaining durability through Raft replication. This separation allows the system to provide strong guarantees for topology changes while optimizing for throughput on data operations.
+Vectron's architecture is guided by five primary design goals that reflect lessons learned from production vector database deployments at scale. Metadata operations including collection creation, shard assignment, and replica configuration use strong consistency via Raft consensus. This prevents split-brain scenarios and ensures all nodes agree on system topology at all times. Vector data is replicated via per-shard Raft state machines; reads can be linearizable or non-linearizable, and search-only replicas plus asynchronous indexing can introduce controlled staleness on the search path. This separation allows the system to provide strong guarantees for topology changes while optimizing throughput on data operations.
 
 The system employs multiple optimization strategies including SIMD vectorization for distance computation, quantization for memory efficiency, multi-tier caching at multiple levels of the architecture, and request batching to amortize network and consensus overhead. These optimizations target the critical path of vector search without compromising correctness or consistency guarantees. Each optimization is carefully integrated to ensure it does not interfere with correctness.
 
@@ -153,7 +153,7 @@ The explicit trade-offs in Vectron's design reflect lessons learned from operati
 
 Quantization enables billion-scale datasets on commodity hardware. A naive float32 representation of 1 billion 768-dimensional vectors requires 3 terabytes of memory, which is prohibitively expensive for most organizations. Vectron's int8 quantization reduces this to 768 gigabytes, fitting comfortably on high-memory servers or distributed across multiple nodes, reducing infrastructure costs by over 50 percent while maintaining search quality.
 
-The hot and cold index tiering recognizes access pattern locality in real workloads following power law distributions. Typically, 20 percent of vectors receive 80 percent of queries. By caching hot vectors in a memory-resident index with larger search parameters while maintaining the full dataset on disk, Vectron serves common queries with DRAM speed while supporting full dataset scale without requiring all data to fit in memory. This tiering provides the best of both performance and capacity.
+The hot and cold index tiering targets workloads where recently ingested vectors are queried more frequently than older data. The hot index is a size-limited, in-memory tier fed by recent writes, while the primary index retains the full dataset and can optionally store vectors in an mmap-backed region. This tiering provides fast responses for recent data without requiring all vectors to fit in DRAM.
 
 Separation of write and search paths allows independent optimization and scaling. Write-heavy workloads benefit from batching and sequential I/O optimizations, while search-heavy workloads benefit from read replicas and aggressive caching. This separation avoids the compromise inherent in unified architectures that must serve both workloads with the same resources, allowing each path to be optimized for its specific access patterns.
 
@@ -169,7 +169,7 @@ Worker nodes form the data plane hosting shard replicas. Each worker runs multip
 
 The Authentication Service handles user authentication through email and password with bcrypt hashing, JWT token issuance with configurable expiration, API key management for programmatic access, and access control enforcement. It stores user credentials in etcd with proper hashing and never stores passwords in plaintext. The service provides both gRPC and HTTP interfaces for flexibility.
 
-The Reranker is an optional service for post-processing search results using rule-based or machine learning models to improve relevance beyond vector similarity. It can boost results based on metadata matching, keyword relevance, or learned ranking functions. The Reranker implements pluggable strategies allowing different ranking algorithms to be used for different use cases.
+The Reranker is an optional service for post-processing search results using a rule-based strategy to improve relevance beyond vector similarity. It can boost results based on metadata matching and keyword overlap. The Reranker exposes a pluggable strategy interface, with additional ML-based strategies left as future work.
 
 \begin{figure}[htbp]
 \centering
@@ -207,17 +207,17 @@ The API Gateway implementation uses Go with the grpc-gateway library for HTTP to
 
 The request router uses consistent hashing to map vector IDs to shards using the FNV-1a hash function, which provides good distribution and avalanche properties ensuring that similar IDs are distributed randomly across shards. Queries without explicit IDs broadcast to all shards in a collection to ensure complete coverage, as the query vector could be closest to vectors in any shard. The Gateway uses cached routing information from the Placement Driver to minimize coordination overhead.
 
-The search cache implements TinyLFU admission policy across 128 sharded caches to minimize lock contention. TinyLFU uses a compact sketch to track access frequency, admitting new entries only if they have been accessed multiple times or if their frequency exceeds the least frequent cached item. This prevents cache pollution from one-time queries that would otherwise evict frequently accessed entries. Caches are keyed by collection name combined with quantized vector hash and top-k parameter, allowing similar queries to benefit from cached results. Cached entries have configurable time-to-live with 200 milliseconds default for search results, balancing hit rate against freshness.
+The search cache implements a TinyLFU admission policy across 128 sharded caches to minimize lock contention. TinyLFU tracks access frequency, admitting new entries only if they have been accessed multiple times or if their frequency exceeds the least frequent cached item. This prevents cache pollution from one-time queries that would otherwise evict frequently accessed entries. Cache keys incorporate the collection name, query text (when present), a hash of the raw float32 query vector, top-k, and rerank mode. Cache TTL and size are configurable; by default, TTLs must be explicitly set to avoid immediate expiration.
 
-The result aggregator merges partial results from multiple shards using a min-heap to efficiently compute global top-k results without sorting all returned candidates. This algorithm maintains a heap of size k and processes results from each shard, achieving O(n log k) complexity where n is the total number of candidates. The aggregator implements request coalescing to batch identical concurrent queries, preventing thundering herd problems when many clients request similar content simultaneously.
+The result aggregator merges partial results from multiple shards using a min-heap to efficiently compute global top-k results without sorting all returned candidates. This algorithm maintains a heap of size k and processes results from each shard, achieving O(n log k) complexity where n is the total number of candidates. To reduce RPC overhead under high concurrency, the Gateway can batch worker search requests into short micro-batches.
 
-The Placement Driver uses Dragonboat's Raft implementation with a custom finite state machine tracking the worker registry with health status and capacity metrics including CPU utilization, memory pressure, and shard count, collection metadata and shard topology mapping collections to their constituent shards with replica locations, replica placement with failure domain annotations ensuring diversity across racks and zones, and epoch-based configuration versioning for optimistic concurrency control preventing stale updates.
+The Placement Driver uses Dragonboat's Raft implementation with a custom finite state machine tracking the worker registry with health status and capacity metrics (CPU cores, memory bytes, disk bytes) and coarse load metrics reported by workers, collection metadata and shard topology mapping collections to their constituent shards with replica locations, replica placement with failure domain annotations ensuring diversity across racks and zones, and epoch-based configuration versioning for optimistic concurrency control preventing stale updates.
 
 The PD exposes gRPC APIs for worker registration which assigns unique IDs and returns initial shard assignments, heartbeat collection every 5 seconds to detect failures and update load metrics, and shard assignment queries that return routing information to clients including shard leaders and replicas. It runs background reconcilers that detect imbalances such as hot shards receiving disproportionate query traffic or uneven distribution of shards across workers and initiates rebalancing operations to restore balance.
 
 Worker nodes are the workhorses of the system, each hosting multiple shard replicas. A worker's architecture includes the NodeHost from Dragonboat managing multiple Raft groups, one per shard, handling log replication and leader election. The Shard Manager controls lifecycle operations starting and stopping shard replicas based on assignments from the Placement Driver, initializing PebbleDB instances and HNSW indices as needed. Each shard has a State Machine storing vectors in PebbleDB and maintaining HNSW index structures in memory, applying committed Raft entries to storage. The gRPC Server handles StoreVector, Search, BatchSearch, and administrative RPCs from the API Gateway with proper authentication and authorization checks.
 
-The storage layer uses PebbleDB, a Go-native LSM-tree key-value store optimized for SSDs that provides excellent write performance and efficient range scans. The storage schema uses keys prefixed with v followed by the vector ID to store vector data and metadata in JSON format, keys prefixed with hnsw followed by layer and node ID to serialize HNSW graph nodes with their neighbor lists for persistence, and meta prefixed keys for shard metadata including dimension, distance metric, indexing parameters, and applied index for recovery.
+The storage layer uses PebbleDB, a Go-native LSM-tree key-value store optimized for SSDs that provides excellent write performance and efficient range scans. The storage schema uses keys prefixed with \texttt{v\_} followed by the vector ID to store vector data and opaque metadata bytes, a snapshot key (e.g., \texttt{\_hnsw\_index}) for serialized HNSW state, and a write-ahead log prefix (e.g., \texttt{\_hnsw\_wal\_}) for index replay and streaming to search-only replicas.
 
 \begin{table}[htbp]
 \centering
@@ -417,7 +417,7 @@ Similarity search begins when clients send Search RPCs with query vectors and to
 
 \subsection{Failure Handling and Recovery}
 
-When a worker fails, the PD detects missed heartbeats after a configurable timeout period, typically 15 seconds. The PD marks the worker as unhealthy in its registry and initiates failover procedures. For each shard hosted on the failed worker, remaining replicas elect a new leader through the Raft protocol's leader election mechanism, ensuring continuous availability. The PD triggers re-replication to restore the configured replication factor by assigning new replicas to healthy workers. The new replica streams a snapshot from the existing leader, then applies the write-ahead log to catch up to current state. Once synchronized, the system returns to full replication with the specified number of copies.
+When a worker fails, the PD detects missed heartbeats after a configurable timeout period (default 30 seconds). The PD marks the worker as unhealthy in its registry and initiates failover procedures. For each shard hosted on the failed worker, remaining replicas elect a new leader through the Raft protocol's leader election mechanism, ensuring continuous availability. The PD triggers re-replication to restore the configured replication factor by assigning new replicas to healthy workers. The new replica streams a snapshot from the existing leader, then applies the write-ahead log to catch up to current state. Once synchronized, the system returns to full replication with the specified number of copies.
 
 When a Placement Driver leader fails, PD followers detect the absence of heartbeats and initiate Raft leader election. A new leader is elected among the remaining PD nodes and continues serving metadata operations. During the election period, which typically completes within one second, metadata updates such as collection creation are unavailable. However, vector search continues unaffected as the Gateway uses cached topology information to route queries to workers.
 
@@ -431,166 +431,107 @@ Disk failures are detected when workers encounter I/O exceptions or corruption e
 
 \subsection{Test Environment}
 
-The experimental evaluation uses a cluster of 5 nodes each equipped with Intel Xeon Gold 6248R processors providing 24 cores at 3.0 GHz, 256 GB of RAM, and NVMe solid-state drives providing high I/O throughput. The network infrastructure provides 25 Gbps Ethernet with less than 100 microseconds latency between nodes. The operating system is Ubuntu 22.04 LTS running Linux kernel version 5.15.
+The experimental evaluation was executed on February 9, 2026 on a single host with an Intel Core i3 7th generation U-series CPU, 8 GB RAM, and Fedora 43. All microservices were co-located on the same machine: three Placement Driver nodes, two workers, API Gateway, Authentication service, and Reranker. etcd and Valkey (Redis-compatible) were started via Podman containers.
 
-The software stack includes Go version 1.21.5, Dragonboat version 3.3.9 for Raft consensus, Pebble from the latest master branch for storage, etcd version 3.5.9 for authentication service storage, and the Vectron codebase at a representative commit.
-
-The evaluation uses three representative datasets. GIST-1M contains 1 million 960-dimensional image descriptors used for computer vision applications. SIFT-10M contains 10 million 128-dimensional local feature descriptors representing classic computer vision features. Random-100M contains 100 million 768-dimensional vectors matching the dimensionality of OpenAI's ada-002 embedding model. Ground truth for recall measurement is computed via brute force exact nearest neighbor search for each dataset.
+The software stack includes Go 1.24.0, Dragonboat 3.3.8 for Raft consensus, Pebble \texttt{v0.0.0-20210331181633-27fc006b8bfb} for storage, and etcd 3.6.7 for authentication service storage.
 
 \subsection{Workloads and Scenarios}
 
-Workload A represents high-throughput search scenarios with 95 percent search operations and 5 percent insert operations. Queries are uniformly random selections from the test set. This workload measures queries per second and latency percentiles under read-heavy conditions typical of serving applications.
+Scenario 1 (Vector Search Scalability) measures insert and search throughput plus latency while increasing dataset sizes (1,000 to 10,000 vectors) for three vector dimensions (128D, 384D, 768D). Each search phase executes 1,000 queries.
 
-Workload B represents mixed read-write scenarios with 70 percent search and 30 percent insert operations. This simulates real-time ingestion with concurrent querying, measuring the impact of write load on search latency. Such workloads are common in applications continuously ingesting new content while serving queries.
+Scenario 2 (Dimension Impact Analysis) measures insert throughput and search latency across dimensions 64D to 1024D for top-k values of 1, 5, 10, 50, and 100.
 
-Workload C represents point query scenarios with 50 percent get-by-id operations and 50 percent search operations. This tests storage layer efficiency for both exact retrieval and similarity search, representing applications that frequently fetch specific vectors by identifier.
+Scenario 3 (Concurrent Workload Analysis) measures throughput and latency under increasing concurrent clients (1 to 100).
 
-Failure scenarios include node kill tests where worker processes are terminated with SIGKILL to measure recovery time, network partition tests using iptables to drop traffic between availability zones, and disk failure tests where SSDs are physically removed to verify data survives via replication.
+Scenario 5 (Distributed System Scalability) reports shard distribution and load balance across two workers.
 
 \subsection{Metrics and Measurement}
 
-Performance metrics include query throughput measured as requests per second sustained over the test period, latency measured as P50, P95, and P99 response times, recall at K measuring the fraction of true k-nearest neighbors found in the top-k results, and build time measuring index construction duration for the dataset.
-
-System metrics include CPU utilization as per-core usage percentage during load testing, memory consumption including resident set size, heap allocations, and cache hit rates, disk I/O measuring read and write throughput and IOPS, and network traffic measuring bytes transmitted and connection counts.
-
-Operational metrics include failover time measuring duration from failure detection to service restoration, recovery time measuring duration from replica loss to full replication restoration, and rebalancing duration measuring time to complete shard migration between nodes.
-
-The measurement methodology includes a 5-minute warmup period before recording measurements to ensure caches are populated and system is in steady state. Measurements are taken over a 10-minute steady-state period for statistical significance. Latency histograms are sampled from all queries to capture distribution accurately. Recall measurements cross-check against ground truth computed via brute force search.
+Metrics include insert throughput (vectors/sec), search throughput (queries/sec), and latency percentiles (P50, P95, P99). Memory deltas are reported as captured by the benchmark harness.
 
 \section{Results and Evaluation}
 
-\subsection{Performance Analysis}
-
-On the SIFT-1M dataset with 16 shards and 3 workers, Vectron achieves a P50 search latency of 3.2 milliseconds compared to 5.8 milliseconds for Milvus and 7.1 milliseconds for Weaviate. The P95 latency is 6.1 milliseconds compared to 12.4 and 15.3 milliseconds respectively. The P99 latency is 8.9 milliseconds compared to 24.7 and 31.2 milliseconds. Vectron achieves 52,000 queries per second per node compared to 18,000 for Milvus and 12,000 for Weaviate, representing factors of 2.9 and 4.3 improvement in throughput. Recall at 10 is 0.994 compared to 0.991 and 0.987, showing superior accuracy alongside better performance.
-
-The SIMD optimizations and efficient caching contribute to sub-10ms P99 latency even under heavy load, while the optimized HNSW implementation with AVX2 acceleration provides both speed and accuracy advantages. The significant improvement in tail latency is particularly important for production applications requiring consistent response times.
+\subsection{Scenario 1: Vector Search Scalability}
 
 \begin{table*}[htbp]
 \centering
-\caption{Performance Comparison on SIFT-1M Dataset (16 shards, 3 workers)}
-\label{tab:performance}
-\begin{tabular}{@{}lcccccc@{}}
+\caption{Scenario 1 Results (1000 queries per run)}
+\label{tab:scenario1}
+\begin{tabular}{@{}cccccccc@{}}
 \toprule
-\textbf{System} & \textbf{P50 (ms)} & \textbf{P95 (ms)} & \textbf{P99 (ms)} & \textbf{QPS/Node} & \textbf{Recall@10} & \textbf{Memory (GB)} \\
+\textbf{Dim} & \textbf{Vectors} & \textbf{Insert (vec/s)} & \textbf{Search (q/s)} & \textbf{Avg (ms)} & \textbf{P50 (ms)} & \textbf{P95 (ms)} & \textbf{P99 (ms)} \\
 \midrule
-Vectron & 3.2 & 6.1 & 8.9 & 52,000 & 0.994 & 4.2 \\
-Milvus 2.3 & 5.8 & 12.4 & 24.7 & 18,000 & 0.991 & 12.5 \\
-Weaviate 1.21 & 7.1 & 15.3 & 31.2 & 12,000 & 0.987 & 15.8 \\
-Qdrant 1.6 & 4.5 & 9.8 & 18.5 & 22,000 & 0.992 & 8.1 \\
-Elasticsearch 8.x & 12.5 & 28.3 & 45.2 & 5,500 & 0.985 & 22.0 \\
+128 & 1000  & 131 & 131 & 7.620 & 6.553 & 12.488 & 14.251 \\
+128 & 2500  & 441 & 134 & 7.444 & 6.278 & 13.661 & 16.308 \\
+128 & 5000  & 855 & 133 & 7.491 & 6.522 & 14.275 & 20.331 \\
+128 & 10000 & 863 & 92  & 10.797 & 7.755 & 25.340 & 47.025 \\
+384 & 1000  & 176 & 142 & 6.986 & 6.296 & 11.851 & 15.638 \\
+384 & 2500  & 385 & 156 & 6.388 & 6.089 & 8.625 & 14.097 \\
+384 & 5000  & 601 & 117 & 8.483 & 6.430 & 15.321 & 55.580 \\
+384 & 10000 & 974 & 82  & 12.204 & 7.490 & 37.884 & 71.486 \\
+768 & 1000  & 122 & 159 & 6.219 & 5.514 & 11.313 & 15.478 \\
+768 & 2500  & 357 & 144 & 6.891 & 6.272 & 11.364 & 15.134 \\
+768 & 5000  & 675 & 133 & 7.490 & 6.800 & 12.125 & 20.419 \\
+768 & 10000 & 567 & 47  & 21.031 & 10.514 & 66.478 & 100.477 \\
 \bottomrule
 \end{tabular}
 \end{table*}
 
-Scalability analysis on the Random-100M dataset shows query throughput scales linearly with added workers. With 3 workers and 16 shards, the system achieves 48,000 queries per second with 4.1ms average latency and 0.992 recall. Scaling to 6 workers and 32 shards achieves 96,000 queries per second with 4.3ms latency and 0.993 recall. With 12 workers and 64 shards, throughput reaches 189,000 queries per second with 4.8ms latency and 0.991 recall. At 24 workers and 128 shards, the system achieves 372,000 queries per second with 5.2ms latency and 0.990 recall.
+\subsection{Scenario 2: Dimension Impact Analysis}
 
-The linear scaling with correlation coefficient R squared of 0.998 demonstrates that Vectron's architecture effectively distributes load without coordination bottlenecks. The 27 percent latency increase from 3 to 24 workers is minimal considering the 8-fold increase in throughput, indicating efficient load distribution and minimal coordination overhead.
-
-\begin{table}[htbp]
+\begin{table*}[htbp]
 \centering
-\caption{Scalability Analysis on Random-100M Dataset}
-\label{tab:scalability}
-\begin{tabular}{@{}ccccc@{}}
+\caption{Scenario 2 Results (Insert Throughput and Search Latency)}
+\label{tab:scenario2}
+\begin{tabular}{@{}cccccc@{}}
 \toprule
-\textbf{Workers} & \textbf{Shards} & \textbf{Total QPS} & \textbf{Avg Latency} & \textbf{Recall} \\
+\textbf{Dim} & \textbf{Insert (vec/s)} & \textbf{Top-1 P50/P95 (ms)} & \textbf{Top-5 P50/P95 (ms)} & \textbf{Top-10 P50/P95 (ms)} & \textbf{Top-100 P50/P95 (ms)} \\
 \midrule
-3  & 16  & 48,000  & 4.1ms & 0.992 \\
-6  & 32  & 96,000  & 4.3ms & 0.993 \\
-12 & 64  & 189,000 & 4.8ms & 0.991 \\
-24 & 128 & 372,000 & 5.2ms & 0.990 \\
-48 & 256 & 745,000 & 5.8ms & 0.989 \\
+64   & 2434 & 23.147/58.831 & 7.534/20.757 & 5.587/6.837 & 10.560/16.100 \\
+128  & 2451 & 27.482/56.153 & 12.213/21.871 & 6.392/10.740 & 11.296/15.467 \\
+256  & 2077 & 28.035/57.294 & 11.306/17.411 & 6.403/9.697 & 11.634/13.551 \\
+384  & 1791 & 28.145/49.211 & 14.198/23.193 & 8.406/13.242 & 11.923/13.504 \\
+512  & 1715 & 18.107/44.568 & 16.703/24.405 & 9.913/15.958 & 11.952/14.158 \\
+768  & 1460 & 30.156/55.071 & 22.178/77.966 & 7.404/10.516 & 14.900/22.813 \\
+1024 & 1174 & 46.105/82.470 & 21.664/51.126 & 11.974/21.111 & 15.617/31.237 \\
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
-\subsection{Memory Efficiency}
+\subsection{Scenario 3: Concurrent Workload Analysis}
 
-For 768-dimensional vectors, raw float32 storage requires 3,072 bytes per vector, totaling 3.0 terabytes for 1 billion vectors. Vectron's int8 quantization reduces this to 768 bytes per vector plus 192 bytes for HNSW overhead, totaling 0.96 terabytes. When keeping both int8 and float32 representations for exact reranking, storage is 1,152 bytes plus overhead totaling 1.34 terabytes. Milvus requires approximately 4,500 bytes per vector totaling 4.5 terabytes.
-
-Vectron's int8 quantization reduces memory requirements by 68 percent compared to raw float32 storage, enabling billion-scale datasets on single high-memory servers or cost-effective distribution across multiple nodes. The HNSW graph overhead of approximately 25 percent of vector storage is competitive with optimized implementations and significantly lower than systems without quantization.
-
-\begin{table}[htbp]
+\begin{table*}[htbp]
 \centering
-\caption{Memory Usage Comparison (768-dimensional vectors, 1B vectors)}
-\label{tab:memory}
-\begin{tabular}{@{}lcc@{}}
+\caption{Scenario 3 Results (Concurrent Clients)}
+\label{tab:scenario3}
+\begin{tabular}{@{}cccccc@{}}
 \toprule
-\textbf{Configuration} & \textbf{Bytes/Vector} & \textbf{Total Storage} \\
+\textbf{Clients} & \textbf{Total Queries} & \textbf{Throughput (q/s)} & \textbf{Avg (ms)} & \textbf{P50 (ms)} & \textbf{P95/P99 (ms)} \\
 \midrule
-Raw float32 & 3,072 & 3.00 TB \\
-Vectron (int8 only) & 960 & 0.96 TB \\
-Vectron (int8 + float32) & 1,344 & 1.34 TB \\
-Milvus & 4,500 & 4.50 TB \\
-Weaviate & 5,200 & 5.20 TB \\
-Qdrant & 2,800 & 2.80 TB \\
+1   & 563  & 19  & 53.136 & 50.450 & 78.179 / 110.009 \\
+5   & 1739 & 58  & 86.251 & 81.824 & 127.445 / 166.960 \\
+10  & 3111 & 104 & 96.219 & 90.559 & 157.876 / 219.065 \\
+20  & 6535 & 218 & 91.782 & 90.569 & 135.772 / 158.365 \\
+50  & 7735 & 258 & 193.110 & 196.575 & 259.314 / 297.848 \\
+100 & 7838 & 261 & 378.802 & 385.063 & 501.431 / 572.283 \\
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
-\subsection{Consistency and Availability}
-
-Raft failover measurements show leader failure detection averaging 1.2 seconds using configurable heartbeat timeouts. New leader election averages 0.8 seconds. Total unavailability for metadata operations is under 2 seconds. Search availability remains at 100 percent during PD failover as the Gateway uses cached topology information to route queries.
-
-Data durability guarantees include write acknowledgment only after Raft majority commit, ensuring zero data loss in single-node failure scenarios. Automatic re-replication restores 3-times replication within 5 minutes for 100 million vector datasets, maintaining durability guarantees during recovery.
+\subsection{Scenario 5: Distributed System Scalability}
 
 \begin{table}[htbp]
 \centering
-\caption{Failover and Recovery Metrics}
-\label{tab:failover}
-\begin{tabular}{@{}lc@{}}
-\toprule
-\textbf{Metric} & \textbf{Value} \\
-\midrule
-Failure Detection Time & 1.2s \\
-Leader Election Time & 0.8s \\
-Total Metadata Unavailability & $<$2s \\
-Search Availability During Failover & 100\% \\
-Re-replication Time (100M vectors) & 5 min \\
-Data Loss (single node failure) & 0\% \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\subsection{Caching Effectiveness}
-
-Cache hit rates show worker local caches achieving 35 percent hit rate with 200ms TTL. The Gateway TinyLFU cache achieves 42 percent hit rate with adaptive TTL based on access patterns. Distributed Redis caches achieve 18 percent hit rate enabling cross-gateway sharing. The combined effective hit rate across all tiers is 68 percent.
-
-Latency reduction from caching is significant. Cache hits return in 0.5 milliseconds for direct memory reads, while cache misses require 4.2 milliseconds for full search. The effective average latency is 1.7 milliseconds calculated as 68 percent times 0.5ms plus 32 percent times 4.2ms. The multi-tier caching reduces effective query latency by 60 percent for repetitive workloads common in production such as popular content recommendations.
-
-\begin{table}[htbp]
-\centering
-\caption{Cache Performance by Tier}
-\label{tab:cache}
-\begin{tabular}{@{}lccc@{}}
-\toprule
-\textbf{Cache Tier} & \textbf{Hit Rate} & \textbf{Latency} & \textbf{TTL} \\
-\midrule
-Worker Local & 35\% & 0.3ms & 200ms \\
-Gateway TinyLFU & 42\% & 0.5ms & Adaptive \\
-Distributed Redis & 18\% & 1.2ms & 5min \\
-\textbf{Combined} & \textbf{68\%} & \textbf{1.7ms} & -- \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\subsection{Recall vs. Performance Trade-off}
-
-Tuning efSearch on the GIST-1M dataset shows the accuracy-efficiency trade-off clearly. With efSearch of 64, recall at 10 is 0.941 with P99 latency of 3.2ms and 78,000 queries per second. Increasing to 128 achieves 0.978 recall with 4.8ms latency and 52,000 queries per second. At 256, recall reaches 0.994 with 8.1ms latency and 31,000 queries per second. At 512, recall is 0.999 with 15.6ms latency and 16,000 queries per second.
-
-Users can tune efSearch based on application requirements. Real-time applications might choose 128 for 0.978 recall at 4.8ms latency, while batch processing requiring high precision might use 512 for 0.999 recall at 15.6ms latency. This configurability allows Vectron to serve diverse use cases with different latency and accuracy requirements.
-
-\begin{table}[htbp]
-\centering
-\caption{EfSearch Tuning on GIST-1M Dataset}
-\label{tab:efsearch}
+\caption{Scenario 5 Results (Shard Distribution)}
+\label{tab:scenario5}
 \begin{tabular}{@{}cccc@{}}
 \toprule
-\textbf{efSearch} & \textbf{Recall@10} & \textbf{P99 Latency} & \textbf{QPS} \\
+\textbf{Vectors} & \textbf{Shards} & \textbf{Workers} & \textbf{Load Variance (CV)} \\
 \midrule
-64  & 0.941 & 3.2ms & 78,000 \\
-128 & 0.978 & 4.8ms & 52,000 \\
-256 & 0.994 & 8.1ms & 31,000 \\
-512 & 0.999 & 15.6ms & 16,000 \\
+1000  & 8 & 2 (8 shards each) & 0.00 \\
+5000  & 8 & 2 (8 shards each) & 0.00 \\
+10000 & 8 & 2 (8 shards each) & 0.00 \\
+50000 & 8 & 2 (8 shards each) & 0.00 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -599,7 +540,7 @@ Users can tune efSearch based on application requirements. Real-time application
 
 \subsection{Strengths}
 
-Vectron maintains consistent sub-10ms P99 latency across a wide range of workloads due to its multi-tier caching, efficient HNSW implementation, and careful resource management. Unlike systems with garbage collection pauses or unpredictable I/O patterns, Vectron provides predictable performance suitable for service level agreements requiring bounded latency.
+In the February 9, 2026 single-host benchmark, top-10 search latencies on 1,000 to 5,000 vectors were in the 5.5 to 10.5 ms P50 range, with tail latency increasing for larger datasets and higher concurrency. These results reflect the combined effects of SIMD-optimized HNSW, caching, and the single-node deployment constraints.
 
 Raft-based metadata management eliminates configuration drift and split-brain scenarios that plague eventually consistent systems. This strong consistency is critical for financial, healthcare, and compliance-sensitive applications where data integrity cannot be compromised.
 
@@ -673,7 +614,7 @@ This paper presented Vectron, a distributed vector database that combines Raft-b
 
 Key contributions include a failure domain-aware shard placement algorithm that balances load while ensuring fault tolerance across hardware failures, AVX2-accelerated vector distance computation with int8 quantization reducing memory by 75 percent while maintaining accuracy, a two-stage search pipeline with hot and cold index tiering optimizing for both popular and long-tail queries, and comprehensive operational tooling enabling production deployment without extensive manual tuning.
 
-Experimental evaluation demonstrates that Vectron achieves sub-10ms P99 latency for top-k search at 100 million vector scale with 99.4 percent recall, scales linearly to 372,000 queries per second across 24 workers, and maintains strong consistency guarantees with under 2 second failover times. The system reduces memory requirements by 68 percent through quantization while maintaining competitive search accuracy.
+Experimental evaluation on a single i3 7th gen U-series host with 8 GB RAM and Fedora 43 shows millisecond-level P50 search latency at small dataset sizes, tail latency growth at 10,000 vectors, and throughput rising with concurrency until saturation. These results reflect the current implementation and deployment footprint rather than an upper bound on scalability.
 
 Vectron represents a significant advancement in the state of the art for distributed vector databases, proving that strong consistency and high performance are not mutually exclusive when systems are architected with deep understanding of underlying hardware and algorithmic properties. The open-source implementation and comprehensive documentation enable adoption by organizations requiring production-ready vector search with operational simplicity.
 

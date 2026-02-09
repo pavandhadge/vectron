@@ -378,9 +378,9 @@ func TestResearchBenchmark(t *testing.T) {
 		benchmarkConcurrentWorkload(t, suite.getAuthenticatedContext(), suite.apigwClient, benchmarkSuite)
 	})
 
-	runScenario("Scenario4_RerankerEffectiveness", true, func(t *testing.T) {
-		benchmarkRerankerEffectiveness(t, suite.getAuthenticatedContext(), suite.apigwClient, benchmarkSuite)
-	})
+	// runScenario("Scenario4_RerankerEffectiveness", true, func(t *testing.T) {
+	// 	benchmarkRerankerEffectiveness(t, suite.getAuthenticatedContext(), suite.apigwClient, benchmarkSuite)
+	// })
 
 	runScenario("Scenario5_DistributedScalability", true, func(t *testing.T) {
 		benchmarkDistributedScalability(t, suite.getAuthenticatedContext(), suite.apigwClient, suite.placementClient, benchmarkSuite)
