@@ -10,8 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
-	"syscall"
 	"testing" // Added for *testing.T in ServiceProcess.Stop
 	"time"
 
@@ -75,7 +75,48 @@ func BinPath(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, "bin", name), nil
+	return filepath.Join(root, "bin", name+exeSuffix()), nil
+}
+
+func exeSuffix() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
+}
+
+func buildE2EBinaries() error {
+	root, err := findRepoRoot()
+	if err != nil {
+		return err
+	}
+	binDir := filepath.Join(root, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create bin dir: %w", err)
+	}
+
+	bins := []struct {
+		name string
+		pkg  string
+	}{
+		{name: "placementdriver", pkg: "./placementdriver/cmd/placementdriver"},
+		{name: "worker", pkg: "./worker/cmd/worker"},
+		{name: "apigateway", pkg: "./apigateway/cmd/apigateway"},
+		{name: "authsvc", pkg: "./auth/service/cmd/auth"},
+		{name: "reranker", pkg: "./reranker/cmd/reranker"},
+	}
+
+	for _, bin := range bins {
+		outPath := filepath.Join(binDir, bin.name+exeSuffix())
+		cmd := exec.Command("go", "build", "-trimpath", "-o", outPath, bin.pkg)
+		cmd.Dir = root
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to build %s: %w", bin.name, err)
+		}
+	}
+	return nil
 }
 
 func appendDistributedCacheEnv(env []string) []string {
@@ -264,7 +305,7 @@ func StartService(ctx context.Context, name string, env []string, args ...string
 		}
 	}
 	cmd.Env = append(cleanEnv, env...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setProcessGroup(cmd)
 
 	process := &ServiceProcess{
 		Cmd:    cmd,
@@ -287,7 +328,7 @@ func StartService(ctx context.Context, name string, env []string, args ...string
 // Stop stops the service process.
 func (sp *ServiceProcess) Stop(t *testing.T) {
 	if sp.Cmd != nil && sp.Cmd.Process != nil {
-		syscall.Kill(-sp.Cmd.Process.Pid, syscall.SIGKILL)
+		killProcess(sp.Cmd)
 	}
 	sp.Cancel()
 	if t.Failed() {

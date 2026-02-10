@@ -28,6 +28,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -181,6 +182,15 @@ func (s *UltimateE2ETest) ensureAuthenticated(t *testing.T) {
 func TestUltimateE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping ultimate E2E test in short mode")
+	}
+	if os.Getenv("VECTRON_ULTIMATE_E2E") == "" {
+		t.Skip("Skipping ultimate E2E test; set VECTRON_ULTIMATE_E2E=1 to enable")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping ultimate E2E test on Windows")
+	}
+	if _, err := exec.LookPath("podman"); err != nil {
+		t.Skip("Skipping ultimate E2E test; podman not found")
 	}
 
 	// Create base temporary directories

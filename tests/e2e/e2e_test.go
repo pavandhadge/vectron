@@ -9,7 +9,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"syscall"
 	"testing"
 	"time"
 
@@ -76,21 +75,8 @@ func getFreePort() (int, error) {
 }
 
 func TestMain(m *testing.M) {
-	// Build the binaries before running the tests
-	// Get the project root directory (where go.mod is located)
-	repoRoot, err := findRepoRoot()
-	if err != nil {
-		fmt.Printf("Failed to locate repo root: %v\n", err)
-		os.Exit(1)
-	}
-	cmd := exec.Command("make", "build")
-	cmd.Dir = repoRoot
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err = cmd.Run()
-	if err != nil {
+	if err := buildE2EBinaries(); err != nil {
 		fmt.Printf("Failed to build binaries: %v\n", err)
-		fmt.Printf("Working directory: %s\n", repoRoot)
 		os.Exit(1)
 	}
 	stopValkey := startValkeyForTests()
@@ -131,13 +117,13 @@ func TestE2E_FullLifecycle(t *testing.T) {
 		fmt.Sprintf("ETCD_ENDPOINTS=%s", etcd.ClientURL),
 		fmt.Sprintf("JWT_SECRET=%s", jwtTestSecret),
 	)
-	authCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setProcessGroup(authCmd)
 	var authOut bytes.Buffer
 	authCmd.Stdout = &authOut
 	authCmd.Stderr = &authOut
 	require.NoError(t, authCmd.Start())
 	t.Cleanup(func() {
-		syscall.Kill(-authCmd.Process.Pid, syscall.SIGKILL)
+		killProcess(authCmd)
 		if t.Failed() {
 			t.Logf("Auth Service Output:\n%s", authOut.String())
 		}
@@ -155,13 +141,13 @@ func TestE2E_FullLifecycle(t *testing.T) {
 		"--strategy=rule",
 		"--cache=memory",
 	)
-	rerankerCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setProcessGroup(rerankerCmd)
 	var rerankerOut bytes.Buffer
 	rerankerCmd.Stdout = &rerankerOut
 	rerankerCmd.Stderr = &rerankerOut
 	require.NoError(t, rerankerCmd.Start())
 	t.Cleanup(func() {
-		syscall.Kill(-rerankerCmd.Process.Pid, syscall.SIGKILL)
+		killProcess(rerankerCmd)
 		if t.Failed() {
 			t.Logf("Reranker Output:\n%s", rerankerOut.String())
 		}
@@ -229,13 +215,13 @@ func TestE2E_FullLifecycle(t *testing.T) {
 			"--data-dir="+pdDataDir,
 			"--initial-members="+pdInitialMembers,
 		)
-		pdCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		setProcessGroup(pdCmd)
 		var pdOut bytes.Buffer
 		pdCmd.Stdout = &pdOut
 		pdCmd.Stderr = &pdOut
 		require.NoError(t, pdCmd.Start())
 		t.Cleanup(func() {
-			syscall.Kill(-pdCmd.Process.Pid, syscall.SIGKILL)
+			killProcess(pdCmd)
 			if t.Failed() {
 				t.Logf("Placement Driver %d Output:\n%s", nodeID, pdOut.String())
 			}
@@ -256,13 +242,13 @@ func TestE2E_FullLifecycle(t *testing.T) {
 		"--pd-addrs="+allPdGrpcAddrs,
 		"--data-dir="+workerDataDir,
 	)
-	workerCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setProcessGroup(workerCmd)
 	var workerOut bytes.Buffer
 	workerCmd.Stdout = &workerOut
 	workerCmd.Stderr = &workerOut
 	require.NoError(t, workerCmd.Start())
 	t.Cleanup(func() {
-		syscall.Kill(-workerCmd.Process.Pid, syscall.SIGKILL)
+		killProcess(workerCmd)
 		if t.Failed() {
 			t.Logf("Worker Output:\n%s", workerOut.String())
 		}
@@ -285,13 +271,13 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	}
 	gatewayEnv = appendDistributedCacheEnv(gatewayEnv)
 	gatewayCmd.Env = append(os.Environ(), gatewayEnv...)
-	gatewayCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setProcessGroup(gatewayCmd)
 	var gatewayOut bytes.Buffer
 	gatewayCmd.Stdout = &gatewayOut
 	gatewayCmd.Stderr = &gatewayOut
 	require.NoError(t, gatewayCmd.Start())
 	t.Cleanup(func() {
-		syscall.Kill(-gatewayCmd.Process.Pid, syscall.SIGKILL)
+		killProcess(gatewayCmd)
 		if t.Failed() {
 			t.Logf("API Gateway Output:\n%s", gatewayOut.String())
 		}
