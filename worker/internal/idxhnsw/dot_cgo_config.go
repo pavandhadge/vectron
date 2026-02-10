@@ -22,11 +22,11 @@ var dotCgoBatchEnabled = os.Getenv("VECTRON_DOT_CGO_BATCH") == "1"
 var dotCgoBatchMin = func() int {
 	v := os.Getenv("VECTRON_DOT_CGO_BATCH_MIN")
 	if v == "" {
-		return 32
+		return 64
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil || n < 2 {
-		return 32
+		return 64
 	}
 	return n
 }()

@@ -343,6 +343,15 @@ func envInt(name string, def int) int {
 	return def
 }
 
+func envBool(name string, def bool) bool {
+	if v := os.Getenv(name); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
+	}
+	return def
+}
+
 // NewGrpcServer creates a new instance of the gRPC server.
 func NewGrpcServer(nh *dragonboat.NodeHost, sm shardView, searcher shardSearcher, searchOnly bool) *GrpcServer {
 	cacheTTL := time.Duration(envInt("VECTRON_WORKER_SEARCH_CACHE_TTL_MS", int(defaultSearchCacheTTL.Milliseconds()))) * time.Millisecond
@@ -385,6 +394,17 @@ func (s *GrpcServer) validateShardLease(shardID uint64, shardEpoch uint64, lease
 func (s *GrpcServer) SearchShard(ctx context.Context, shardID uint64, query shard.SearchQuery, linearizable bool) (*shard.SearchResult, error) {
 	if s.nodeHost == nil {
 		return nil, status.Error(codes.FailedPrecondition, "search-only worker has no raft")
+	}
+	if !linearizable && envBool("VECTRON_WORKER_FAST_STALE_READ", false) {
+		if provider, ok := s.shardManager.(stateMachineProvider); ok {
+			if sm := provider.GetStateMachine(shardID); sm != nil {
+				ids, scores, err := sm.Search(query.Vector, query.K)
+				if err != nil {
+					return nil, err
+				}
+				return &shard.SearchResult{IDs: ids, Scores: scores}, nil
+			}
+		}
 	}
 	var res interface{}
 	var err error

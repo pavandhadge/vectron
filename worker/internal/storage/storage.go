@@ -79,6 +79,7 @@ type PebbleDB struct {
 	wg                         sync.WaitGroup
 	path                       string // The path to the database directory
 	dirty                      uint32
+	dirtyCount                 uint64
 	ingestMode                 bool
 	shardID                    uint64
 	walHub                     *WALHub

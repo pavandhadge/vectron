@@ -368,6 +368,7 @@ func (r *PebbleDB) recordHNSWWrite(count uint64) {
 
 func (r *PebbleDB) markDirty() {
 	atomic.StoreUint32(&r.dirty, 1)
+	atomic.AddUint64(&r.dirtyCount, 1)
 }
 
 func (r *PebbleDB) hasIngestDirtyMarker() (bool, error) {
@@ -903,6 +904,7 @@ func (r *PebbleDB) backgroundSyncLoop(minInterval, maxInterval time.Duration) {
 	defer r.wg.Done()
 	current := minInterval
 	consecutiveDirty := 0
+	minDirty := envInt("VECTRON_BACKGROUND_SYNC_DIRTY_MIN", 0)
 	timer := time.NewTimer(current)
 	defer timer.Stop()
 
@@ -911,17 +913,27 @@ func (r *PebbleDB) backgroundSyncLoop(minInterval, maxInterval time.Duration) {
 		case <-timer.C:
 			if atomic.SwapUint32(&r.dirty, 0) == 0 {
 				consecutiveDirty = 0
+				atomic.StoreUint64(&r.dirtyCount, 0)
 				if current != minInterval {
 					current = minInterval
 				}
 				timer.Reset(current)
 				continue
 			}
+			if minDirty > 0 {
+				dirtyCount := atomic.LoadUint64(&r.dirtyCount)
+				if dirtyCount < uint64(minDirty) {
+					atomic.StoreUint32(&r.dirty, 1)
+					timer.Reset(current)
+					continue
+				}
+			}
 			if err := r.Flush(); err != nil {
 				log.Printf("Error during background sync: %v", err)
 				atomic.StoreUint32(&r.dirty, 1)
 				consecutiveDirty = 0
 			} else {
+				atomic.StoreUint64(&r.dirtyCount, 0)
 				consecutiveDirty++
 				if consecutiveDirty >= 3 && current < maxInterval {
 					current *= 2

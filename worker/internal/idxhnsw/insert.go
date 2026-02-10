@@ -225,7 +225,7 @@ func (h *HNSW) addNoLock(id string, vec []float32) error {
 	// 4. Iteratively insert the node into each layer from its layer down to 0.
 	for l := min(layer, h.maxLayer); l >= 0; l-- {
 		// Find the `efConstruction` nearest neighbors to the new node at this layer.
-		candidates := h.searchLayer(searchVec, qvec, curr, h.config.EfConstruction, l)
+		candidates, release := h.searchLayer(searchVec, qvec, curr, h.config.EfConstruction, l)
 
 		// Select the best `M` neighbors from the candidates using the heuristic.
 		neighbors := h.selectNeighborsHeuristic(vec, candidates, h.config.M)
@@ -253,6 +253,7 @@ func (h *HNSW) addNoLock(id string, vec []float32) error {
 				curr = n
 			}
 		}
+		release()
 	}
 
 	// 5. Update the global entry point if the new node's layer is the highest.

@@ -6,9 +6,11 @@ package middleware
 
 import (
 	"context"
-	
 	"log"
 	"net/http"
+	"os"
+	"strconv"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
@@ -32,7 +34,10 @@ func LoggingInterceptor(ctx context.Context, req interface{}, info *grpc.UnarySe
 		clientIP = p.Addr.String()
 	}
 
-	log.Printf("[gRPC][START] method=%s user=%s client=%s", info.FullMethod, userID, clientIP)
+	logThis := shouldSampleGatewayLog()
+	if logThis {
+		log.Printf("[gRPC][START] method=%s user=%s client=%s", info.FullMethod, userID, clientIP)
+	}
 
 	// Call the next handler in the chain.
 	resp, err := handler(ctx, req)
@@ -43,7 +48,9 @@ func LoggingInterceptor(ctx context.Context, req interface{}, info *grpc.UnarySe
 		status = "ERROR"
 	}
 
-	log.Printf("[gRPC][END] status=%s method=%s user=%s duration=%v", status, info.FullMethod, userID, duration)
+	if logThis {
+		log.Printf("[gRPC][END] status=%s method=%s user=%s duration=%v", status, info.FullMethod, userID, duration)
+	}
 	return resp, err
 }
 
@@ -57,13 +64,43 @@ func Logging(next http.Handler) http.Handler {
 			userID = "anonymous"
 		}
 
-		log.Printf("[HTTP][START] method=%s path=%s user=%s client=%s", r.Method, r.URL.Path, userID, r.RemoteAddr)
+		logThis := shouldSampleGatewayLog()
+		if logThis {
+			log.Printf("[HTTP][START] method=%s path=%s user=%s client=%s", r.Method, r.URL.Path, userID, r.RemoteAddr)
+		}
 
 		// Serve the next handler.
 		next.ServeHTTP(w, r)
 
-		log.Printf("[HTTP][END] method=%s path=%s user=%s duration=%v", r.Method, r.URL.Path, userID, time.Since(start))
+		if logThis {
+			log.Printf("[HTTP][END] method=%s path=%s user=%s duration=%v", r.Method, r.URL.Path, userID, time.Since(start))
+		}
 	})
+}
+
+var (
+	gatewayLogSampleN = envInt("VECTRON_GATEWAY_LOG_SAMPLE_N", 1)
+	gatewayLogCounter uint64
+)
+
+func shouldSampleGatewayLog() bool {
+	n := atomic.LoadInt64(&gatewayLogSampleN)
+	if n <= 1 {
+		return true
+	}
+	return atomic.AddUint64(&gatewayLogCounter, 1)%uint64(n) == 0
+}
+
+func envInt(key string, def int64) int64 {
+	val := os.Getenv(key)
+	if val == "" {
+		return def
+	}
+	parsed, err := strconv.ParseInt(val, 10, 64)
+	if err != nil || parsed <= 0 {
+		return def
+	}
+	return parsed
 }
 
 // extractUserID is a helper function to safely retrieve a user ID from the context.

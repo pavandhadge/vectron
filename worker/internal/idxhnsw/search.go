@@ -220,7 +220,8 @@ func (h *HNSW) search(vec []float32, k int) ([]string, []float32) {
 	}
 
 	// 2. Perform a more thorough search at the base layer (layer 0).
-	results := h.searchLayer(vec, qvec, curr, h.config.EfSearch, 0)
+	results, release := h.searchLayer(vec, qvec, curr, h.config.EfSearch, 0)
+	defer release()
 
 	// 3. Sort the final results by distance and take the top K.
 	if len(results) > k {
@@ -268,7 +269,8 @@ func (h *HNSW) searchWithEf(vec []float32, k, ef int) ([]string, []float32) {
 	}
 
 	// 2. Perform a more thorough search at the base layer (layer 0).
-	results := h.searchLayer(vec, qvec, curr, ef, 0)
+	results, release := h.searchLayer(vec, qvec, curr, ef, 0)
+	defer release()
 
 	// 3. Sort the final results by distance and take the top K.
 	if len(results) > k {
@@ -319,7 +321,8 @@ func (h *HNSW) searchTwoStage(vec []float32, k, stage1Ef, candidateFactor int) (
 		curr = h.searchLayerSingle(vec, qvec, curr, l)
 	}
 
-	candidates := h.searchLayer(vec, qvec, curr, stage1Ef, 0)
+	candidates, release := h.searchLayer(vec, qvec, curr, stage1Ef, 0)
+	defer release()
 	sort.Slice(candidates, func(i, j int) bool {
 		return candidates[i].dist < candidates[j].dist
 	})
@@ -379,7 +382,7 @@ func (h *HNSW) searchLayerSingle(vec []float32, qvec []int8, start *Node, layer 
 
 // searchLayer performs an expanded search within a single layer using a priority queue.
 // It explores neighbors of neighbors up to `ef` (efConstruction or efSearch) candidates.
-func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer int) []candidate {
+func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer int) ([]candidate, func()) {
 	if ef <= smallEfThreshold {
 		return h.searchLayerSmall(vec, qvec, start, ef, layer)
 	}
@@ -574,14 +577,15 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 	}
 
 	// The result is a max-heap, so we need to convert it to a simple slice.
-	finalResults := make([]candidate, len(results))
-	copy(finalResults, results)
 	candidateSlicePool.Put([]candidate(candidates)[:0])
-	resultSlicePool.Put([]candidate(results)[:0])
-	return finalResults
+	finalResults := []candidate(results)
+	release := func() {
+		resultSlicePool.Put(finalResults[:0])
+	}
+	return finalResults, release
 }
 
-func (h *HNSW) searchLayerSmall(vec []float32, qvec []int8, start *Node, ef, layer int) []candidate {
+func (h *HNSW) searchLayerSmall(vec []float32, qvec []int8, start *Node, ef, layer int) ([]candidate, func()) {
 	tracker := visitedPool.Get().(*visitTracker)
 	maxID := int(h.nextID)
 	if maxID < 0 {
@@ -711,11 +715,12 @@ func (h *HNSW) searchLayerSmall(vec []float32, qvec []int8, start *Node, ef, lay
 		neighborIDSlicePool.Put(ids[:0])
 	}
 
-	finalResults := make([]candidate, len(results))
-	copy(finalResults, results)
 	candidateSlicePool.Put(candidateSlice[:0])
-	resultSlicePool.Put(resultSlice[:0])
-	return finalResults
+	finalResults := results
+	release := func() {
+		resultSlicePool.Put(finalResults[:0])
+	}
+	return finalResults, release
 }
 
 func (h *HNSW) computeDistancesInto(vec []float32, qvec []int8, nodes []*Node, distances []float32) {
