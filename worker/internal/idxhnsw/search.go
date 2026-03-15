@@ -132,11 +132,11 @@ var neighborIDSlicePool = sync.Pool{
 var smallEfThreshold = func() int {
 	v := os.Getenv("VECTRON_HNSW_SMALL_EF")
 	if v == "" {
-		return 64
+		return 32
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil || n <= 0 {
-		return 64
+		return 32
 	}
 	return n
 }()

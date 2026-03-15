@@ -3408,12 +3408,7 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 		workerReq := translator.ToWorkerSearchRequest(req, shardID, shardEpoch, 0, linearizable)
 		workerReq.K = int32(workerTopK)
 
-		var res *workerpb.SearchResponse
-		if s.workerSearchBatcher != nil {
-			res, err = s.workerSearchBatcher.Search(searchCtx, workerAddr, workerClient, workerReq)
-		} else {
-			res, err = workerClient.Search(searchCtx, workerReq)
-		}
+		res, err := workerClient.Search(searchCtx, workerReq)
 		if err != nil && !cfg.SearchFanoutEnabled && shardID != 0 && isStaleShardError(err) {
 			if routingEntry, rerr := s.getCollectionRouting(ctx, req.Collection, true); rerr == nil {
 				if addr, sid, epoch := s.pickFastSearchTargetPreferSearchOnly(ctx, routingEntry, linearizable, routeKey); addr != "" {
@@ -3428,11 +3423,7 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 					}
 					workerReq = translator.ToWorkerSearchRequest(req, shardID, shardEpoch, 0, linearizable)
 					workerReq.K = int32(workerTopK)
-					if s.workerSearchBatcher != nil {
-						res, err = s.workerSearchBatcher.Search(searchCtx, workerAddr, workerClient, workerReq)
-					} else {
-						res, err = workerClient.Search(searchCtx, workerReq)
-					}
+					res, err = workerClient.Search(searchCtx, workerReq)
 				}
 			}
 		}
@@ -3770,12 +3761,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		workerReq.K = int32(workerTopK)
 
 		workerStart := time.Now()
-		var res *workerpb.SearchResponse
-		if s.workerSearchBatcher != nil {
-			res, err = s.workerSearchBatcher.Search(searchCtx, workerAddr, workerClient, workerReq)
-		} else {
-			res, err = workerClient.Search(searchCtx, workerReq)
-		}
+		res, err := workerClient.Search(searchCtx, workerReq)
 		if err != nil && !cfg.SearchFanoutEnabled && shardID != 0 && isStaleShardError(err) {
 			if routingEntry, rerr := s.getCollectionRouting(ctx, req.Collection, true); rerr == nil {
 				if addr, sid, epoch := s.pickFastSearchTargetPreferSearchOnly(ctx, routingEntry, linearizable, routeKey); addr != "" {
@@ -3790,11 +3776,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 					}
 					workerReq = translator.ToWorkerSearchRequest(req, shardID, shardEpoch, 0, linearizable)
 					workerReq.K = int32(workerTopK)
-					if s.workerSearchBatcher != nil {
-						res, err = s.workerSearchBatcher.Search(searchCtx, workerAddr, workerClient, workerReq)
-					} else {
-						res, err = workerClient.Search(searchCtx, workerReq)
-					}
+					res, err = workerClient.Search(searchCtx, workerReq)
 				}
 			}
 		}
