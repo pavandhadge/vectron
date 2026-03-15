@@ -26,6 +26,7 @@ type Manager struct {
 	authClient  authpb.AuthServiceClient
 	feedbackSvc *feedback.Service
 	grpcClient  pb.VectronServiceClient
+	metricsSrc  GatewayMetricsProvider
 
 	// Internal state for metrics
 	metricsMu     sync.RWMutex
@@ -101,6 +102,8 @@ type GatewayStats struct {
 	AverageResponseTime int64          `json:"averageResponseTime"`
 	RateLimit           RateLimitInfo  `json:"rateLimit"`
 	Endpoints           []EndpointStat `json:"endpoints"`
+	SearchCache         *GatewaySearchCacheStats  `json:"searchCache,omitempty"`
+	WorkerBatcher       *GatewayWorkerBatcherStats `json:"workerBatcher,omitempty"`
 }
 
 // RateLimitInfo represents rate limiting configuration and status
@@ -108,6 +111,30 @@ type RateLimitInfo struct {
 	Enabled     bool  `json:"enabled"`
 	RPS         int   `json:"rps"`
 	ActiveUsers int64 `json:"activeUsers"`
+}
+
+type GatewaySearchCacheStats struct {
+	LocalHits       int64   `json:"localHits"`
+	DistributedHits int64   `json:"distributedHits"`
+	Misses          int64   `json:"misses"`
+	HitRate         float64 `json:"hitRate"`
+}
+
+type GatewayWorkerBatcherStats struct {
+	Batches   int64   `json:"batches"`
+	Requests  int64   `json:"requests"`
+	AvgBatch  float64 `json:"avgBatch"`
+	MaxBatch  int64   `json:"maxBatch"`
+	AvgWaitMs float64 `json:"avgWaitMs"`
+}
+
+type GatewayMetrics struct {
+	SearchCache   *GatewaySearchCacheStats
+	WorkerBatcher *GatewayWorkerBatcherStats
+}
+
+type GatewayMetricsProvider interface {
+	GatewayMetrics() GatewayMetrics
 }
 
 // WorkerInfo represents a worker node with full details - matches frontend
@@ -178,6 +205,10 @@ func NewManager(pdClient placementpb.PlacementServiceClient, authClient authpb.A
 		startTime:     time.Now(),
 		endpointStats: make(map[string]*EndpointStat),
 	}
+}
+
+func (m *Manager) SetGatewayMetricsProvider(provider GatewayMetricsProvider) {
+	m.metricsSrc = provider
 }
 
 // RecordRequest records a request for metrics
@@ -397,7 +428,7 @@ func (m *Manager) GetGatewayStats() *GatewayStats {
 		endpoints = append(endpoints, *stat)
 	}
 
-	return &GatewayStats{
+	stats := &GatewayStats{
 		Uptime:              uptime,
 		TotalRequests:       m.requestCount,
 		RequestsPerSecond:   rps,
@@ -411,6 +442,12 @@ func (m *Manager) GetGatewayStats() *GatewayStats {
 		},
 		Endpoints: endpoints,
 	}
+	if m.metricsSrc != nil {
+		extra := m.metricsSrc.GatewayMetrics()
+		stats.SearchCache = extra.SearchCache
+		stats.WorkerBatcher = extra.WorkerBatcher
+	}
+	return stats
 }
 
 // GetWorkers returns all workers with detailed information

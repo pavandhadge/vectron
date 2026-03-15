@@ -92,6 +92,19 @@ export interface GatewayStats {
     rps: number;
     activeUsers: number;
   };
+  searchCache?: {
+    localHits: number;
+    distributedHits: number;
+    misses: number;
+    hitRate: number;
+  };
+  workerBatcher?: {
+    batches: number;
+    requests: number;
+    avgBatch: number;
+    maxBatch: number;
+    avgWaitMs: number;
+  };
 }
 
 export interface GatewayEndpoint {

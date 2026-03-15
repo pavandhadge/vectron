@@ -78,6 +78,12 @@ func shouldLogGatewayHotPath() bool {
 
 var cacheHashSeed = maphash.MakeSeed()
 
+type gatewayMetrics struct {
+	searchCacheLocalHits      uint64
+	searchCacheDistributedHits uint64
+	searchCacheMisses         uint64
+}
+
 func adaptiveConcurrency(multiplier, maxCap int) int {
 	procs := stdruntime.GOMAXPROCS(0)
 	if procs < 1 {
@@ -1137,14 +1143,26 @@ func (s *gatewayServer) getSearchCache(ctx context.Context, req *pb.SearchReques
 		keys.normal = key
 	}
 	if cached, found := s.searchCache.Get(req); found {
+		if s.metrics != nil {
+			atomic.AddUint64(&s.metrics.searchCacheLocalHits, 1)
+		}
 		return cached, true
 	}
 	if s.distributedCache == nil || !cfg.DistributedCacheSearchEnabled {
+		if s.metrics != nil {
+			atomic.AddUint64(&s.metrics.searchCacheMisses, 1)
+		}
 		return nil, false
 	}
 	if cached, found := s.distributedCache.GetSearch(ctx, key); found {
 		s.searchCache.Set(req, cached)
+		if s.metrics != nil {
+			atomic.AddUint64(&s.metrics.searchCacheDistributedHits, 1)
+		}
 		return cached, true
+	}
+	if s.metrics != nil {
+		atomic.AddUint64(&s.metrics.searchCacheMisses, 1)
 	}
 	return nil, false
 }
@@ -1167,6 +1185,45 @@ func (s *gatewayServer) setSearchCache(ctx context.Context, req *pb.SearchReques
 		}
 		s.distributedCache.SetSearch(ctx, key, resp, 0)
 	}
+}
+
+func (s *gatewayServer) GatewayMetrics() management.GatewayMetrics {
+	var metrics management.GatewayMetrics
+	if s.metrics != nil {
+		localHits := atomic.LoadUint64(&s.metrics.searchCacheLocalHits)
+		distHits := atomic.LoadUint64(&s.metrics.searchCacheDistributedHits)
+		misses := atomic.LoadUint64(&s.metrics.searchCacheMisses)
+		total := localHits + distHits + misses
+		hitRate := 0.0
+		if total > 0 {
+			hitRate = float64(localHits+distHits) / float64(total)
+		}
+		metrics.SearchCache = &management.GatewaySearchCacheStats{
+			LocalHits:       int64(localHits),
+			DistributedHits: int64(distHits),
+			Misses:          int64(misses),
+			HitRate:         hitRate,
+		}
+	}
+	if s.workerSearchBatcher != nil {
+		snapshot := s.workerSearchBatcher.Metrics()
+		batches := snapshot.TotalBatches
+		requests := snapshot.TotalRequests
+		avgBatch := 0.0
+		avgWaitMs := 0.0
+		if batches > 0 {
+			avgBatch = float64(requests) / float64(batches)
+			avgWaitMs = float64(snapshot.TotalWaitNs) / 1e6 / float64(batches)
+		}
+		metrics.WorkerBatcher = &management.GatewayWorkerBatcherStats{
+			Batches:     int64(batches),
+			Requests:    int64(requests),
+			AvgBatch:    avgBatch,
+			MaxBatch:    int64(snapshot.MaxBatchSize),
+			AvgWaitMs:   avgWaitMs,
+		}
+	}
+	return metrics
 }
 
 // Get retrieves cached results if available and not expired
@@ -1705,6 +1762,7 @@ type gatewayServer struct {
 	inFlightShards           []inFlightShard
 	inflightRoutingShards    []inflightRoutingShard
 	inflightWorkerListShards []inflightWorkerListShard
+	metrics                  *gatewayMetrics
 }
 
 type inFlightSearch struct {
@@ -1786,11 +1844,13 @@ type WorkerSearchBatcher struct {
 	pending  map[string]*workerSearchGroup
 	maxWait  time.Duration
 	maxBatch int
+	metrics  workerSearchBatcherMetrics
 }
 
 type workerSearchGroup struct {
 	requests []*workerSearchRequest
 	done     chan struct{}
+	created  time.Time
 }
 
 type workerSearchRequest struct {
@@ -1798,6 +1858,20 @@ type workerSearchRequest struct {
 	req  *workerpb.SearchRequest
 	resp chan *workerpb.SearchResponse
 	err  chan error
+}
+
+type workerSearchBatcherMetrics struct {
+	totalBatches  uint64
+	totalRequests uint64
+	totalWaitNs   uint64
+	maxBatchSize  uint64
+}
+
+type workerSearchBatcherSnapshot struct {
+	TotalBatches  uint64
+	TotalRequests uint64
+	TotalWaitNs   uint64
+	MaxBatchSize  uint64
 }
 
 func NewWorkerSearchBatcher(maxWait time.Duration, maxBatch int) *WorkerSearchBatcher {
@@ -1825,6 +1899,7 @@ func (b *WorkerSearchBatcher) Search(ctx context.Context, workerAddr string, cli
 		group = &workerSearchGroup{
 			requests: make([]*workerSearchRequest, 0, b.maxBatch),
 			done:     make(chan struct{}),
+			created:  time.Now(),
 		}
 		b.pending[key] = group
 		go b.processBatch(key, group, client)
@@ -1856,6 +1931,8 @@ func (b *WorkerSearchBatcher) processBatch(key string, group *workerSearchGroup,
 	case <-group.done:
 		return
 	}
+
+	b.recordBatchMetrics(group)
 
 	b.mu.Lock()
 	delete(b.pending, key)
@@ -1919,6 +1996,37 @@ func (b *WorkerSearchBatcher) processBatch(key string, group *workerSearchGroup,
 		target.resp <- res
 	}
 	close(group.done)
+}
+
+func (b *WorkerSearchBatcher) recordBatchMetrics(group *workerSearchGroup) {
+	batchSize := len(group.requests)
+	atomic.AddUint64(&b.metrics.totalBatches, 1)
+	atomic.AddUint64(&b.metrics.totalRequests, uint64(batchSize))
+	if !group.created.IsZero() {
+		waitNs := uint64(time.Since(group.created).Nanoseconds())
+		atomic.AddUint64(&b.metrics.totalWaitNs, waitNs)
+	}
+	for {
+		current := atomic.LoadUint64(&b.metrics.maxBatchSize)
+		if uint64(batchSize) <= current {
+			break
+		}
+		if atomic.CompareAndSwapUint64(&b.metrics.maxBatchSize, current, uint64(batchSize)) {
+			break
+		}
+	}
+}
+
+func (b *WorkerSearchBatcher) Metrics() workerSearchBatcherSnapshot {
+	if b == nil {
+		return workerSearchBatcherSnapshot{}
+	}
+	return workerSearchBatcherSnapshot{
+		TotalBatches:  atomic.LoadUint64(&b.metrics.totalBatches),
+		TotalRequests: atomic.LoadUint64(&b.metrics.totalRequests),
+		TotalWaitNs:   atomic.LoadUint64(&b.metrics.totalWaitNs),
+		MaxBatchSize:  atomic.LoadUint64(&b.metrics.maxBatchSize),
+	}
 }
 
 func NewRequestCoalescer(workerPool *WorkerConnPool, maxWait time.Duration, maxBatch int) *RequestCoalescer {
@@ -3300,7 +3408,12 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 		workerReq := translator.ToWorkerSearchRequest(req, shardID, shardEpoch, 0, linearizable)
 		workerReq.K = int32(workerTopK)
 
-		res, err := workerClient.Search(searchCtx, workerReq)
+		var res *workerpb.SearchResponse
+		if s.workerSearchBatcher != nil {
+			res, err = s.workerSearchBatcher.Search(searchCtx, workerAddr, workerClient, workerReq)
+		} else {
+			res, err = workerClient.Search(searchCtx, workerReq)
+		}
 		if err != nil && !cfg.SearchFanoutEnabled && shardID != 0 && isStaleShardError(err) {
 			if routingEntry, rerr := s.getCollectionRouting(ctx, req.Collection, true); rerr == nil {
 				if addr, sid, epoch := s.pickFastSearchTargetPreferSearchOnly(ctx, routingEntry, linearizable, routeKey); addr != "" {
@@ -3315,7 +3428,11 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 					}
 					workerReq = translator.ToWorkerSearchRequest(req, shardID, shardEpoch, 0, linearizable)
 					workerReq.K = int32(workerTopK)
-					res, err = workerClient.Search(searchCtx, workerReq)
+					if s.workerSearchBatcher != nil {
+						res, err = s.workerSearchBatcher.Search(searchCtx, workerAddr, workerClient, workerReq)
+					} else {
+						res, err = workerClient.Search(searchCtx, workerReq)
+					}
 				}
 			}
 		}
@@ -3653,7 +3770,12 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		workerReq.K = int32(workerTopK)
 
 		workerStart := time.Now()
-		res, err := workerClient.Search(searchCtx, workerReq)
+		var res *workerpb.SearchResponse
+		if s.workerSearchBatcher != nil {
+			res, err = s.workerSearchBatcher.Search(searchCtx, workerAddr, workerClient, workerReq)
+		} else {
+			res, err = workerClient.Search(searchCtx, workerReq)
+		}
 		if err != nil && !cfg.SearchFanoutEnabled && shardID != 0 && isStaleShardError(err) {
 			if routingEntry, rerr := s.getCollectionRouting(ctx, req.Collection, true); rerr == nil {
 				if addr, sid, epoch := s.pickFastSearchTargetPreferSearchOnly(ctx, routingEntry, linearizable, routeKey); addr != "" {
@@ -3668,7 +3790,11 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 					}
 					workerReq = translator.ToWorkerSearchRequest(req, shardID, shardEpoch, 0, linearizable)
 					workerReq.K = int32(workerTopK)
-					res, err = workerClient.Search(searchCtx, workerReq)
+					if s.workerSearchBatcher != nil {
+						res, err = s.workerSearchBatcher.Search(searchCtx, workerAddr, workerClient, workerReq)
+					} else {
+						res, err = workerClient.Search(searchCtx, workerReq)
+					}
 				}
 			}
 		}
@@ -4404,8 +4530,16 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 	}
 
 	var workerSearchBatcher *WorkerSearchBatcher
-	if !config.RawSpeedMode {
-		workerSearchBatcher = NewWorkerSearchBatcher(2*time.Millisecond, 16)
+	if !config.RawSpeedMode && config.WorkerSearchBatcherEnabled {
+		waitMs := config.WorkerSearchBatcherMaxWaitMs
+		if waitMs <= 0 {
+			waitMs = 2
+		}
+		maxBatch := config.WorkerSearchBatcherMaxBatch
+		if maxBatch <= 0 {
+			maxBatch = 16
+		}
+		workerSearchBatcher = NewWorkerSearchBatcher(time.Duration(waitMs)*time.Millisecond, maxBatch)
 	}
 
 	routingTTL := time.Duration(config.RoutingCacheTTLms) * time.Millisecond
@@ -4447,6 +4581,7 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 		inFlightShards:           make([]inFlightShard, inFlightShardCount),
 		inflightRoutingShards:    make([]inflightRoutingShard, inflightRoutingShardCount),
 		inflightWorkerListShards: make([]inflightWorkerListShard, inflightWorkerListShardCount),
+		metrics:                  &gatewayMetrics{},
 	}
 	for i := range server.inFlightShards {
 		server.inFlightShards[i].m = make(map[uint64]*inFlightSearch)
@@ -4498,6 +4633,7 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 		feedbackService,
 		nil, // grpcClient - not available directly
 	)
+	managementMgr.SetGatewayMetricsProvider(server)
 	server.managementMgr = managementMgr
 
 	// Create the gRPC server with a chain of unary interceptors for middleware.

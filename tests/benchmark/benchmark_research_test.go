@@ -390,6 +390,14 @@ func TestResearchBenchmark(t *testing.T) {
 		benchmarkEndToEndLatency(t, suite.getAuthenticatedContext(), suite.apigwClient, benchmarkSuite)
 	})
 
+	runScenario("Scenario7_SearchOnly", true, func(t *testing.T) {
+		benchmarkSearchOnly(t, suite.getAuthenticatedContext(), suite.apigwClient, benchmarkSuite)
+	})
+
+	runScenario("Scenario8_WriteOnly", true, func(t *testing.T) {
+		benchmarkWriteOnly(t, suite.getAuthenticatedContext(), suite.apigwClient, benchmarkSuite)
+	})
+
 	// Generate final report
 	t.Run("GenerateReport", func(t *testing.T) {
 		generateResearchReport(t, benchmarkSuite)
@@ -1802,6 +1810,179 @@ func benchmarkEndToEndLatency(t *testing.T, ctx context.Context, client apigatew
 }
 
 // =============================================================================
+// Scenario 7: Search-Only Benchmark (CPU-bound read path)
+// =============================================================================
+
+func benchmarkSearchOnly(t *testing.T, ctx context.Context, client apigatewaypb.VectronServiceClient, suite *BenchmarkSuite) {
+	log.Println("\n🔎 Scenario 7: Search-Only Benchmark")
+	log.Println("Isolating search CPU without write contention")
+
+	collectionName := "search-only"
+	datasetSize := 50000
+	dimension := 384
+	queryDuration := 30 * time.Second
+	concurrency := 8
+
+	result := &BenchmarkResult{
+		Name:            "Search-Only",
+		Description:     "Search-only workload after preloading dataset (no writes during measurement)",
+		Timestamp:       time.Now(),
+		DatasetSize:     datasetSize,
+		VectorDimension: dimension,
+	}
+
+	_, err := client.CreateCollection(ctx, &apigatewaypb.CreateCollectionRequest{
+		Name:      collectionName,
+		Dimension: int32(dimension),
+		Distance:  "cosine",
+	})
+	require.NoError(t, err)
+
+	log.Printf("  Waiting for shards to be assigned and initialized...")
+	require.NoError(t, waitForCollectionReady(ctx, client, collectionName, 120*time.Second))
+
+	// Preload dataset (not measured in result metrics).
+	for i := 0; i < datasetSize; i += 1000 {
+		batch := make([]*apigatewaypb.Point, 0, 1000)
+		for j := 0; j < 1000 && i+j < datasetSize; j++ {
+			batch = append(batch, &apigatewaypb.Point{
+				Id:     fmt.Sprintf("searchonly-%d", i+j),
+				Vector: generateNormalizedVector(dimension),
+			})
+		}
+		_, err := upsertWithRetry(ctx, client, &apigatewaypb.UpsertRequest{
+			Collection: collectionName,
+			Points:     batch,
+		}, 5)
+		require.NoError(t, err)
+	}
+
+	// Allow indexing to settle.
+	time.Sleep(5 * time.Second)
+
+	var wg sync.WaitGroup
+	var queryCount int64
+	latencies := make([]time.Duration, 0, 1000)
+	var latenciesMutex sync.Mutex
+
+	ctxTimeout, cancel := context.WithTimeout(ctx, queryDuration)
+	defer cancel()
+
+	start := time.Now()
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-ctxTimeout.Done():
+					return
+				default:
+					queryStart := time.Now()
+					_, err := client.Search(ctxTimeout, &apigatewaypb.SearchRequest{
+						Collection: collectionName,
+						Vector:     generateNormalizedVector(dimension),
+						TopK:       10,
+					})
+					queryDuration := time.Since(queryStart)
+					if err == nil {
+						atomic.AddInt64(&queryCount, 1)
+						latenciesMutex.Lock()
+						latencies = append(latencies, queryDuration)
+						latenciesMutex.Unlock()
+					}
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	actualDuration := time.Since(start)
+
+	result.SearchMetrics = &ThroughputMetrics{
+		Operations:   queryCount,
+		Duration:     actualDuration,
+		OpsPerSecond: float64(queryCount) / actualDuration.Seconds(),
+	}
+	result.LatencyMetrics = calculateLatencyMetrics(latencies)
+	result.Duration = actualDuration
+
+	log.Printf("\n  ✅ Search-Only Benchmark")
+	log.Printf("     Total Queries: %d", queryCount)
+	log.Printf("     Throughput: %.0f queries/sec", result.SearchMetrics.OpsPerSecond)
+	log.Printf("     Latency: Avg=%v, P50=%v, P95=%v, P99=%v",
+		result.LatencyMetrics.Average,
+		result.LatencyMetrics.P50,
+		result.LatencyMetrics.P95,
+		result.LatencyMetrics.P99)
+
+	suite.addResult(result)
+}
+
+// =============================================================================
+// Scenario 8: Write-Only Benchmark (storage-bound write path)
+// =============================================================================
+
+func benchmarkWriteOnly(t *testing.T, ctx context.Context, client apigatewaypb.VectronServiceClient, suite *BenchmarkSuite) {
+	log.Println("\n✍️ Scenario 8: Write-Only Benchmark")
+	log.Println("Isolating ingestion throughput without read traffic")
+
+	collectionName := "write-only"
+	datasetSize := 50000
+	dimension := 384
+
+	result := &BenchmarkResult{
+		Name:            "Write-Only",
+		Description:     "Write-only workload measuring ingestion throughput",
+		Timestamp:       time.Now(),
+		DatasetSize:     datasetSize,
+		VectorDimension: dimension,
+	}
+
+	_, err := client.CreateCollection(ctx, &apigatewaypb.CreateCollectionRequest{
+		Name:      collectionName,
+		Dimension: int32(dimension),
+		Distance:  "cosine",
+	})
+	require.NoError(t, err)
+
+	log.Printf("  Waiting for shards to be assigned and initialized...")
+	require.NoError(t, waitForCollectionReady(ctx, client, collectionName, 120*time.Second))
+
+	start := time.Now()
+	var insertCount int64
+
+	for i := 0; i < datasetSize; i += 1000 {
+		batch := make([]*apigatewaypb.Point, 0, 1000)
+		for j := 0; j < 1000 && i+j < datasetSize; j++ {
+			batch = append(batch, &apigatewaypb.Point{
+				Id:     fmt.Sprintf("writeonly-%d", i+j),
+				Vector: generateNormalizedVector(dimension),
+			})
+		}
+		resp, err := upsertWithRetry(ctx, client, &apigatewaypb.UpsertRequest{
+			Collection: collectionName,
+			Points:     batch,
+		}, 5)
+		require.NoError(t, err)
+		insertCount += int64(resp.Upserted)
+	}
+
+	insertDuration := time.Since(start)
+	result.InsertMetrics = &ThroughputMetrics{
+		Operations:    insertCount,
+		Duration:      insertDuration,
+		VectorsPerSec: float64(insertCount) / insertDuration.Seconds(),
+	}
+	result.Duration = insertDuration
+
+	log.Printf("\n  ✅ Write-Only Benchmark")
+	log.Printf("     Total Inserts: %d", insertCount)
+	log.Printf("     Throughput: %.0f vectors/sec", result.InsertMetrics.VectorsPerSec)
+
+	suite.addResult(result)
+}
+
+// =============================================================================
 // Report Generation
 // =============================================================================
 
@@ -1843,19 +2024,36 @@ func generateCSVReport(t *testing.T, results []*BenchmarkResult) {
 	})
 
 	for _, r := range results {
-		if r.InsertMetrics != nil && r.SearchMetrics != nil {
-			writer.Write([]string{
-				r.Name,
-				fmt.Sprintf("%d", r.DatasetSize),
-				fmt.Sprintf("%d", r.VectorDimension),
-				fmt.Sprintf("%.2f", r.InsertMetrics.VectorsPerSec),
-				fmt.Sprintf("%.2f", r.SearchMetrics.OpsPerSecond),
-				fmt.Sprintf("%.2f", float64(r.LatencyMetrics.P50)/float64(time.Millisecond)),
-				fmt.Sprintf("%.2f", float64(r.LatencyMetrics.P95)/float64(time.Millisecond)),
-				fmt.Sprintf("%.2f", float64(r.LatencyMetrics.P99)/float64(time.Millisecond)),
-				fmt.Sprintf("%d", r.MemoryAfterMB-r.MemoryBeforeMB),
-			})
+		if r.InsertMetrics == nil && r.SearchMetrics == nil {
+			continue
 		}
+		insertThroughput := ""
+		if r.InsertMetrics != nil {
+			insertThroughput = fmt.Sprintf("%.2f", r.InsertMetrics.VectorsPerSec)
+		}
+		searchThroughput := ""
+		if r.SearchMetrics != nil {
+			searchThroughput = fmt.Sprintf("%.2f", r.SearchMetrics.OpsPerSecond)
+		}
+		p50 := ""
+		p95 := ""
+		p99 := ""
+		if r.LatencyMetrics != nil {
+			p50 = fmt.Sprintf("%.2f", float64(r.LatencyMetrics.P50)/float64(time.Millisecond))
+			p95 = fmt.Sprintf("%.2f", float64(r.LatencyMetrics.P95)/float64(time.Millisecond))
+			p99 = fmt.Sprintf("%.2f", float64(r.LatencyMetrics.P99)/float64(time.Millisecond))
+		}
+		writer.Write([]string{
+			r.Name,
+			fmt.Sprintf("%d", r.DatasetSize),
+			fmt.Sprintf("%d", r.VectorDimension),
+			insertThroughput,
+			searchThroughput,
+			p50,
+			p95,
+			p99,
+			fmt.Sprintf("%d", r.MemoryAfterMB-r.MemoryBeforeMB),
+		})
 	}
 	writer.Flush()
 
@@ -1902,21 +2100,26 @@ func generateMarkdownReport(t *testing.T, results []*BenchmarkResult) {
 	fmt.Fprintf(file, "|------|---------|-----|--------------|--------------|-----|-----|\n")
 
 	for _, r := range results {
-		if r.InsertMetrics == nil {
+		if r.InsertMetrics == nil && r.SearchMetrics == nil {
 			continue
 		}
-		searchOps := 0.0
+		insertVal := "-"
+		if r.InsertMetrics != nil {
+			insertVal = fmt.Sprintf("%.0f", r.InsertMetrics.VectorsPerSec)
+		}
+		searchVal := "-"
 		if r.SearchMetrics != nil {
-			searchOps = r.SearchMetrics.OpsPerSecond
+			searchVal = fmt.Sprintf("%.0f", r.SearchMetrics.OpsPerSecond)
 		}
-		var p50, p95 interface{} = "-", "-"
+		p50 := "-"
+		p95 := "-"
 		if r.LatencyMetrics != nil {
-			p50 = r.LatencyMetrics.P50
-			p95 = r.LatencyMetrics.P95
+			p50 = fmt.Sprintf("%v", r.LatencyMetrics.P50)
+			p95 = fmt.Sprintf("%v", r.LatencyMetrics.P95)
 		}
-		fmt.Fprintf(file, "| %s | %d | %d | %.0f | %.0f | %v | %v |\n",
+		fmt.Fprintf(file, "| %s | %d | %d | %s | %s | %s | %s |\n",
 			r.Name, r.DatasetSize, r.VectorDimension,
-			r.InsertMetrics.VectorsPerSec, searchOps, p50, p95)
+			insertVal, searchVal, p50, p95)
 	}
 
 	fmt.Fprintf(file, "\n## Detailed Results\n\n")
@@ -1950,11 +2153,14 @@ func generateSummaryStats(t *testing.T, results []*BenchmarkResult) {
 	var count int
 
 	for _, r := range results {
-		if r.InsertMetrics != nil {
-			totalInsertThroughput += r.InsertMetrics.VectorsPerSec
-			totalSearchThroughput += r.SearchMetrics.OpsPerSecond
-			count++
+		if r == nil || r.InsertMetrics == nil {
+			continue
 		}
+			totalInsertThroughput += r.InsertMetrics.VectorsPerSec
+			if r.SearchMetrics != nil {
+				totalSearchThroughput += r.SearchMetrics.OpsPerSecond
+			}
+			count++
 	}
 
 	if count > 0 {

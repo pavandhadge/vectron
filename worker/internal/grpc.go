@@ -395,7 +395,7 @@ func (s *GrpcServer) SearchShard(ctx context.Context, shardID uint64, query shar
 	if s.nodeHost == nil {
 		return nil, status.Error(codes.FailedPrecondition, "search-only worker has no raft")
 	}
-	if !linearizable && envBool("VECTRON_WORKER_FAST_STALE_READ", false) {
+	if !linearizable && envBool("VECTRON_WORKER_FAST_STALE_READ", true) {
 		if provider, ok := s.shardManager.(stateMachineProvider); ok {
 			if sm := provider.GetStateMachine(shardID); sm != nil {
 				ids, scores, err := sm.Search(query.Vector, query.K)
@@ -586,7 +586,7 @@ func (s *GrpcServer) BatchSearch(ctx context.Context, req *worker.BatchSearchReq
 		}
 	}
 	if len(requests) == 1 {
-		resp, err := s.searchCore(ctx, requests[0])
+		resp, err := s.searchWithCache(ctx, requests[0])
 		if err != nil {
 			return nil, err
 		}
@@ -613,16 +613,7 @@ func (s *GrpcServer) BatchSearch(ctx context.Context, req *worker.BatchSearchReq
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			if err := s.validateShardLease(r.GetShardId(), r.GetShardEpoch(), r.GetLeaseExpiryUnixMs()); err != nil {
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = err
-					cancel()
-				}
-				mu.Unlock()
-				return
-			}
-			resp, err := s.searchCore(ctx, r)
+			resp, err := s.searchWithCache(ctx, r)
 			if err != nil {
 				mu.Lock()
 				if firstErr == nil {
@@ -649,6 +640,22 @@ func (s *GrpcServer) Search(ctx context.Context, req *worker.SearchRequest) (*wo
 		log.Printf("Received Search request on shard %d", req.GetShardId())
 	}
 	start := time.Now()
+	resp, err := s.searchWithCache(ctx, req)
+	if shouldLogHotPath() {
+		log.Printf("Worker Search shard=%d broadcast=%t linearizable=%t vecDim=%d k=%d total=%s err=%v",
+			req.GetShardId(),
+			req.GetShardId() == 0,
+			req.GetLinearizable(),
+			len(req.GetVector()),
+			req.GetK(),
+			time.Since(start),
+			err,
+		)
+	}
+	return resp, err
+}
+
+func (s *GrpcServer) searchWithCache(ctx context.Context, req *worker.SearchRequest) (*worker.SearchResponse, error) {
 	if len(req.GetVector()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "search vector is empty")
 	}
@@ -678,17 +685,6 @@ func (s *GrpcServer) Search(ctx context.Context, req *worker.SearchRequest) (*wo
 		s.searchCache.Set(key, resp)
 	}
 	s.finishInFlight(key, resp, err)
-	if shouldLogHotPath() {
-		log.Printf("Worker Search shard=%d broadcast=%t linearizable=%t vecDim=%d k=%d total=%s err=%v",
-			req.GetShardId(),
-			req.GetShardId() == 0,
-			req.GetLinearizable(),
-			len(req.GetVector()),
-			req.GetK(),
-			time.Since(start),
-			err,
-		)
-	}
 	return resp, err
 }
 

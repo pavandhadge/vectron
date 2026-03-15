@@ -129,7 +129,42 @@ var neighborIDSlicePool = sync.Pool{
 	},
 }
 
-const smallEfThreshold = 32
+var smallEfThreshold = func() int {
+	v := os.Getenv("VECTRON_HNSW_SMALL_EF")
+	if v == "" {
+		return 64
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return 64
+	}
+	return n
+}()
+
+var localCandidatesPool = sync.Pool{
+	New: func() interface{} {
+		return make([][]candidate, 0, 8)
+	},
+}
+
+func getLocalCandidates(n int) [][]candidate {
+	buf := localCandidatesPool.Get().([][]candidate)
+	if cap(buf) < n {
+		return make([][]candidate, n)
+	}
+	buf = buf[:n]
+	for i := range buf {
+		buf[i] = nil
+	}
+	return buf
+}
+
+func putLocalCandidates(buf [][]candidate) {
+	for i := range buf {
+		buf[i] = nil
+	}
+	localCandidatesPool.Put(buf[:0])
+}
 
 var neighborCap = func() int {
 	v := os.Getenv("VECTRON_HNSW_NEIGHBOR_CAP")
@@ -474,7 +509,6 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 
 		distances := getDistanceSlice(len(nodes))
 		h.computeDistancesInto(vec, qvec, nodes, distances)
-		defer putDistanceSlice(distances)
 		if results.Len() >= ef && len(nodes) >= 256 {
 			worst := results[0].dist
 			parallelism := h.config.SearchParallelism
@@ -486,7 +520,7 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 			}
 			if parallelism > 1 {
 				chunk := (len(nodes) + parallelism - 1) / parallelism
-				locals := make([][]candidate, parallelism)
+				locals := getLocalCandidates(parallelism)
 				var wg sync.WaitGroup
 				for w := 0; w < parallelism; w++ {
 					start := w * chunk
@@ -532,6 +566,8 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 					}
 					putTempCandidateSlice(local)
 				}
+				putLocalCandidates(locals)
+				putDistanceSlice(distances)
 				neighborNodeSlicePool.Put(nodes[:0])
 				neighborIDSlicePool.Put(ids[:0])
 				continue
@@ -572,6 +608,7 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 				}
 			}
 		}
+		putDistanceSlice(distances)
 		neighborNodeSlicePool.Put(nodes[:0])
 		neighborIDSlicePool.Put(ids[:0])
 	}

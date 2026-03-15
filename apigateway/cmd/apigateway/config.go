@@ -61,6 +61,9 @@ type Config struct {
 	ResolveCacheTTLms             int             // TTL for resolve cache (milliseconds).
 	PreferSearchOnlyWorkers       bool            // Prefer search-only workers for non-linearizable reads.
 	WorkerRoleCacheTTLms          int             // TTL for worker role cache (milliseconds).
+	WorkerSearchBatcherEnabled    bool            // Enable worker search batcher.
+	WorkerSearchBatcherMaxWaitMs  int             // Max wait time for batching (milliseconds).
+	WorkerSearchBatcherMaxBatch   int             // Max batch size for worker search.
 	GatewayDebugLogs              bool            // Enable verbose gateway logs.
 	GatewayLogSampleEvery         int             // Sample rate for hot-path logs (1 = log all).
 	RawSpeedMode                  bool            // Disable expensive features for max throughput.
@@ -118,6 +121,9 @@ func LoadConfig() Config {
 		ResolveCacheTTLms:             getEnvAsInt("RESOLVE_CACHE_TTL_MS", 30000),
 		PreferSearchOnlyWorkers:       getEnvAsBool("PREFER_SEARCH_ONLY_WORKERS", true),
 		WorkerRoleCacheTTLms:          getEnvAsInt("WORKER_ROLE_CACHE_TTL_MS", 5000),
+		WorkerSearchBatcherEnabled:    getEnvAsBool("WORKER_SEARCH_BATCHER_ENABLED", true),
+		WorkerSearchBatcherMaxWaitMs:  getEnvAsInt("WORKER_SEARCH_BATCHER_MAX_WAIT_MS", 2),
+		WorkerSearchBatcherMaxBatch:   getEnvAsInt("WORKER_SEARCH_BATCHER_MAX_BATCH", 16),
 		GatewayDebugLogs:              getEnvAsBool("GATEWAY_DEBUG_LOGS", false),
 		GatewayLogSampleEvery:         getEnvAsInt("GATEWAY_LOG_SAMPLE_EVERY", 100),
 		RawSpeedMode:                  getEnvAsBool("RAW_SPEED_MODE", false),
@@ -134,6 +140,7 @@ func LoadConfig() Config {
 		cfg.SearchCacheMaxSize = 0
 		cfg.DistributedCacheSearchEnabled = false
 		cfg.PreferSearchOnlyWorkers = false
+		cfg.WorkerSearchBatcherEnabled = false
 	}
 
 	return cfg
