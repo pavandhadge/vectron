@@ -53,7 +53,7 @@ const PlanChangePage: React.FC = () => {
       <div className="flex items-center gap-3">
         <button
           onClick={() => navigate("/dashboard/billing")}
-          className="p-2 rounded-lg border border-neutral-800 text-neutral-400 hover:text-white hover:bg-neutral-900/60 transition-colors"
+          className="p-2 rounded-lg border border-neutral-800 text-neutral-400 hover:text-white hover:bg-[#111111] transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
         </button>
@@ -75,7 +75,7 @@ const PlanChangePage: React.FC = () => {
         </div>
       )}
 
-      <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30">
+      <div className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a]">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-xl font-semibold text-white">{planData.title}</h2>
@@ -102,7 +102,7 @@ const PlanChangePage: React.FC = () => {
       <div className="flex flex-col sm:flex-row gap-3">
         <button
           onClick={() => navigate("/dashboard/billing")}
-          className="flex-1 px-4 py-2 rounded-lg border border-neutral-800 text-neutral-300 hover:text-white hover:bg-neutral-900/60 transition-colors"
+          className="flex-1 px-4 py-2 rounded-lg border border-neutral-800 text-neutral-300 hover:text-white hover:bg-[#111111] transition-colors"
         >
           Cancel
         </button>

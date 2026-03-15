@@ -54,6 +54,7 @@ const authApiClient = axios.create({
   headers: {
     "Content-Type": "application/json",
   },
+  timeout: 15000,
 });
 
 const apiGatewayApiClient = axios.create({
@@ -62,6 +63,7 @@ const apiGatewayApiClient = axios.create({
   headers: {
     "Content-Type": "application/json",
   },
+  timeout: 15000,
 });
 
 /* =======================
@@ -165,6 +167,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.error("Login failed:", err);
       setError(
         err.response?.data?.message ||
+          err.message ||
           "Login failed. Please check your credentials.",
       );
       throw err;
@@ -182,7 +185,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } catch (err: any) {
       console.error("Signup failed:", err);
       setError(
-        err.response?.data?.message || "Signup failed. Please try again.",
+        err.response?.data?.message ||
+          err.message ||
+          "Signup failed. Please try again.",
       );
       throw err;
     }

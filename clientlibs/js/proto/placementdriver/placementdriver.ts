@@ -205,6 +205,54 @@ export interface ListWorkersResponse {
   workers: WorkerInfo[];
 }
 
+export interface RegisterRerankerRequest {
+  grpcAddress: string;
+  capabilities: string[];
+  timestamp: string;
+  /** Capacity information for capacity-weighted placement */
+  cpuCores: number;
+  memoryBytes: string;
+  diskBytes: string;
+  /** Failure domain information for fault-tolerant placement */
+  rack: string;
+  zone: string;
+  region: string;
+}
+
+export interface RegisterRerankerResponse {
+  rerankerId: string;
+  success: boolean;
+}
+
+export interface RerankerHeartbeatRequest {
+  rerankerId: string;
+  timestamp: string;
+  cpuUsagePercent: number;
+  memoryUsagePercent: number;
+  diskUsagePercent: number;
+  queriesPerSecond: number;
+}
+
+export interface RerankerHeartbeatResponse {
+  ok: boolean;
+  message: string;
+}
+
+export interface ListRerankersRequest {
+}
+
+export interface ListRerankersResponse {
+  rerankers: RerankerInfo[];
+}
+
+export interface GetRerankerRequest {
+}
+
+export interface GetRerankerResponse {
+  rerankerId: string;
+  grpcAddress: string;
+}
+
 export interface ListWorkersForCollectionRequest {
   collection: string;
 }
@@ -225,6 +273,19 @@ export interface WorkerInfo {
 }
 
 export interface WorkerInfo_MetadataEntry {
+  key: string;
+  value: string;
+}
+
+export interface RerankerInfo {
+  rerankerId: string;
+  grpcAddress: string;
+  lastHeartbeat: string;
+  healthy: boolean;
+  metadata: { [key: string]: string };
+}
+
+export interface RerankerInfo_MetadataEntry {
   key: string;
   value: string;
 }
@@ -1902,6 +1963,729 @@ export const ListWorkersResponse: MessageFns<ListWorkersResponse> = {
   },
 };
 
+function createBaseRegisterRerankerRequest(): RegisterRerankerRequest {
+  return {
+    grpcAddress: "",
+    capabilities: [],
+    timestamp: "0",
+    cpuCores: 0,
+    memoryBytes: "0",
+    diskBytes: "0",
+    rack: "",
+    zone: "",
+    region: "",
+  };
+}
+
+export const RegisterRerankerRequest: MessageFns<RegisterRerankerRequest> = {
+  encode(message: RegisterRerankerRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.grpcAddress !== "") {
+      writer.uint32(10).string(message.grpcAddress);
+    }
+    for (const v of message.capabilities) {
+      writer.uint32(18).string(v!);
+    }
+    if (message.timestamp !== "0") {
+      writer.uint32(24).int64(message.timestamp);
+    }
+    if (message.cpuCores !== 0) {
+      writer.uint32(32).int32(message.cpuCores);
+    }
+    if (message.memoryBytes !== "0") {
+      writer.uint32(40).int64(message.memoryBytes);
+    }
+    if (message.diskBytes !== "0") {
+      writer.uint32(48).int64(message.diskBytes);
+    }
+    if (message.rack !== "") {
+      writer.uint32(58).string(message.rack);
+    }
+    if (message.zone !== "") {
+      writer.uint32(66).string(message.zone);
+    }
+    if (message.region !== "") {
+      writer.uint32(74).string(message.region);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): RegisterRerankerRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseRegisterRerankerRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.grpcAddress = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.capabilities.push(reader.string());
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.timestamp = reader.int64().toString();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.cpuCores = reader.int32();
+          continue;
+        }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.memoryBytes = reader.int64().toString();
+          continue;
+        }
+        case 6: {
+          if (tag !== 48) {
+            break;
+          }
+
+          message.diskBytes = reader.int64().toString();
+          continue;
+        }
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.rack = reader.string();
+          continue;
+        }
+        case 8: {
+          if (tag !== 66) {
+            break;
+          }
+
+          message.zone = reader.string();
+          continue;
+        }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          message.region = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): RegisterRerankerRequest {
+    return {
+      grpcAddress: isSet(object.grpcAddress) ? globalThis.String(object.grpcAddress) : "",
+      capabilities: globalThis.Array.isArray(object?.capabilities)
+        ? object.capabilities.map((e: any) => globalThis.String(e))
+        : [],
+      timestamp: isSet(object.timestamp) ? globalThis.String(object.timestamp) : "0",
+      cpuCores: isSet(object.cpuCores) ? globalThis.Number(object.cpuCores) : 0,
+      memoryBytes: isSet(object.memoryBytes) ? globalThis.String(object.memoryBytes) : "0",
+      diskBytes: isSet(object.diskBytes) ? globalThis.String(object.diskBytes) : "0",
+      rack: isSet(object.rack) ? globalThis.String(object.rack) : "",
+      zone: isSet(object.zone) ? globalThis.String(object.zone) : "",
+      region: isSet(object.region) ? globalThis.String(object.region) : "",
+    };
+  },
+
+  toJSON(message: RegisterRerankerRequest): unknown {
+    const obj: any = {};
+    if (message.grpcAddress !== "") {
+      obj.grpcAddress = message.grpcAddress;
+    }
+    if (message.capabilities?.length) {
+      obj.capabilities = message.capabilities;
+    }
+    if (message.timestamp !== "0") {
+      obj.timestamp = message.timestamp;
+    }
+    if (message.cpuCores !== 0) {
+      obj.cpuCores = Math.round(message.cpuCores);
+    }
+    if (message.memoryBytes !== "0") {
+      obj.memoryBytes = message.memoryBytes;
+    }
+    if (message.diskBytes !== "0") {
+      obj.diskBytes = message.diskBytes;
+    }
+    if (message.rack !== "") {
+      obj.rack = message.rack;
+    }
+    if (message.zone !== "") {
+      obj.zone = message.zone;
+    }
+    if (message.region !== "") {
+      obj.region = message.region;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<RegisterRerankerRequest>, I>>(base?: I): RegisterRerankerRequest {
+    return RegisterRerankerRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<RegisterRerankerRequest>, I>>(object: I): RegisterRerankerRequest {
+    const message = createBaseRegisterRerankerRequest();
+    message.grpcAddress = object.grpcAddress ?? "";
+    message.capabilities = object.capabilities?.map((e) => e) || [];
+    message.timestamp = object.timestamp ?? "0";
+    message.cpuCores = object.cpuCores ?? 0;
+    message.memoryBytes = object.memoryBytes ?? "0";
+    message.diskBytes = object.diskBytes ?? "0";
+    message.rack = object.rack ?? "";
+    message.zone = object.zone ?? "";
+    message.region = object.region ?? "";
+    return message;
+  },
+};
+
+function createBaseRegisterRerankerResponse(): RegisterRerankerResponse {
+  return { rerankerId: "", success: false };
+}
+
+export const RegisterRerankerResponse: MessageFns<RegisterRerankerResponse> = {
+  encode(message: RegisterRerankerResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.rerankerId !== "") {
+      writer.uint32(10).string(message.rerankerId);
+    }
+    if (message.success !== false) {
+      writer.uint32(16).bool(message.success);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): RegisterRerankerResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseRegisterRerankerResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.rerankerId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): RegisterRerankerResponse {
+    return {
+      rerankerId: isSet(object.rerankerId) ? globalThis.String(object.rerankerId) : "",
+      success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
+    };
+  },
+
+  toJSON(message: RegisterRerankerResponse): unknown {
+    const obj: any = {};
+    if (message.rerankerId !== "") {
+      obj.rerankerId = message.rerankerId;
+    }
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<RegisterRerankerResponse>, I>>(base?: I): RegisterRerankerResponse {
+    return RegisterRerankerResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<RegisterRerankerResponse>, I>>(object: I): RegisterRerankerResponse {
+    const message = createBaseRegisterRerankerResponse();
+    message.rerankerId = object.rerankerId ?? "";
+    message.success = object.success ?? false;
+    return message;
+  },
+};
+
+function createBaseRerankerHeartbeatRequest(): RerankerHeartbeatRequest {
+  return {
+    rerankerId: "",
+    timestamp: "0",
+    cpuUsagePercent: 0,
+    memoryUsagePercent: 0,
+    diskUsagePercent: 0,
+    queriesPerSecond: 0,
+  };
+}
+
+export const RerankerHeartbeatRequest: MessageFns<RerankerHeartbeatRequest> = {
+  encode(message: RerankerHeartbeatRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.rerankerId !== "") {
+      writer.uint32(10).string(message.rerankerId);
+    }
+    if (message.timestamp !== "0") {
+      writer.uint32(16).int64(message.timestamp);
+    }
+    if (message.cpuUsagePercent !== 0) {
+      writer.uint32(29).float(message.cpuUsagePercent);
+    }
+    if (message.memoryUsagePercent !== 0) {
+      writer.uint32(37).float(message.memoryUsagePercent);
+    }
+    if (message.diskUsagePercent !== 0) {
+      writer.uint32(45).float(message.diskUsagePercent);
+    }
+    if (message.queriesPerSecond !== 0) {
+      writer.uint32(53).float(message.queriesPerSecond);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): RerankerHeartbeatRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseRerankerHeartbeatRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.rerankerId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.timestamp = reader.int64().toString();
+          continue;
+        }
+        case 3: {
+          if (tag !== 29) {
+            break;
+          }
+
+          message.cpuUsagePercent = reader.float();
+          continue;
+        }
+        case 4: {
+          if (tag !== 37) {
+            break;
+          }
+
+          message.memoryUsagePercent = reader.float();
+          continue;
+        }
+        case 5: {
+          if (tag !== 45) {
+            break;
+          }
+
+          message.diskUsagePercent = reader.float();
+          continue;
+        }
+        case 6: {
+          if (tag !== 53) {
+            break;
+          }
+
+          message.queriesPerSecond = reader.float();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): RerankerHeartbeatRequest {
+    return {
+      rerankerId: isSet(object.rerankerId) ? globalThis.String(object.rerankerId) : "",
+      timestamp: isSet(object.timestamp) ? globalThis.String(object.timestamp) : "0",
+      cpuUsagePercent: isSet(object.cpuUsagePercent) ? globalThis.Number(object.cpuUsagePercent) : 0,
+      memoryUsagePercent: isSet(object.memoryUsagePercent) ? globalThis.Number(object.memoryUsagePercent) : 0,
+      diskUsagePercent: isSet(object.diskUsagePercent) ? globalThis.Number(object.diskUsagePercent) : 0,
+      queriesPerSecond: isSet(object.queriesPerSecond) ? globalThis.Number(object.queriesPerSecond) : 0,
+    };
+  },
+
+  toJSON(message: RerankerHeartbeatRequest): unknown {
+    const obj: any = {};
+    if (message.rerankerId !== "") {
+      obj.rerankerId = message.rerankerId;
+    }
+    if (message.timestamp !== "0") {
+      obj.timestamp = message.timestamp;
+    }
+    if (message.cpuUsagePercent !== 0) {
+      obj.cpuUsagePercent = message.cpuUsagePercent;
+    }
+    if (message.memoryUsagePercent !== 0) {
+      obj.memoryUsagePercent = message.memoryUsagePercent;
+    }
+    if (message.diskUsagePercent !== 0) {
+      obj.diskUsagePercent = message.diskUsagePercent;
+    }
+    if (message.queriesPerSecond !== 0) {
+      obj.queriesPerSecond = message.queriesPerSecond;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<RerankerHeartbeatRequest>, I>>(base?: I): RerankerHeartbeatRequest {
+    return RerankerHeartbeatRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<RerankerHeartbeatRequest>, I>>(object: I): RerankerHeartbeatRequest {
+    const message = createBaseRerankerHeartbeatRequest();
+    message.rerankerId = object.rerankerId ?? "";
+    message.timestamp = object.timestamp ?? "0";
+    message.cpuUsagePercent = object.cpuUsagePercent ?? 0;
+    message.memoryUsagePercent = object.memoryUsagePercent ?? 0;
+    message.diskUsagePercent = object.diskUsagePercent ?? 0;
+    message.queriesPerSecond = object.queriesPerSecond ?? 0;
+    return message;
+  },
+};
+
+function createBaseRerankerHeartbeatResponse(): RerankerHeartbeatResponse {
+  return { ok: false, message: "" };
+}
+
+export const RerankerHeartbeatResponse: MessageFns<RerankerHeartbeatResponse> = {
+  encode(message: RerankerHeartbeatResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.ok !== false) {
+      writer.uint32(8).bool(message.ok);
+    }
+    if (message.message !== "") {
+      writer.uint32(18).string(message.message);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): RerankerHeartbeatResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseRerankerHeartbeatResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.ok = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.message = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): RerankerHeartbeatResponse {
+    return {
+      ok: isSet(object.ok) ? globalThis.Boolean(object.ok) : false,
+      message: isSet(object.message) ? globalThis.String(object.message) : "",
+    };
+  },
+
+  toJSON(message: RerankerHeartbeatResponse): unknown {
+    const obj: any = {};
+    if (message.ok !== false) {
+      obj.ok = message.ok;
+    }
+    if (message.message !== "") {
+      obj.message = message.message;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<RerankerHeartbeatResponse>, I>>(base?: I): RerankerHeartbeatResponse {
+    return RerankerHeartbeatResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<RerankerHeartbeatResponse>, I>>(object: I): RerankerHeartbeatResponse {
+    const message = createBaseRerankerHeartbeatResponse();
+    message.ok = object.ok ?? false;
+    message.message = object.message ?? "";
+    return message;
+  },
+};
+
+function createBaseListRerankersRequest(): ListRerankersRequest {
+  return {};
+}
+
+export const ListRerankersRequest: MessageFns<ListRerankersRequest> = {
+  encode(_: ListRerankersRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListRerankersRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListRerankersRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(_: any): ListRerankersRequest {
+    return {};
+  },
+
+  toJSON(_: ListRerankersRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListRerankersRequest>, I>>(base?: I): ListRerankersRequest {
+    return ListRerankersRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ListRerankersRequest>, I>>(_: I): ListRerankersRequest {
+    const message = createBaseListRerankersRequest();
+    return message;
+  },
+};
+
+function createBaseListRerankersResponse(): ListRerankersResponse {
+  return { rerankers: [] };
+}
+
+export const ListRerankersResponse: MessageFns<ListRerankersResponse> = {
+  encode(message: ListRerankersResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.rerankers) {
+      RerankerInfo.encode(v!, writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListRerankersResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListRerankersResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.rerankers.push(RerankerInfo.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListRerankersResponse {
+    return {
+      rerankers: globalThis.Array.isArray(object?.rerankers)
+        ? object.rerankers.map((e: any) => RerankerInfo.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: ListRerankersResponse): unknown {
+    const obj: any = {};
+    if (message.rerankers?.length) {
+      obj.rerankers = message.rerankers.map((e) => RerankerInfo.toJSON(e));
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListRerankersResponse>, I>>(base?: I): ListRerankersResponse {
+    return ListRerankersResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ListRerankersResponse>, I>>(object: I): ListRerankersResponse {
+    const message = createBaseListRerankersResponse();
+    message.rerankers = object.rerankers?.map((e) => RerankerInfo.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseGetRerankerRequest(): GetRerankerRequest {
+  return {};
+}
+
+export const GetRerankerRequest: MessageFns<GetRerankerRequest> = {
+  encode(_: GetRerankerRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GetRerankerRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetRerankerRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(_: any): GetRerankerRequest {
+    return {};
+  },
+
+  toJSON(_: GetRerankerRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetRerankerRequest>, I>>(base?: I): GetRerankerRequest {
+    return GetRerankerRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GetRerankerRequest>, I>>(_: I): GetRerankerRequest {
+    const message = createBaseGetRerankerRequest();
+    return message;
+  },
+};
+
+function createBaseGetRerankerResponse(): GetRerankerResponse {
+  return { rerankerId: "", grpcAddress: "" };
+}
+
+export const GetRerankerResponse: MessageFns<GetRerankerResponse> = {
+  encode(message: GetRerankerResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.rerankerId !== "") {
+      writer.uint32(10).string(message.rerankerId);
+    }
+    if (message.grpcAddress !== "") {
+      writer.uint32(18).string(message.grpcAddress);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GetRerankerResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetRerankerResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.rerankerId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.grpcAddress = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetRerankerResponse {
+    return {
+      rerankerId: isSet(object.rerankerId) ? globalThis.String(object.rerankerId) : "",
+      grpcAddress: isSet(object.grpcAddress) ? globalThis.String(object.grpcAddress) : "",
+    };
+  },
+
+  toJSON(message: GetRerankerResponse): unknown {
+    const obj: any = {};
+    if (message.rerankerId !== "") {
+      obj.rerankerId = message.rerankerId;
+    }
+    if (message.grpcAddress !== "") {
+      obj.grpcAddress = message.grpcAddress;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetRerankerResponse>, I>>(base?: I): GetRerankerResponse {
+    return GetRerankerResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GetRerankerResponse>, I>>(object: I): GetRerankerResponse {
+    const message = createBaseGetRerankerResponse();
+    message.rerankerId = object.rerankerId ?? "";
+    message.grpcAddress = object.grpcAddress ?? "";
+    return message;
+  },
+};
+
 function createBaseListWorkersForCollectionRequest(): ListWorkersForCollectionRequest {
   return { collection: "" };
 }
@@ -2306,6 +3090,231 @@ export const WorkerInfo_MetadataEntry: MessageFns<WorkerInfo_MetadataEntry> = {
   },
   fromPartial<I extends Exact<DeepPartial<WorkerInfo_MetadataEntry>, I>>(object: I): WorkerInfo_MetadataEntry {
     const message = createBaseWorkerInfo_MetadataEntry();
+    message.key = object.key ?? "";
+    message.value = object.value ?? "";
+    return message;
+  },
+};
+
+function createBaseRerankerInfo(): RerankerInfo {
+  return { rerankerId: "", grpcAddress: "", lastHeartbeat: "0", healthy: false, metadata: {} };
+}
+
+export const RerankerInfo: MessageFns<RerankerInfo> = {
+  encode(message: RerankerInfo, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.rerankerId !== "") {
+      writer.uint32(10).string(message.rerankerId);
+    }
+    if (message.grpcAddress !== "") {
+      writer.uint32(18).string(message.grpcAddress);
+    }
+    if (message.lastHeartbeat !== "0") {
+      writer.uint32(24).int64(message.lastHeartbeat);
+    }
+    if (message.healthy !== false) {
+      writer.uint32(32).bool(message.healthy);
+    }
+    globalThis.Object.entries(message.metadata).forEach(([key, value]: [string, string]) => {
+      RerankerInfo_MetadataEntry.encode({ key: key as any, value }, writer.uint32(42).fork()).join();
+    });
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): RerankerInfo {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseRerankerInfo();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.rerankerId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.grpcAddress = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.lastHeartbeat = reader.int64().toString();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.healthy = reader.bool();
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          const entry5 = RerankerInfo_MetadataEntry.decode(reader, reader.uint32());
+          if (entry5.value !== undefined) {
+            message.metadata[entry5.key] = entry5.value;
+          }
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): RerankerInfo {
+    return {
+      rerankerId: isSet(object.rerankerId) ? globalThis.String(object.rerankerId) : "",
+      grpcAddress: isSet(object.grpcAddress) ? globalThis.String(object.grpcAddress) : "",
+      lastHeartbeat: isSet(object.lastHeartbeat) ? globalThis.String(object.lastHeartbeat) : "0",
+      healthy: isSet(object.healthy) ? globalThis.Boolean(object.healthy) : false,
+      metadata: isObject(object.metadata)
+        ? (globalThis.Object.entries(object.metadata) as [string, any][]).reduce(
+          (acc: { [key: string]: string }, [key, value]: [string, any]) => {
+            acc[key] = globalThis.String(value);
+            return acc;
+          },
+          {},
+        )
+        : {},
+    };
+  },
+
+  toJSON(message: RerankerInfo): unknown {
+    const obj: any = {};
+    if (message.rerankerId !== "") {
+      obj.rerankerId = message.rerankerId;
+    }
+    if (message.grpcAddress !== "") {
+      obj.grpcAddress = message.grpcAddress;
+    }
+    if (message.lastHeartbeat !== "0") {
+      obj.lastHeartbeat = message.lastHeartbeat;
+    }
+    if (message.healthy !== false) {
+      obj.healthy = message.healthy;
+    }
+    if (message.metadata) {
+      const entries = globalThis.Object.entries(message.metadata) as [string, string][];
+      if (entries.length > 0) {
+        obj.metadata = {};
+        entries.forEach(([k, v]) => {
+          obj.metadata[k] = v;
+        });
+      }
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<RerankerInfo>, I>>(base?: I): RerankerInfo {
+    return RerankerInfo.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<RerankerInfo>, I>>(object: I): RerankerInfo {
+    const message = createBaseRerankerInfo();
+    message.rerankerId = object.rerankerId ?? "";
+    message.grpcAddress = object.grpcAddress ?? "";
+    message.lastHeartbeat = object.lastHeartbeat ?? "0";
+    message.healthy = object.healthy ?? false;
+    message.metadata = (globalThis.Object.entries(object.metadata ?? {}) as [string, string][]).reduce(
+      (acc: { [key: string]: string }, [key, value]: [string, string]) => {
+        if (value !== undefined) {
+          acc[key] = globalThis.String(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseRerankerInfo_MetadataEntry(): RerankerInfo_MetadataEntry {
+  return { key: "", value: "" };
+}
+
+export const RerankerInfo_MetadataEntry: MessageFns<RerankerInfo_MetadataEntry> = {
+  encode(message: RerankerInfo_MetadataEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.key !== "") {
+      writer.uint32(10).string(message.key);
+    }
+    if (message.value !== "") {
+      writer.uint32(18).string(message.value);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): RerankerInfo_MetadataEntry {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseRerankerInfo_MetadataEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.key = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.value = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): RerankerInfo_MetadataEntry {
+    return {
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
+      value: isSet(object.value) ? globalThis.String(object.value) : "",
+    };
+  },
+
+  toJSON(message: RerankerInfo_MetadataEntry): unknown {
+    const obj: any = {};
+    if (message.key !== "") {
+      obj.key = message.key;
+    }
+    if (message.value !== "") {
+      obj.value = message.value;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<RerankerInfo_MetadataEntry>, I>>(base?: I): RerankerInfo_MetadataEntry {
+    return RerankerInfo_MetadataEntry.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<RerankerInfo_MetadataEntry>, I>>(object: I): RerankerInfo_MetadataEntry {
+    const message = createBaseRerankerInfo_MetadataEntry();
     message.key = object.key ?? "";
     message.value = object.value ?? "";
     return message;
@@ -3438,6 +4447,51 @@ export const PlacementServiceService = {
     responseSerialize: (value: ListWorkersResponse): Buffer => Buffer.from(ListWorkersResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): ListWorkersResponse => ListWorkersResponse.decode(value),
   },
+  /** Reranker registers itself on startup */
+  registerReranker: {
+    path: "/vectron.placementdriver.v1.PlacementService/RegisterReranker",
+    requestStream: false,
+    responseStream: false,
+    requestSerialize: (value: RegisterRerankerRequest): Buffer =>
+      Buffer.from(RegisterRerankerRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): RegisterRerankerRequest => RegisterRerankerRequest.decode(value),
+    responseSerialize: (value: RegisterRerankerResponse): Buffer =>
+      Buffer.from(RegisterRerankerResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): RegisterRerankerResponse => RegisterRerankerResponse.decode(value),
+  },
+  /** Reranker sends heartbeat */
+  rerankerHeartbeat: {
+    path: "/vectron.placementdriver.v1.PlacementService/RerankerHeartbeat",
+    requestStream: false,
+    responseStream: false,
+    requestSerialize: (value: RerankerHeartbeatRequest): Buffer =>
+      Buffer.from(RerankerHeartbeatRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): RerankerHeartbeatRequest => RerankerHeartbeatRequest.decode(value),
+    responseSerialize: (value: RerankerHeartbeatResponse): Buffer =>
+      Buffer.from(RerankerHeartbeatResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): RerankerHeartbeatResponse => RerankerHeartbeatResponse.decode(value),
+  },
+  /** List all rerankers (for monitoring) */
+  listRerankers: {
+    path: "/vectron.placementdriver.v1.PlacementService/ListRerankers",
+    requestStream: false,
+    responseStream: false,
+    requestSerialize: (value: ListRerankersRequest): Buffer => Buffer.from(ListRerankersRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): ListRerankersRequest => ListRerankersRequest.decode(value),
+    responseSerialize: (value: ListRerankersResponse): Buffer =>
+      Buffer.from(ListRerankersResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): ListRerankersResponse => ListRerankersResponse.decode(value),
+  },
+  /** Get reranker address for routing */
+  getReranker: {
+    path: "/vectron.placementdriver.v1.PlacementService/GetReranker",
+    requestStream: false,
+    responseStream: false,
+    requestSerialize: (value: GetRerankerRequest): Buffer => Buffer.from(GetRerankerRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GetRerankerRequest => GetRerankerRequest.decode(value),
+    responseSerialize: (value: GetRerankerResponse): Buffer => Buffer.from(GetRerankerResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GetRerankerResponse => GetRerankerResponse.decode(value),
+  },
   listWorkersForCollection: {
     path: "/vectron.placementdriver.v1.PlacementService/ListWorkersForCollection",
     requestStream: false,
@@ -3547,6 +4601,14 @@ export interface PlacementServiceServer extends UntypedServiceImplementation {
   heartbeat: handleUnaryCall<HeartbeatRequest, HeartbeatResponse>;
   /** List all workers (for monitoring) */
   listWorkers: handleUnaryCall<ListWorkersRequest, ListWorkersResponse>;
+  /** Reranker registers itself on startup */
+  registerReranker: handleUnaryCall<RegisterRerankerRequest, RegisterRerankerResponse>;
+  /** Reranker sends heartbeat */
+  rerankerHeartbeat: handleUnaryCall<RerankerHeartbeatRequest, RerankerHeartbeatResponse>;
+  /** List all rerankers (for monitoring) */
+  listRerankers: handleUnaryCall<ListRerankersRequest, ListRerankersResponse>;
+  /** Get reranker address for routing */
+  getReranker: handleUnaryCall<GetRerankerRequest, GetRerankerResponse>;
   listWorkersForCollection: handleUnaryCall<ListWorkersForCollectionRequest, ListWorkersForCollectionResponse>;
   /** Admin: drain a worker (move shards away, stop new assignments) */
   drainWorker: handleUnaryCall<DrainWorkerRequest, DrainWorkerResponse>;
@@ -3626,6 +4688,70 @@ export interface PlacementServiceClient extends Client {
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: ListWorkersResponse) => void,
+  ): ClientUnaryCall;
+  /** Reranker registers itself on startup */
+  registerReranker(
+    request: RegisterRerankerRequest,
+    callback: (error: ServiceError | null, response: RegisterRerankerResponse) => void,
+  ): ClientUnaryCall;
+  registerReranker(
+    request: RegisterRerankerRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: RegisterRerankerResponse) => void,
+  ): ClientUnaryCall;
+  registerReranker(
+    request: RegisterRerankerRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: RegisterRerankerResponse) => void,
+  ): ClientUnaryCall;
+  /** Reranker sends heartbeat */
+  rerankerHeartbeat(
+    request: RerankerHeartbeatRequest,
+    callback: (error: ServiceError | null, response: RerankerHeartbeatResponse) => void,
+  ): ClientUnaryCall;
+  rerankerHeartbeat(
+    request: RerankerHeartbeatRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: RerankerHeartbeatResponse) => void,
+  ): ClientUnaryCall;
+  rerankerHeartbeat(
+    request: RerankerHeartbeatRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: RerankerHeartbeatResponse) => void,
+  ): ClientUnaryCall;
+  /** List all rerankers (for monitoring) */
+  listRerankers(
+    request: ListRerankersRequest,
+    callback: (error: ServiceError | null, response: ListRerankersResponse) => void,
+  ): ClientUnaryCall;
+  listRerankers(
+    request: ListRerankersRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: ListRerankersResponse) => void,
+  ): ClientUnaryCall;
+  listRerankers(
+    request: ListRerankersRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: ListRerankersResponse) => void,
+  ): ClientUnaryCall;
+  /** Get reranker address for routing */
+  getReranker(
+    request: GetRerankerRequest,
+    callback: (error: ServiceError | null, response: GetRerankerResponse) => void,
+  ): ClientUnaryCall;
+  getReranker(
+    request: GetRerankerRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GetRerankerResponse) => void,
+  ): ClientUnaryCall;
+  getReranker(
+    request: GetRerankerRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GetRerankerResponse) => void,
   ): ClientUnaryCall;
   listWorkersForCollection(
     request: ListWorkersForCollectionRequest,

@@ -106,7 +106,7 @@ const ProfilePage: React.FC = () => {
           </p>
         </div>
         <div className="p-6">
-          <div className="flex items-center justify-between p-4 rounded-lg bg-neutral-900/50 border border-neutral-800">
+          <div className="flex items-center justify-between p-4 rounded-lg bg-[#0a0a0a] border border-neutral-800">
             <div className="flex items-center gap-4">
               <div
                 className={`p-2 rounded-lg ${user?.plan === Plan.PAID ? "bg-purple-500/10 text-purple-400" : "bg-neutral-800 text-neutral-400"}`}

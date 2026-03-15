@@ -28,6 +28,8 @@ const (
 	RegisterReranker
 	// CreateCollection creates a new collection and its initial shards.
 	CreateCollection
+	// DeleteCollection deletes a collection and its shards.
+	DeleteCollection
 	// UpdateWorkerHeartbeat updates the last heartbeat timestamp for a worker.
 	UpdateWorkerHeartbeat
 	// UpdateRerankerHeartbeat updates the last heartbeat timestamp for a reranker.
@@ -108,6 +110,11 @@ type CreateCollectionPayload struct {
 	Dimension     int32  `json:"dimension"`
 	Distance      string `json:"distance"`
 	InitialShards int    `json:"initial_shards"`
+}
+
+// DeleteCollectionPayload is the data for the DeleteCollection command.
+type DeleteCollectionPayload struct {
+	Name string `json:"name"`
 }
 
 // UpdateWorkerHeartbeatPayload is the data for the UpdateWorkerHeartbeat command.
@@ -355,6 +362,18 @@ func (f *FSM) Update(entries []sm.Entry) ([]sm.Entry, error) {
 					result = 0 // Explicitly set 0 on failure.
 				} else {
 					result = 1 // Set 1 on success.
+				}
+			}
+		case DeleteCollection:
+			var payload DeleteCollectionPayload
+			if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
+				appErr = fmt.Errorf("failed to unmarshal DeleteCollection payload: %w", err)
+			} else {
+				if err := f.applyDeleteCollection(payload); err != nil {
+					appErr = err
+					result = 0
+				} else {
+					result = 1
 				}
 			}
 		case UpdateWorkerHeartbeat:
@@ -645,6 +664,23 @@ func (f *FSM) applyCreateCollection(payload CreateCollectionPayload) error {
 	f.Collections[collection.Name] = collection
 	f.bumpAssignmentsEpochLocked()
 	fmt.Printf("FSM: Successfully created collection '%s' with %d shards\n", collection.Name, numShards)
+	return nil
+}
+
+func (f *FSM) applyDeleteCollection(payload DeleteCollectionPayload) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if payload.Name == "" {
+		return fmt.Errorf("collection name is required")
+	}
+	if _, ok := f.Collections[payload.Name]; !ok {
+		return fmt.Errorf("collection %s not found", payload.Name)
+	}
+
+	delete(f.Collections, payload.Name)
+	f.bumpAssignmentsEpochLocked()
+	fmt.Printf("FSM: Deleted collection '%s'\n", payload.Name)
 	return nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -14,9 +15,11 @@ import (
 	"github.com/pavandhadge/vectron/reranker/internal"
 	"github.com/pavandhadge/vectron/reranker/internal/cache"
 	"github.com/pavandhadge/vectron/reranker/internal/strategies/rule"
+	pd "github.com/pavandhadge/vectron/shared/proto/placementdriver"
 	pb "github.com/pavandhadge/vectron/shared/proto/reranker"
 	"github.com/pavandhadge/vectron/shared/runtimeutil"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	_ "google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
@@ -90,6 +93,15 @@ func main() {
 		}
 	}()
 
+	// Register with Placement Driver (best-effort)
+	pdAddrs := getPDAddrs()
+	if len(pdAddrs) > 0 {
+		advertiseAddr := getRerankerAdvertiseAddr(*port)
+		go startPDHeartbeat(pdAddrs, advertiseAddr)
+	} else {
+		log.Println("Placement Driver addresses not configured; skipping reranker registration")
+	}
+
 	// Wait for interrupt signal
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -98,6 +110,152 @@ func main() {
 	log.Println("Shutting down gracefully...")
 	server.GracefulStop()
 	log.Println("Server stopped")
+}
+
+func getPDAddrs() []string {
+	raw := strings.TrimSpace(os.Getenv("RERANKER_PD_ADDRS"))
+	if raw == "" {
+		raw = strings.TrimSpace(os.Getenv("PD_ADDRS"))
+	}
+	if raw == "" {
+		raw = strings.TrimSpace(os.Getenv("PLACEMENT_DRIVER"))
+	}
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func getRerankerAdvertiseAddr(port string) string {
+	if addr := strings.TrimSpace(os.Getenv("RERANKER_ADVERTISE_ADDR")); addr != "" {
+		return addr
+	}
+	host := strings.TrimSpace(os.Getenv("RERANKER_HOST"))
+	if host == "" {
+		host = "localhost"
+	}
+	if strings.Contains(port, ":") {
+		return port
+	}
+	return host + ":" + port
+}
+
+func startPDHeartbeat(pdAddrs []string, advertiseAddr string) {
+	heartbeatInterval := 5 * time.Second
+	var rerankerID string
+	var client pd.PlacementServiceClient
+	var conn *grpc.ClientConn
+
+	register := func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		for _, addr := range pdAddrs {
+			c, err := grpc.DialContext(ctx, addr,
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+				grpc.WithKeepaliveParams(keepalive.ClientParameters{
+					Time:                20 * time.Second,
+					Timeout:             5 * time.Second,
+					PermitWithoutStream: true,
+				}),
+				grpc.WithBlock(),
+			)
+			if err != nil {
+				log.Printf("Failed to connect to PD at %s: %v", addr, err)
+				continue
+			}
+			cli := pd.NewPlacementServiceClient(c)
+
+			cpuCores, memBytes, diskBytes := collectCapacityMetrics()
+			rack, zone, region := collectFailureDomain()
+			resp, err := cli.RegisterReranker(ctx, &pd.RegisterRerankerRequest{
+				GrpcAddress: advertiseAddr,
+				CpuCores:    cpuCores,
+				MemoryBytes: memBytes,
+				DiskBytes:   diskBytes,
+				Rack:        rack,
+				Zone:        zone,
+				Region:      region,
+				Timestamp:   time.Now().Unix(),
+			})
+			if err != nil || resp.GetRerankerId() == "" {
+				log.Printf("Failed to register reranker with PD at %s: %v", addr, err)
+				c.Close()
+				continue
+			}
+
+			if conn != nil {
+				conn.Close()
+			}
+			conn = c
+			client = cli
+			rerankerID = resp.GetRerankerId()
+			log.Printf("Registered reranker with PD at %s as ID %s (addr=%s)", addr, rerankerID, advertiseAddr)
+			return true
+		}
+		return false
+	}
+
+	if !register() {
+		log.Println("Failed to register reranker with any PD; will retry in background")
+	}
+
+	ticker := time.NewTicker(heartbeatInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		if client == nil || rerankerID == "" {
+			if !register() {
+				continue
+			}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_, err := client.RerankerHeartbeat(ctx, &pd.RerankerHeartbeatRequest{
+			RerankerId: rerankerID,
+			Timestamp:  time.Now().Unix(),
+		})
+		cancel()
+		if err != nil {
+			log.Printf("Reranker heartbeat failed: %v", err)
+			rerankerID = ""
+		}
+	}
+}
+
+// collectCapacityMetrics gathers system capacity information.
+func collectCapacityMetrics() (cpuCores int32, memoryBytes, diskBytes int64) {
+	cpuCores = int32(runtime.NumCPU())
+
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	memoryBytes = int64(m.Sys)
+
+	diskBytes = 500 * 1024 * 1024 * 1024
+	return
+}
+
+// collectFailureDomain gathers failure domain information from environment.
+func collectFailureDomain() (rack, zone, region string) {
+	rack = os.Getenv("VECTRON_RACK")
+	if rack == "" {
+		rack = "default-rack"
+	}
+	zone = os.Getenv("VECTRON_ZONE")
+	if zone == "" {
+		zone = "default-zone"
+	}
+	region = os.Getenv("VECTRON_REGION")
+	if region == "" {
+		region = "default-region"
+	}
+	return
 }
 
 // createCache initializes the cache implementation based on config.

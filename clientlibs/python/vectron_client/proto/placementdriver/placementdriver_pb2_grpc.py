@@ -54,6 +54,26 @@ class PlacementServiceStub(object):
                 request_serializer=placementdriver_dot_placementdriver__pb2.ListWorkersRequest.SerializeToString,
                 response_deserializer=placementdriver_dot_placementdriver__pb2.ListWorkersResponse.FromString,
                 _registered_method=True)
+        self.RegisterReranker = channel.unary_unary(
+                '/vectron.placementdriver.v1.PlacementService/RegisterReranker',
+                request_serializer=placementdriver_dot_placementdriver__pb2.RegisterRerankerRequest.SerializeToString,
+                response_deserializer=placementdriver_dot_placementdriver__pb2.RegisterRerankerResponse.FromString,
+                _registered_method=True)
+        self.RerankerHeartbeat = channel.unary_unary(
+                '/vectron.placementdriver.v1.PlacementService/RerankerHeartbeat',
+                request_serializer=placementdriver_dot_placementdriver__pb2.RerankerHeartbeatRequest.SerializeToString,
+                response_deserializer=placementdriver_dot_placementdriver__pb2.RerankerHeartbeatResponse.FromString,
+                _registered_method=True)
+        self.ListRerankers = channel.unary_unary(
+                '/vectron.placementdriver.v1.PlacementService/ListRerankers',
+                request_serializer=placementdriver_dot_placementdriver__pb2.ListRerankersRequest.SerializeToString,
+                response_deserializer=placementdriver_dot_placementdriver__pb2.ListRerankersResponse.FromString,
+                _registered_method=True)
+        self.GetReranker = channel.unary_unary(
+                '/vectron.placementdriver.v1.PlacementService/GetReranker',
+                request_serializer=placementdriver_dot_placementdriver__pb2.GetRerankerRequest.SerializeToString,
+                response_deserializer=placementdriver_dot_placementdriver__pb2.GetRerankerResponse.FromString,
+                _registered_method=True)
         self.ListWorkersForCollection = channel.unary_unary(
                 '/vectron.placementdriver.v1.PlacementService/ListWorkersForCollection',
                 request_serializer=placementdriver_dot_placementdriver__pb2.ListWorkersForCollectionRequest.SerializeToString,
@@ -127,6 +147,34 @@ class PlacementServiceServicer(object):
 
     def ListWorkers(self, request, context):
         """List all workers (for monitoring)
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RegisterReranker(self, request, context):
+        """Reranker registers itself on startup
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RerankerHeartbeat(self, request, context):
+        """Reranker sends heartbeat
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListRerankers(self, request, context):
+        """List all rerankers (for monitoring)
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetReranker(self, request, context):
+        """Get reranker address for routing
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -212,6 +260,26 @@ def add_PlacementServiceServicer_to_server(servicer, server):
                     servicer.ListWorkers,
                     request_deserializer=placementdriver_dot_placementdriver__pb2.ListWorkersRequest.FromString,
                     response_serializer=placementdriver_dot_placementdriver__pb2.ListWorkersResponse.SerializeToString,
+            ),
+            'RegisterReranker': grpc.unary_unary_rpc_method_handler(
+                    servicer.RegisterReranker,
+                    request_deserializer=placementdriver_dot_placementdriver__pb2.RegisterRerankerRequest.FromString,
+                    response_serializer=placementdriver_dot_placementdriver__pb2.RegisterRerankerResponse.SerializeToString,
+            ),
+            'RerankerHeartbeat': grpc.unary_unary_rpc_method_handler(
+                    servicer.RerankerHeartbeat,
+                    request_deserializer=placementdriver_dot_placementdriver__pb2.RerankerHeartbeatRequest.FromString,
+                    response_serializer=placementdriver_dot_placementdriver__pb2.RerankerHeartbeatResponse.SerializeToString,
+            ),
+            'ListRerankers': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListRerankers,
+                    request_deserializer=placementdriver_dot_placementdriver__pb2.ListRerankersRequest.FromString,
+                    response_serializer=placementdriver_dot_placementdriver__pb2.ListRerankersResponse.SerializeToString,
+            ),
+            'GetReranker': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetReranker,
+                    request_deserializer=placementdriver_dot_placementdriver__pb2.GetRerankerRequest.FromString,
+                    response_serializer=placementdriver_dot_placementdriver__pb2.GetRerankerResponse.SerializeToString,
             ),
             'ListWorkersForCollection': grpc.unary_unary_rpc_method_handler(
                     servicer.ListWorkersForCollection,
@@ -367,6 +435,114 @@ class PlacementService(object):
             '/vectron.placementdriver.v1.PlacementService/ListWorkers',
             placementdriver_dot_placementdriver__pb2.ListWorkersRequest.SerializeToString,
             placementdriver_dot_placementdriver__pb2.ListWorkersResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RegisterReranker(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vectron.placementdriver.v1.PlacementService/RegisterReranker',
+            placementdriver_dot_placementdriver__pb2.RegisterRerankerRequest.SerializeToString,
+            placementdriver_dot_placementdriver__pb2.RegisterRerankerResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RerankerHeartbeat(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vectron.placementdriver.v1.PlacementService/RerankerHeartbeat',
+            placementdriver_dot_placementdriver__pb2.RerankerHeartbeatRequest.SerializeToString,
+            placementdriver_dot_placementdriver__pb2.RerankerHeartbeatResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListRerankers(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vectron.placementdriver.v1.PlacementService/ListRerankers',
+            placementdriver_dot_placementdriver__pb2.ListRerankersRequest.SerializeToString,
+            placementdriver_dot_placementdriver__pb2.ListRerankersResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetReranker(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vectron.placementdriver.v1.PlacementService/GetReranker',
+            placementdriver_dot_placementdriver__pb2.GetRerankerRequest.SerializeToString,
+            placementdriver_dot_placementdriver__pb2.GetRerankerResponse.FromString,
             options,
             channel_credentials,
             insecure,

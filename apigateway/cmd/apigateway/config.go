@@ -64,6 +64,8 @@ type Config struct {
 	GatewayDebugLogs              bool            // Enable verbose gateway logs.
 	GatewayLogSampleEvery         int             // Sample rate for hot-path logs (1 = log all).
 	RawSpeedMode                  bool            // Disable expensive features for max throughput.
+	RerankerDiscoveryEnabled      bool            // Enable reranker discovery via placement driver.
+	RerankerDiscoveryTTLms        int             // TTL for reranker discovery cache (milliseconds).
 }
 
 // LoadConfig loads the configuration from environment variables with default fallbacks.
@@ -118,6 +120,8 @@ func LoadConfig() Config {
 		ResolveCacheTTLms:             getEnvAsInt("RESOLVE_CACHE_TTL_MS", 30000),
 		PreferSearchOnlyWorkers:       getEnvAsBool("PREFER_SEARCH_ONLY_WORKERS", true),
 		WorkerRoleCacheTTLms:          getEnvAsInt("WORKER_ROLE_CACHE_TTL_MS", 5000),
+		RerankerDiscoveryEnabled:      getEnvAsBool("RERANKER_DISCOVERY_ENABLED", false),
+		RerankerDiscoveryTTLms:        getEnvAsInt("RERANKER_DISCOVERY_TTL_MS", 5000),
 		GatewayDebugLogs:              getEnvAsBool("GATEWAY_DEBUG_LOGS", false),
 		GatewayLogSampleEvery:         getEnvAsInt("GATEWAY_LOG_SAMPLE_EVERY", 100),
 		RawSpeedMode:                  getEnvAsBool("RAW_SPEED_MODE", false),

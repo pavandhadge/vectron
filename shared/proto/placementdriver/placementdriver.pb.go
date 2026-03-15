@@ -1076,6 +1076,472 @@ func (x *ListWorkersResponse) GetWorkers() []*WorkerInfo {
 	return nil
 }
 
+type RegisterRerankerRequest struct {
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	GrpcAddress  string                 `protobuf:"bytes,1,opt,name=grpc_address,json=grpcAddress,proto3" json:"grpc_address,omitempty"`
+	Capabilities []string               `protobuf:"bytes,2,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
+	Timestamp    int64                  `protobuf:"varint,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	// Capacity information for capacity-weighted placement
+	CpuCores    int32 `protobuf:"varint,4,opt,name=cpu_cores,json=cpuCores,proto3" json:"cpu_cores,omitempty"`
+	MemoryBytes int64 `protobuf:"varint,5,opt,name=memory_bytes,json=memoryBytes,proto3" json:"memory_bytes,omitempty"`
+	DiskBytes   int64 `protobuf:"varint,6,opt,name=disk_bytes,json=diskBytes,proto3" json:"disk_bytes,omitempty"`
+	// Failure domain information for fault-tolerant placement
+	Rack          string `protobuf:"bytes,7,opt,name=rack,proto3" json:"rack,omitempty"`
+	Zone          string `protobuf:"bytes,8,opt,name=zone,proto3" json:"zone,omitempty"`
+	Region        string `protobuf:"bytes,9,opt,name=region,proto3" json:"region,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RegisterRerankerRequest) Reset() {
+	*x = RegisterRerankerRequest{}
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterRerankerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterRerankerRequest) ProtoMessage() {}
+
+func (x *RegisterRerankerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterRerankerRequest.ProtoReflect.Descriptor instead.
+func (*RegisterRerankerRequest) Descriptor() ([]byte, []int) {
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *RegisterRerankerRequest) GetGrpcAddress() string {
+	if x != nil {
+		return x.GrpcAddress
+	}
+	return ""
+}
+
+func (x *RegisterRerankerRequest) GetCapabilities() []string {
+	if x != nil {
+		return x.Capabilities
+	}
+	return nil
+}
+
+func (x *RegisterRerankerRequest) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
+func (x *RegisterRerankerRequest) GetCpuCores() int32 {
+	if x != nil {
+		return x.CpuCores
+	}
+	return 0
+}
+
+func (x *RegisterRerankerRequest) GetMemoryBytes() int64 {
+	if x != nil {
+		return x.MemoryBytes
+	}
+	return 0
+}
+
+func (x *RegisterRerankerRequest) GetDiskBytes() int64 {
+	if x != nil {
+		return x.DiskBytes
+	}
+	return 0
+}
+
+func (x *RegisterRerankerRequest) GetRack() string {
+	if x != nil {
+		return x.Rack
+	}
+	return ""
+}
+
+func (x *RegisterRerankerRequest) GetZone() string {
+	if x != nil {
+		return x.Zone
+	}
+	return ""
+}
+
+func (x *RegisterRerankerRequest) GetRegion() string {
+	if x != nil {
+		return x.Region
+	}
+	return ""
+}
+
+type RegisterRerankerResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RerankerId    string                 `protobuf:"bytes,1,opt,name=reranker_id,json=rerankerId,proto3" json:"reranker_id,omitempty"`
+	Success       bool                   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RegisterRerankerResponse) Reset() {
+	*x = RegisterRerankerResponse{}
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterRerankerResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterRerankerResponse) ProtoMessage() {}
+
+func (x *RegisterRerankerResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterRerankerResponse.ProtoReflect.Descriptor instead.
+func (*RegisterRerankerResponse) Descriptor() ([]byte, []int) {
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *RegisterRerankerResponse) GetRerankerId() string {
+	if x != nil {
+		return x.RerankerId
+	}
+	return ""
+}
+
+func (x *RegisterRerankerResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+type RerankerHeartbeatRequest struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	RerankerId         string                 `protobuf:"bytes,1,opt,name=reranker_id,json=rerankerId,proto3" json:"reranker_id,omitempty"`
+	Timestamp          int64                  `protobuf:"varint,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	CpuUsagePercent    float32                `protobuf:"fixed32,3,opt,name=cpu_usage_percent,json=cpuUsagePercent,proto3" json:"cpu_usage_percent,omitempty"`
+	MemoryUsagePercent float32                `protobuf:"fixed32,4,opt,name=memory_usage_percent,json=memoryUsagePercent,proto3" json:"memory_usage_percent,omitempty"`
+	DiskUsagePercent   float32                `protobuf:"fixed32,5,opt,name=disk_usage_percent,json=diskUsagePercent,proto3" json:"disk_usage_percent,omitempty"`
+	QueriesPerSecond   float32                `protobuf:"fixed32,6,opt,name=queries_per_second,json=queriesPerSecond,proto3" json:"queries_per_second,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *RerankerHeartbeatRequest) Reset() {
+	*x = RerankerHeartbeatRequest{}
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RerankerHeartbeatRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RerankerHeartbeatRequest) ProtoMessage() {}
+
+func (x *RerankerHeartbeatRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RerankerHeartbeatRequest.ProtoReflect.Descriptor instead.
+func (*RerankerHeartbeatRequest) Descriptor() ([]byte, []int) {
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *RerankerHeartbeatRequest) GetRerankerId() string {
+	if x != nil {
+		return x.RerankerId
+	}
+	return ""
+}
+
+func (x *RerankerHeartbeatRequest) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
+func (x *RerankerHeartbeatRequest) GetCpuUsagePercent() float32 {
+	if x != nil {
+		return x.CpuUsagePercent
+	}
+	return 0
+}
+
+func (x *RerankerHeartbeatRequest) GetMemoryUsagePercent() float32 {
+	if x != nil {
+		return x.MemoryUsagePercent
+	}
+	return 0
+}
+
+func (x *RerankerHeartbeatRequest) GetDiskUsagePercent() float32 {
+	if x != nil {
+		return x.DiskUsagePercent
+	}
+	return 0
+}
+
+func (x *RerankerHeartbeatRequest) GetQueriesPerSecond() float32 {
+	if x != nil {
+		return x.QueriesPerSecond
+	}
+	return 0
+}
+
+type RerankerHeartbeatResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RerankerHeartbeatResponse) Reset() {
+	*x = RerankerHeartbeatResponse{}
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RerankerHeartbeatResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RerankerHeartbeatResponse) ProtoMessage() {}
+
+func (x *RerankerHeartbeatResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RerankerHeartbeatResponse.ProtoReflect.Descriptor instead.
+func (*RerankerHeartbeatResponse) Descriptor() ([]byte, []int) {
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *RerankerHeartbeatResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *RerankerHeartbeatResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+type ListRerankersRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListRerankersRequest) Reset() {
+	*x = ListRerankersRequest{}
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListRerankersRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListRerankersRequest) ProtoMessage() {}
+
+func (x *ListRerankersRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListRerankersRequest.ProtoReflect.Descriptor instead.
+func (*ListRerankersRequest) Descriptor() ([]byte, []int) {
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{19}
+}
+
+type ListRerankersResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Rerankers     []*RerankerInfo        `protobuf:"bytes,1,rep,name=rerankers,proto3" json:"rerankers,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListRerankersResponse) Reset() {
+	*x = ListRerankersResponse{}
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListRerankersResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListRerankersResponse) ProtoMessage() {}
+
+func (x *ListRerankersResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListRerankersResponse.ProtoReflect.Descriptor instead.
+func (*ListRerankersResponse) Descriptor() ([]byte, []int) {
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *ListRerankersResponse) GetRerankers() []*RerankerInfo {
+	if x != nil {
+		return x.Rerankers
+	}
+	return nil
+}
+
+type GetRerankerRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetRerankerRequest) Reset() {
+	*x = GetRerankerRequest{}
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetRerankerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetRerankerRequest) ProtoMessage() {}
+
+func (x *GetRerankerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetRerankerRequest.ProtoReflect.Descriptor instead.
+func (*GetRerankerRequest) Descriptor() ([]byte, []int) {
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{21}
+}
+
+type GetRerankerResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RerankerId    string                 `protobuf:"bytes,1,opt,name=reranker_id,json=rerankerId,proto3" json:"reranker_id,omitempty"`
+	GrpcAddress   string                 `protobuf:"bytes,2,opt,name=grpc_address,json=grpcAddress,proto3" json:"grpc_address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetRerankerResponse) Reset() {
+	*x = GetRerankerResponse{}
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetRerankerResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetRerankerResponse) ProtoMessage() {}
+
+func (x *GetRerankerResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetRerankerResponse.ProtoReflect.Descriptor instead.
+func (*GetRerankerResponse) Descriptor() ([]byte, []int) {
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *GetRerankerResponse) GetRerankerId() string {
+	if x != nil {
+		return x.RerankerId
+	}
+	return ""
+}
+
+func (x *GetRerankerResponse) GetGrpcAddress() string {
+	if x != nil {
+		return x.GrpcAddress
+	}
+	return ""
+}
+
 type ListWorkersForCollectionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Collection    string                 `protobuf:"bytes,1,opt,name=collection,proto3" json:"collection,omitempty"`
@@ -1085,7 +1551,7 @@ type ListWorkersForCollectionRequest struct {
 
 func (x *ListWorkersForCollectionRequest) Reset() {
 	*x = ListWorkersForCollectionRequest{}
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[15]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1097,7 +1563,7 @@ func (x *ListWorkersForCollectionRequest) String() string {
 func (*ListWorkersForCollectionRequest) ProtoMessage() {}
 
 func (x *ListWorkersForCollectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[15]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1110,7 +1576,7 @@ func (x *ListWorkersForCollectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkersForCollectionRequest.ProtoReflect.Descriptor instead.
 func (*ListWorkersForCollectionRequest) Descriptor() ([]byte, []int) {
-	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{15}
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ListWorkersForCollectionRequest) GetCollection() string {
@@ -1129,7 +1595,7 @@ type ListWorkersForCollectionResponse struct {
 
 func (x *ListWorkersForCollectionResponse) Reset() {
 	*x = ListWorkersForCollectionResponse{}
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[16]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1141,7 +1607,7 @@ func (x *ListWorkersForCollectionResponse) String() string {
 func (*ListWorkersForCollectionResponse) ProtoMessage() {}
 
 func (x *ListWorkersForCollectionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[16]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1154,7 +1620,7 @@ func (x *ListWorkersForCollectionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkersForCollectionResponse.ProtoReflect.Descriptor instead.
 func (*ListWorkersForCollectionResponse) Descriptor() ([]byte, []int) {
-	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{16}
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ListWorkersForCollectionResponse) GetGrpcAddresses() []string {
@@ -1180,7 +1646,7 @@ type WorkerInfo struct {
 
 func (x *WorkerInfo) Reset() {
 	*x = WorkerInfo{}
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[17]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1192,7 +1658,7 @@ func (x *WorkerInfo) String() string {
 func (*WorkerInfo) ProtoMessage() {}
 
 func (x *WorkerInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[17]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1205,7 +1671,7 @@ func (x *WorkerInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerInfo.ProtoReflect.Descriptor instead.
 func (*WorkerInfo) Descriptor() ([]byte, []int) {
-	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{17}
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *WorkerInfo) GetWorkerId() string {
@@ -1264,6 +1730,82 @@ func (x *WorkerInfo) GetState() WorkerState {
 	return WorkerState_WORKER_STATE_UNKNOWN
 }
 
+type RerankerInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RerankerId    string                 `protobuf:"bytes,1,opt,name=reranker_id,json=rerankerId,proto3" json:"reranker_id,omitempty"`
+	GrpcAddress   string                 `protobuf:"bytes,2,opt,name=grpc_address,json=grpcAddress,proto3" json:"grpc_address,omitempty"`
+	LastHeartbeat int64                  `protobuf:"varint,3,opt,name=last_heartbeat,json=lastHeartbeat,proto3" json:"last_heartbeat,omitempty"`
+	Healthy       bool                   `protobuf:"varint,4,opt,name=healthy,proto3" json:"healthy,omitempty"`
+	Metadata      map[string]string      `protobuf:"bytes,5,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RerankerInfo) Reset() {
+	*x = RerankerInfo{}
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RerankerInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RerankerInfo) ProtoMessage() {}
+
+func (x *RerankerInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RerankerInfo.ProtoReflect.Descriptor instead.
+func (*RerankerInfo) Descriptor() ([]byte, []int) {
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *RerankerInfo) GetRerankerId() string {
+	if x != nil {
+		return x.RerankerId
+	}
+	return ""
+}
+
+func (x *RerankerInfo) GetGrpcAddress() string {
+	if x != nil {
+		return x.GrpcAddress
+	}
+	return ""
+}
+
+func (x *RerankerInfo) GetLastHeartbeat() int64 {
+	if x != nil {
+		return x.LastHeartbeat
+	}
+	return 0
+}
+
+func (x *RerankerInfo) GetHealthy() bool {
+	if x != nil {
+		return x.Healthy
+	}
+	return false
+}
+
+func (x *RerankerInfo) GetMetadata() map[string]string {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
 type DrainWorkerRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkerId      string                 `protobuf:"bytes,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
@@ -1273,7 +1815,7 @@ type DrainWorkerRequest struct {
 
 func (x *DrainWorkerRequest) Reset() {
 	*x = DrainWorkerRequest{}
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[18]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1285,7 +1827,7 @@ func (x *DrainWorkerRequest) String() string {
 func (*DrainWorkerRequest) ProtoMessage() {}
 
 func (x *DrainWorkerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[18]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1298,7 +1840,7 @@ func (x *DrainWorkerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DrainWorkerRequest.ProtoReflect.Descriptor instead.
 func (*DrainWorkerRequest) Descriptor() ([]byte, []int) {
-	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{18}
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *DrainWorkerRequest) GetWorkerId() string {
@@ -1317,7 +1859,7 @@ type DrainWorkerResponse struct {
 
 func (x *DrainWorkerResponse) Reset() {
 	*x = DrainWorkerResponse{}
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[19]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1329,7 +1871,7 @@ func (x *DrainWorkerResponse) String() string {
 func (*DrainWorkerResponse) ProtoMessage() {}
 
 func (x *DrainWorkerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[19]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1342,7 +1884,7 @@ func (x *DrainWorkerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DrainWorkerResponse.ProtoReflect.Descriptor instead.
 func (*DrainWorkerResponse) Descriptor() ([]byte, []int) {
-	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{19}
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *DrainWorkerResponse) GetSuccess() bool {
@@ -1361,7 +1903,7 @@ type RemoveWorkerRequest struct {
 
 func (x *RemoveWorkerRequest) Reset() {
 	*x = RemoveWorkerRequest{}
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[20]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1373,7 +1915,7 @@ func (x *RemoveWorkerRequest) String() string {
 func (*RemoveWorkerRequest) ProtoMessage() {}
 
 func (x *RemoveWorkerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[20]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1386,7 +1928,7 @@ func (x *RemoveWorkerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveWorkerRequest.ProtoReflect.Descriptor instead.
 func (*RemoveWorkerRequest) Descriptor() ([]byte, []int) {
-	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{20}
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *RemoveWorkerRequest) GetWorkerId() string {
@@ -1405,7 +1947,7 @@ type RemoveWorkerResponse struct {
 
 func (x *RemoveWorkerResponse) Reset() {
 	*x = RemoveWorkerResponse{}
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[21]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1417,7 +1959,7 @@ func (x *RemoveWorkerResponse) String() string {
 func (*RemoveWorkerResponse) ProtoMessage() {}
 
 func (x *RemoveWorkerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[21]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1430,7 +1972,7 @@ func (x *RemoveWorkerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveWorkerResponse.ProtoReflect.Descriptor instead.
 func (*RemoveWorkerResponse) Descriptor() ([]byte, []int) {
-	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{21}
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *RemoveWorkerResponse) GetSuccess() bool {
@@ -1448,7 +1990,7 @@ type RebalanceRequest struct {
 
 func (x *RebalanceRequest) Reset() {
 	*x = RebalanceRequest{}
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[22]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1460,7 +2002,7 @@ func (x *RebalanceRequest) String() string {
 func (*RebalanceRequest) ProtoMessage() {}
 
 func (x *RebalanceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[22]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1473,7 +2015,7 @@ func (x *RebalanceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RebalanceRequest.ProtoReflect.Descriptor instead.
 func (*RebalanceRequest) Descriptor() ([]byte, []int) {
-	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{22}
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{31}
 }
 
 type RebalanceResponse struct {
@@ -1485,7 +2027,7 @@ type RebalanceResponse struct {
 
 func (x *RebalanceResponse) Reset() {
 	*x = RebalanceResponse{}
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[23]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1497,7 +2039,7 @@ func (x *RebalanceResponse) String() string {
 func (*RebalanceResponse) ProtoMessage() {}
 
 func (x *RebalanceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[23]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1510,7 +2052,7 @@ func (x *RebalanceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RebalanceResponse.ProtoReflect.Descriptor instead.
 func (*RebalanceResponse) Descriptor() ([]byte, []int) {
-	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{23}
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *RebalanceResponse) GetStarted() bool {
@@ -1531,7 +2073,7 @@ type CreateCollectionRequest struct {
 
 func (x *CreateCollectionRequest) Reset() {
 	*x = CreateCollectionRequest{}
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[24]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1543,7 +2085,7 @@ func (x *CreateCollectionRequest) String() string {
 func (*CreateCollectionRequest) ProtoMessage() {}
 
 func (x *CreateCollectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[24]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1556,7 +2098,7 @@ func (x *CreateCollectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateCollectionRequest.ProtoReflect.Descriptor instead.
 func (*CreateCollectionRequest) Descriptor() ([]byte, []int) {
-	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{24}
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *CreateCollectionRequest) GetName() string {
@@ -1589,7 +2131,7 @@ type CreateCollectionResponse struct {
 
 func (x *CreateCollectionResponse) Reset() {
 	*x = CreateCollectionResponse{}
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[25]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1601,7 +2143,7 @@ func (x *CreateCollectionResponse) String() string {
 func (*CreateCollectionResponse) ProtoMessage() {}
 
 func (x *CreateCollectionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[25]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1614,7 +2156,7 @@ func (x *CreateCollectionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateCollectionResponse.ProtoReflect.Descriptor instead.
 func (*CreateCollectionResponse) Descriptor() ([]byte, []int) {
-	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{25}
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *CreateCollectionResponse) GetSuccess() bool {
@@ -1632,7 +2174,7 @@ type ListCollectionsRequest struct {
 
 func (x *ListCollectionsRequest) Reset() {
 	*x = ListCollectionsRequest{}
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[26]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1644,7 +2186,7 @@ func (x *ListCollectionsRequest) String() string {
 func (*ListCollectionsRequest) ProtoMessage() {}
 
 func (x *ListCollectionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[26]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1657,7 +2199,7 @@ func (x *ListCollectionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCollectionsRequest.ProtoReflect.Descriptor instead.
 func (*ListCollectionsRequest) Descriptor() ([]byte, []int) {
-	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{26}
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{35}
 }
 
 type ListCollectionsResponse struct {
@@ -1669,7 +2211,7 @@ type ListCollectionsResponse struct {
 
 func (x *ListCollectionsResponse) Reset() {
 	*x = ListCollectionsResponse{}
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[27]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1681,7 +2223,7 @@ func (x *ListCollectionsResponse) String() string {
 func (*ListCollectionsResponse) ProtoMessage() {}
 
 func (x *ListCollectionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[27]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1694,7 +2236,7 @@ func (x *ListCollectionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCollectionsResponse.ProtoReflect.Descriptor instead.
 func (*ListCollectionsResponse) Descriptor() ([]byte, []int) {
-	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{27}
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ListCollectionsResponse) GetCollections() []string {
@@ -1713,7 +2255,7 @@ type DeleteCollectionRequest struct {
 
 func (x *DeleteCollectionRequest) Reset() {
 	*x = DeleteCollectionRequest{}
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[28]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1725,7 +2267,7 @@ func (x *DeleteCollectionRequest) String() string {
 func (*DeleteCollectionRequest) ProtoMessage() {}
 
 func (x *DeleteCollectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[28]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1738,7 +2280,7 @@ func (x *DeleteCollectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteCollectionRequest.ProtoReflect.Descriptor instead.
 func (*DeleteCollectionRequest) Descriptor() ([]byte, []int) {
-	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{28}
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *DeleteCollectionRequest) GetName() string {
@@ -1757,7 +2299,7 @@ type DeleteCollectionResponse struct {
 
 func (x *DeleteCollectionResponse) Reset() {
 	*x = DeleteCollectionResponse{}
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[29]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1769,7 +2311,7 @@ func (x *DeleteCollectionResponse) String() string {
 func (*DeleteCollectionResponse) ProtoMessage() {}
 
 func (x *DeleteCollectionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[29]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1782,7 +2324,7 @@ func (x *DeleteCollectionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteCollectionResponse.ProtoReflect.Descriptor instead.
 func (*DeleteCollectionResponse) Descriptor() ([]byte, []int) {
-	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{29}
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *DeleteCollectionResponse) GetSuccess() bool {
@@ -1801,7 +2343,7 @@ type GetCollectionStatusRequest struct {
 
 func (x *GetCollectionStatusRequest) Reset() {
 	*x = GetCollectionStatusRequest{}
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[30]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1813,7 +2355,7 @@ func (x *GetCollectionStatusRequest) String() string {
 func (*GetCollectionStatusRequest) ProtoMessage() {}
 
 func (x *GetCollectionStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[30]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1826,7 +2368,7 @@ func (x *GetCollectionStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCollectionStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetCollectionStatusRequest) Descriptor() ([]byte, []int) {
-	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{30}
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *GetCollectionStatusRequest) GetName() string {
@@ -1848,7 +2390,7 @@ type GetCollectionStatusResponse struct {
 
 func (x *GetCollectionStatusResponse) Reset() {
 	*x = GetCollectionStatusResponse{}
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[31]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1860,7 +2402,7 @@ func (x *GetCollectionStatusResponse) String() string {
 func (*GetCollectionStatusResponse) ProtoMessage() {}
 
 func (x *GetCollectionStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[31]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1873,7 +2415,7 @@ func (x *GetCollectionStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCollectionStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetCollectionStatusResponse) Descriptor() ([]byte, []int) {
-	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{31}
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *GetCollectionStatusResponse) GetName() string {
@@ -1921,7 +2463,7 @@ type ShardStatus struct {
 
 func (x *ShardStatus) Reset() {
 	*x = ShardStatus{}
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[32]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1933,7 +2475,7 @@ func (x *ShardStatus) String() string {
 func (*ShardStatus) ProtoMessage() {}
 
 func (x *ShardStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_placementdriver_placementdriver_proto_msgTypes[32]
+	mi := &file_placementdriver_placementdriver_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1946,7 +2488,7 @@ func (x *ShardStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShardStatus.ProtoReflect.Descriptor instead.
 func (*ShardStatus) Descriptor() ([]byte, []int) {
-	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{32}
+	return file_placementdriver_placementdriver_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ShardStatus) GetShardId() uint32 {
@@ -2096,7 +2638,41 @@ const file_placementdriver_placementdriver_proto_rawDesc = "" +
 	"\x11assignments_epoch\x18\x03 \x01(\x04R\x10assignmentsEpoch\"\x14\n" +
 	"\x12ListWorkersRequest\"W\n" +
 	"\x13ListWorkersResponse\x12@\n" +
-	"\aworkers\x18\x01 \x03(\v2&.vectron.placementdriver.v1.WorkerInfoR\aworkers\"A\n" +
+	"\aworkers\x18\x01 \x03(\v2&.vectron.placementdriver.v1.WorkerInfoR\aworkers\"\x9d\x02\n" +
+	"\x17RegisterRerankerRequest\x12!\n" +
+	"\fgrpc_address\x18\x01 \x01(\tR\vgrpcAddress\x12\"\n" +
+	"\fcapabilities\x18\x02 \x03(\tR\fcapabilities\x12\x1c\n" +
+	"\ttimestamp\x18\x03 \x01(\x03R\ttimestamp\x12\x1b\n" +
+	"\tcpu_cores\x18\x04 \x01(\x05R\bcpuCores\x12!\n" +
+	"\fmemory_bytes\x18\x05 \x01(\x03R\vmemoryBytes\x12\x1d\n" +
+	"\n" +
+	"disk_bytes\x18\x06 \x01(\x03R\tdiskBytes\x12\x12\n" +
+	"\x04rack\x18\a \x01(\tR\x04rack\x12\x12\n" +
+	"\x04zone\x18\b \x01(\tR\x04zone\x12\x16\n" +
+	"\x06region\x18\t \x01(\tR\x06region\"U\n" +
+	"\x18RegisterRerankerResponse\x12\x1f\n" +
+	"\vreranker_id\x18\x01 \x01(\tR\n" +
+	"rerankerId\x12\x18\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\"\x93\x02\n" +
+	"\x18RerankerHeartbeatRequest\x12\x1f\n" +
+	"\vreranker_id\x18\x01 \x01(\tR\n" +
+	"rerankerId\x12\x1c\n" +
+	"\ttimestamp\x18\x02 \x01(\x03R\ttimestamp\x12*\n" +
+	"\x11cpu_usage_percent\x18\x03 \x01(\x02R\x0fcpuUsagePercent\x120\n" +
+	"\x14memory_usage_percent\x18\x04 \x01(\x02R\x12memoryUsagePercent\x12,\n" +
+	"\x12disk_usage_percent\x18\x05 \x01(\x02R\x10diskUsagePercent\x12,\n" +
+	"\x12queries_per_second\x18\x06 \x01(\x02R\x10queriesPerSecond\"E\n" +
+	"\x19RerankerHeartbeatResponse\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\x16\n" +
+	"\x14ListRerankersRequest\"_\n" +
+	"\x15ListRerankersResponse\x12F\n" +
+	"\trerankers\x18\x01 \x03(\v2(.vectron.placementdriver.v1.RerankerInfoR\trerankers\"\x14\n" +
+	"\x12GetRerankerRequest\"Y\n" +
+	"\x13GetRerankerResponse\x12\x1f\n" +
+	"\vreranker_id\x18\x01 \x01(\tR\n" +
+	"rerankerId\x12!\n" +
+	"\fgrpc_address\x18\x02 \x01(\tR\vgrpcAddress\"A\n" +
 	"\x1fListWorkersForCollectionRequest\x12\x1e\n" +
 	"\n" +
 	"collection\x18\x01 \x01(\tR\n" +
@@ -2113,6 +2689,16 @@ const file_placementdriver_placementdriver_proto_rawDesc = "" +
 	"\ahealthy\x18\x06 \x01(\bR\ahealthy\x12P\n" +
 	"\bmetadata\x18\a \x03(\v24.vectron.placementdriver.v1.WorkerInfo.MetadataEntryR\bmetadata\x12=\n" +
 	"\x05state\x18\b \x01(\x0e2'.vectron.placementdriver.v1.WorkerStateR\x05state\x1a;\n" +
+	"\rMetadataEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa4\x02\n" +
+	"\fRerankerInfo\x12\x1f\n" +
+	"\vreranker_id\x18\x01 \x01(\tR\n" +
+	"rerankerId\x12!\n" +
+	"\fgrpc_address\x18\x02 \x01(\tR\vgrpcAddress\x12%\n" +
+	"\x0elast_heartbeat\x18\x03 \x01(\x03R\rlastHeartbeat\x12\x18\n" +
+	"\ahealthy\x18\x04 \x01(\bR\ahealthy\x12R\n" +
+	"\bmetadata\x18\x05 \x03(\v26.vectron.placementdriver.v1.RerankerInfo.MetadataEntryR\bmetadata\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"1\n" +
@@ -2162,12 +2748,16 @@ const file_placementdriver_placementdriver_proto_rawDesc = "" +
 	"\x14WORKER_STATE_UNKNOWN\x10\x00\x12\x18\n" +
 	"\x14WORKER_STATE_JOINING\x10\x01\x12\x16\n" +
 	"\x12WORKER_STATE_READY\x10\x02\x12\x19\n" +
-	"\x15WORKER_STATE_DRAINING\x10\x032\xbb\f\n" +
+	"\x15WORKER_STATE_DRAINING\x10\x032\xab\x10\n" +
 	"\x10PlacementService\x12j\n" +
 	"\tGetWorker\x12,.vectron.placementdriver.v1.GetWorkerRequest\x1a-.vectron.placementdriver.v1.GetWorkerResponse\"\x00\x12y\n" +
 	"\x0eRegisterWorker\x121.vectron.placementdriver.v1.RegisterWorkerRequest\x1a2.vectron.placementdriver.v1.RegisterWorkerResponse\"\x00\x12j\n" +
 	"\tHeartbeat\x12,.vectron.placementdriver.v1.HeartbeatRequest\x1a-.vectron.placementdriver.v1.HeartbeatResponse\"\x00\x12p\n" +
-	"\vListWorkers\x12..vectron.placementdriver.v1.ListWorkersRequest\x1a/.vectron.placementdriver.v1.ListWorkersResponse\"\x00\x12\x97\x01\n" +
+	"\vListWorkers\x12..vectron.placementdriver.v1.ListWorkersRequest\x1a/.vectron.placementdriver.v1.ListWorkersResponse\"\x00\x12\x7f\n" +
+	"\x10RegisterReranker\x123.vectron.placementdriver.v1.RegisterRerankerRequest\x1a4.vectron.placementdriver.v1.RegisterRerankerResponse\"\x00\x12\x82\x01\n" +
+	"\x11RerankerHeartbeat\x124.vectron.placementdriver.v1.RerankerHeartbeatRequest\x1a5.vectron.placementdriver.v1.RerankerHeartbeatResponse\"\x00\x12v\n" +
+	"\rListRerankers\x120.vectron.placementdriver.v1.ListRerankersRequest\x1a1.vectron.placementdriver.v1.ListRerankersResponse\"\x00\x12p\n" +
+	"\vGetReranker\x12..vectron.placementdriver.v1.GetRerankerRequest\x1a/.vectron.placementdriver.v1.GetRerankerResponse\"\x00\x12\x97\x01\n" +
 	"\x18ListWorkersForCollection\x12;.vectron.placementdriver.v1.ListWorkersForCollectionRequest\x1a<.vectron.placementdriver.v1.ListWorkersForCollectionResponse\"\x00\x12p\n" +
 	"\vDrainWorker\x12..vectron.placementdriver.v1.DrainWorkerRequest\x1a/.vectron.placementdriver.v1.DrainWorkerResponse\"\x00\x12s\n" +
 	"\fRemoveWorker\x12/.vectron.placementdriver.v1.RemoveWorkerRequest\x1a0.vectron.placementdriver.v1.RemoveWorkerResponse\"\x00\x12j\n" +
@@ -2191,7 +2781,7 @@ func file_placementdriver_placementdriver_proto_rawDescGZIP() []byte {
 }
 
 var file_placementdriver_placementdriver_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_placementdriver_placementdriver_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
+var file_placementdriver_placementdriver_proto_msgTypes = make([]protoimpl.MessageInfo, 44)
 var file_placementdriver_placementdriver_proto_goTypes = []any{
 	(WorkerState)(0),                         // 0: vectron.placementdriver.v1.WorkerState
 	(*GetLeaderRequest)(nil),                 // 1: vectron.placementdriver.v1.GetLeaderRequest
@@ -2209,25 +2799,35 @@ var file_placementdriver_placementdriver_proto_goTypes = []any{
 	(*HeartbeatResponse)(nil),                // 13: vectron.placementdriver.v1.HeartbeatResponse
 	(*ListWorkersRequest)(nil),               // 14: vectron.placementdriver.v1.ListWorkersRequest
 	(*ListWorkersResponse)(nil),              // 15: vectron.placementdriver.v1.ListWorkersResponse
-	(*ListWorkersForCollectionRequest)(nil),  // 16: vectron.placementdriver.v1.ListWorkersForCollectionRequest
-	(*ListWorkersForCollectionResponse)(nil), // 17: vectron.placementdriver.v1.ListWorkersForCollectionResponse
-	(*WorkerInfo)(nil),                       // 18: vectron.placementdriver.v1.WorkerInfo
-	(*DrainWorkerRequest)(nil),               // 19: vectron.placementdriver.v1.DrainWorkerRequest
-	(*DrainWorkerResponse)(nil),              // 20: vectron.placementdriver.v1.DrainWorkerResponse
-	(*RemoveWorkerRequest)(nil),              // 21: vectron.placementdriver.v1.RemoveWorkerRequest
-	(*RemoveWorkerResponse)(nil),             // 22: vectron.placementdriver.v1.RemoveWorkerResponse
-	(*RebalanceRequest)(nil),                 // 23: vectron.placementdriver.v1.RebalanceRequest
-	(*RebalanceResponse)(nil),                // 24: vectron.placementdriver.v1.RebalanceResponse
-	(*CreateCollectionRequest)(nil),          // 25: vectron.placementdriver.v1.CreateCollectionRequest
-	(*CreateCollectionResponse)(nil),         // 26: vectron.placementdriver.v1.CreateCollectionResponse
-	(*ListCollectionsRequest)(nil),           // 27: vectron.placementdriver.v1.ListCollectionsRequest
-	(*ListCollectionsResponse)(nil),          // 28: vectron.placementdriver.v1.ListCollectionsResponse
-	(*DeleteCollectionRequest)(nil),          // 29: vectron.placementdriver.v1.DeleteCollectionRequest
-	(*DeleteCollectionResponse)(nil),         // 30: vectron.placementdriver.v1.DeleteCollectionResponse
-	(*GetCollectionStatusRequest)(nil),       // 31: vectron.placementdriver.v1.GetCollectionStatusRequest
-	(*GetCollectionStatusResponse)(nil),      // 32: vectron.placementdriver.v1.GetCollectionStatusResponse
-	(*ShardStatus)(nil),                      // 33: vectron.placementdriver.v1.ShardStatus
-	nil,                                      // 34: vectron.placementdriver.v1.WorkerInfo.MetadataEntry
+	(*RegisterRerankerRequest)(nil),          // 16: vectron.placementdriver.v1.RegisterRerankerRequest
+	(*RegisterRerankerResponse)(nil),         // 17: vectron.placementdriver.v1.RegisterRerankerResponse
+	(*RerankerHeartbeatRequest)(nil),         // 18: vectron.placementdriver.v1.RerankerHeartbeatRequest
+	(*RerankerHeartbeatResponse)(nil),        // 19: vectron.placementdriver.v1.RerankerHeartbeatResponse
+	(*ListRerankersRequest)(nil),             // 20: vectron.placementdriver.v1.ListRerankersRequest
+	(*ListRerankersResponse)(nil),            // 21: vectron.placementdriver.v1.ListRerankersResponse
+	(*GetRerankerRequest)(nil),               // 22: vectron.placementdriver.v1.GetRerankerRequest
+	(*GetRerankerResponse)(nil),              // 23: vectron.placementdriver.v1.GetRerankerResponse
+	(*ListWorkersForCollectionRequest)(nil),  // 24: vectron.placementdriver.v1.ListWorkersForCollectionRequest
+	(*ListWorkersForCollectionResponse)(nil), // 25: vectron.placementdriver.v1.ListWorkersForCollectionResponse
+	(*WorkerInfo)(nil),                       // 26: vectron.placementdriver.v1.WorkerInfo
+	(*RerankerInfo)(nil),                     // 27: vectron.placementdriver.v1.RerankerInfo
+	(*DrainWorkerRequest)(nil),               // 28: vectron.placementdriver.v1.DrainWorkerRequest
+	(*DrainWorkerResponse)(nil),              // 29: vectron.placementdriver.v1.DrainWorkerResponse
+	(*RemoveWorkerRequest)(nil),              // 30: vectron.placementdriver.v1.RemoveWorkerRequest
+	(*RemoveWorkerResponse)(nil),             // 31: vectron.placementdriver.v1.RemoveWorkerResponse
+	(*RebalanceRequest)(nil),                 // 32: vectron.placementdriver.v1.RebalanceRequest
+	(*RebalanceResponse)(nil),                // 33: vectron.placementdriver.v1.RebalanceResponse
+	(*CreateCollectionRequest)(nil),          // 34: vectron.placementdriver.v1.CreateCollectionRequest
+	(*CreateCollectionResponse)(nil),         // 35: vectron.placementdriver.v1.CreateCollectionResponse
+	(*ListCollectionsRequest)(nil),           // 36: vectron.placementdriver.v1.ListCollectionsRequest
+	(*ListCollectionsResponse)(nil),          // 37: vectron.placementdriver.v1.ListCollectionsResponse
+	(*DeleteCollectionRequest)(nil),          // 38: vectron.placementdriver.v1.DeleteCollectionRequest
+	(*DeleteCollectionResponse)(nil),         // 39: vectron.placementdriver.v1.DeleteCollectionResponse
+	(*GetCollectionStatusRequest)(nil),       // 40: vectron.placementdriver.v1.GetCollectionStatusRequest
+	(*GetCollectionStatusResponse)(nil),      // 41: vectron.placementdriver.v1.GetCollectionStatusResponse
+	(*ShardStatus)(nil),                      // 42: vectron.placementdriver.v1.ShardStatus
+	nil,                                      // 43: vectron.placementdriver.v1.WorkerInfo.MetadataEntry
+	nil,                                      // 44: vectron.placementdriver.v1.RerankerInfo.MetadataEntry
 }
 var file_placementdriver_placementdriver_proto_depIdxs = []int32{
 	7,  // 0: vectron.placementdriver.v1.HeartbeatRequest.shard_leader_info:type_name -> vectron.placementdriver.v1.ShardLeaderInfo
@@ -2235,41 +2835,51 @@ var file_placementdriver_placementdriver_proto_depIdxs = []int32{
 	8,  // 2: vectron.placementdriver.v1.HeartbeatRequest.shard_membership:type_name -> vectron.placementdriver.v1.ShardMembershipInfo
 	9,  // 3: vectron.placementdriver.v1.HeartbeatRequest.shard_progress:type_name -> vectron.placementdriver.v1.ShardProgressInfo
 	10, // 4: vectron.placementdriver.v1.HeartbeatRequest.leader_transfer_acks:type_name -> vectron.placementdriver.v1.ShardLeaderTransferAck
-	18, // 5: vectron.placementdriver.v1.ListWorkersResponse.workers:type_name -> vectron.placementdriver.v1.WorkerInfo
-	34, // 6: vectron.placementdriver.v1.WorkerInfo.metadata:type_name -> vectron.placementdriver.v1.WorkerInfo.MetadataEntry
-	0,  // 7: vectron.placementdriver.v1.WorkerInfo.state:type_name -> vectron.placementdriver.v1.WorkerState
-	33, // 8: vectron.placementdriver.v1.GetCollectionStatusResponse.shards:type_name -> vectron.placementdriver.v1.ShardStatus
-	3,  // 9: vectron.placementdriver.v1.PlacementService.GetWorker:input_type -> vectron.placementdriver.v1.GetWorkerRequest
-	5,  // 10: vectron.placementdriver.v1.PlacementService.RegisterWorker:input_type -> vectron.placementdriver.v1.RegisterWorkerRequest
-	12, // 11: vectron.placementdriver.v1.PlacementService.Heartbeat:input_type -> vectron.placementdriver.v1.HeartbeatRequest
-	14, // 12: vectron.placementdriver.v1.PlacementService.ListWorkers:input_type -> vectron.placementdriver.v1.ListWorkersRequest
-	16, // 13: vectron.placementdriver.v1.PlacementService.ListWorkersForCollection:input_type -> vectron.placementdriver.v1.ListWorkersForCollectionRequest
-	19, // 14: vectron.placementdriver.v1.PlacementService.DrainWorker:input_type -> vectron.placementdriver.v1.DrainWorkerRequest
-	21, // 15: vectron.placementdriver.v1.PlacementService.RemoveWorker:input_type -> vectron.placementdriver.v1.RemoveWorkerRequest
-	23, // 16: vectron.placementdriver.v1.PlacementService.Rebalance:input_type -> vectron.placementdriver.v1.RebalanceRequest
-	25, // 17: vectron.placementdriver.v1.PlacementService.CreateCollection:input_type -> vectron.placementdriver.v1.CreateCollectionRequest
-	27, // 18: vectron.placementdriver.v1.PlacementService.ListCollections:input_type -> vectron.placementdriver.v1.ListCollectionsRequest
-	29, // 19: vectron.placementdriver.v1.PlacementService.DeleteCollection:input_type -> vectron.placementdriver.v1.DeleteCollectionRequest
-	31, // 20: vectron.placementdriver.v1.PlacementService.GetCollectionStatus:input_type -> vectron.placementdriver.v1.GetCollectionStatusRequest
-	1,  // 21: vectron.placementdriver.v1.PlacementService.GetLeader:input_type -> vectron.placementdriver.v1.GetLeaderRequest
-	4,  // 22: vectron.placementdriver.v1.PlacementService.GetWorker:output_type -> vectron.placementdriver.v1.GetWorkerResponse
-	6,  // 23: vectron.placementdriver.v1.PlacementService.RegisterWorker:output_type -> vectron.placementdriver.v1.RegisterWorkerResponse
-	13, // 24: vectron.placementdriver.v1.PlacementService.Heartbeat:output_type -> vectron.placementdriver.v1.HeartbeatResponse
-	15, // 25: vectron.placementdriver.v1.PlacementService.ListWorkers:output_type -> vectron.placementdriver.v1.ListWorkersResponse
-	17, // 26: vectron.placementdriver.v1.PlacementService.ListWorkersForCollection:output_type -> vectron.placementdriver.v1.ListWorkersForCollectionResponse
-	20, // 27: vectron.placementdriver.v1.PlacementService.DrainWorker:output_type -> vectron.placementdriver.v1.DrainWorkerResponse
-	22, // 28: vectron.placementdriver.v1.PlacementService.RemoveWorker:output_type -> vectron.placementdriver.v1.RemoveWorkerResponse
-	24, // 29: vectron.placementdriver.v1.PlacementService.Rebalance:output_type -> vectron.placementdriver.v1.RebalanceResponse
-	26, // 30: vectron.placementdriver.v1.PlacementService.CreateCollection:output_type -> vectron.placementdriver.v1.CreateCollectionResponse
-	28, // 31: vectron.placementdriver.v1.PlacementService.ListCollections:output_type -> vectron.placementdriver.v1.ListCollectionsResponse
-	30, // 32: vectron.placementdriver.v1.PlacementService.DeleteCollection:output_type -> vectron.placementdriver.v1.DeleteCollectionResponse
-	32, // 33: vectron.placementdriver.v1.PlacementService.GetCollectionStatus:output_type -> vectron.placementdriver.v1.GetCollectionStatusResponse
-	2,  // 34: vectron.placementdriver.v1.PlacementService.GetLeader:output_type -> vectron.placementdriver.v1.GetLeaderResponse
-	22, // [22:35] is the sub-list for method output_type
-	9,  // [9:22] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	26, // 5: vectron.placementdriver.v1.ListWorkersResponse.workers:type_name -> vectron.placementdriver.v1.WorkerInfo
+	27, // 6: vectron.placementdriver.v1.ListRerankersResponse.rerankers:type_name -> vectron.placementdriver.v1.RerankerInfo
+	43, // 7: vectron.placementdriver.v1.WorkerInfo.metadata:type_name -> vectron.placementdriver.v1.WorkerInfo.MetadataEntry
+	0,  // 8: vectron.placementdriver.v1.WorkerInfo.state:type_name -> vectron.placementdriver.v1.WorkerState
+	44, // 9: vectron.placementdriver.v1.RerankerInfo.metadata:type_name -> vectron.placementdriver.v1.RerankerInfo.MetadataEntry
+	42, // 10: vectron.placementdriver.v1.GetCollectionStatusResponse.shards:type_name -> vectron.placementdriver.v1.ShardStatus
+	3,  // 11: vectron.placementdriver.v1.PlacementService.GetWorker:input_type -> vectron.placementdriver.v1.GetWorkerRequest
+	5,  // 12: vectron.placementdriver.v1.PlacementService.RegisterWorker:input_type -> vectron.placementdriver.v1.RegisterWorkerRequest
+	12, // 13: vectron.placementdriver.v1.PlacementService.Heartbeat:input_type -> vectron.placementdriver.v1.HeartbeatRequest
+	14, // 14: vectron.placementdriver.v1.PlacementService.ListWorkers:input_type -> vectron.placementdriver.v1.ListWorkersRequest
+	16, // 15: vectron.placementdriver.v1.PlacementService.RegisterReranker:input_type -> vectron.placementdriver.v1.RegisterRerankerRequest
+	18, // 16: vectron.placementdriver.v1.PlacementService.RerankerHeartbeat:input_type -> vectron.placementdriver.v1.RerankerHeartbeatRequest
+	20, // 17: vectron.placementdriver.v1.PlacementService.ListRerankers:input_type -> vectron.placementdriver.v1.ListRerankersRequest
+	22, // 18: vectron.placementdriver.v1.PlacementService.GetReranker:input_type -> vectron.placementdriver.v1.GetRerankerRequest
+	24, // 19: vectron.placementdriver.v1.PlacementService.ListWorkersForCollection:input_type -> vectron.placementdriver.v1.ListWorkersForCollectionRequest
+	28, // 20: vectron.placementdriver.v1.PlacementService.DrainWorker:input_type -> vectron.placementdriver.v1.DrainWorkerRequest
+	30, // 21: vectron.placementdriver.v1.PlacementService.RemoveWorker:input_type -> vectron.placementdriver.v1.RemoveWorkerRequest
+	32, // 22: vectron.placementdriver.v1.PlacementService.Rebalance:input_type -> vectron.placementdriver.v1.RebalanceRequest
+	34, // 23: vectron.placementdriver.v1.PlacementService.CreateCollection:input_type -> vectron.placementdriver.v1.CreateCollectionRequest
+	36, // 24: vectron.placementdriver.v1.PlacementService.ListCollections:input_type -> vectron.placementdriver.v1.ListCollectionsRequest
+	38, // 25: vectron.placementdriver.v1.PlacementService.DeleteCollection:input_type -> vectron.placementdriver.v1.DeleteCollectionRequest
+	40, // 26: vectron.placementdriver.v1.PlacementService.GetCollectionStatus:input_type -> vectron.placementdriver.v1.GetCollectionStatusRequest
+	1,  // 27: vectron.placementdriver.v1.PlacementService.GetLeader:input_type -> vectron.placementdriver.v1.GetLeaderRequest
+	4,  // 28: vectron.placementdriver.v1.PlacementService.GetWorker:output_type -> vectron.placementdriver.v1.GetWorkerResponse
+	6,  // 29: vectron.placementdriver.v1.PlacementService.RegisterWorker:output_type -> vectron.placementdriver.v1.RegisterWorkerResponse
+	13, // 30: vectron.placementdriver.v1.PlacementService.Heartbeat:output_type -> vectron.placementdriver.v1.HeartbeatResponse
+	15, // 31: vectron.placementdriver.v1.PlacementService.ListWorkers:output_type -> vectron.placementdriver.v1.ListWorkersResponse
+	17, // 32: vectron.placementdriver.v1.PlacementService.RegisterReranker:output_type -> vectron.placementdriver.v1.RegisterRerankerResponse
+	19, // 33: vectron.placementdriver.v1.PlacementService.RerankerHeartbeat:output_type -> vectron.placementdriver.v1.RerankerHeartbeatResponse
+	21, // 34: vectron.placementdriver.v1.PlacementService.ListRerankers:output_type -> vectron.placementdriver.v1.ListRerankersResponse
+	23, // 35: vectron.placementdriver.v1.PlacementService.GetReranker:output_type -> vectron.placementdriver.v1.GetRerankerResponse
+	25, // 36: vectron.placementdriver.v1.PlacementService.ListWorkersForCollection:output_type -> vectron.placementdriver.v1.ListWorkersForCollectionResponse
+	29, // 37: vectron.placementdriver.v1.PlacementService.DrainWorker:output_type -> vectron.placementdriver.v1.DrainWorkerResponse
+	31, // 38: vectron.placementdriver.v1.PlacementService.RemoveWorker:output_type -> vectron.placementdriver.v1.RemoveWorkerResponse
+	33, // 39: vectron.placementdriver.v1.PlacementService.Rebalance:output_type -> vectron.placementdriver.v1.RebalanceResponse
+	35, // 40: vectron.placementdriver.v1.PlacementService.CreateCollection:output_type -> vectron.placementdriver.v1.CreateCollectionResponse
+	37, // 41: vectron.placementdriver.v1.PlacementService.ListCollections:output_type -> vectron.placementdriver.v1.ListCollectionsResponse
+	39, // 42: vectron.placementdriver.v1.PlacementService.DeleteCollection:output_type -> vectron.placementdriver.v1.DeleteCollectionResponse
+	41, // 43: vectron.placementdriver.v1.PlacementService.GetCollectionStatus:output_type -> vectron.placementdriver.v1.GetCollectionStatusResponse
+	2,  // 44: vectron.placementdriver.v1.PlacementService.GetLeader:output_type -> vectron.placementdriver.v1.GetLeaderResponse
+	28, // [28:45] is the sub-list for method output_type
+	11, // [11:28] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_placementdriver_placementdriver_proto_init() }
@@ -2283,7 +2893,7 @@ func file_placementdriver_placementdriver_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_placementdriver_placementdriver_proto_rawDesc), len(file_placementdriver_placementdriver_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   34,
+			NumMessages:   44,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

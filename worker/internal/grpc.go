@@ -423,6 +423,21 @@ func (s *GrpcServer) SearchShard(ctx context.Context, shardID uint64, query shar
 	return searchResult, nil
 }
 
+func (s *GrpcServer) validateVectorDim(shardID uint64, dim int) error {
+	if dim <= 0 {
+		return nil
+	}
+	if provider, ok := s.shardManager.(stateMachineProvider); ok {
+		if sm := provider.GetStateMachine(shardID); sm != nil {
+			expected := sm.Dimension()
+			if expected > 0 && dim != expected {
+				return status.Errorf(codes.InvalidArgument, "vector dimension %d does not match index dimension %d", dim, expected)
+			}
+		}
+	}
+	return nil
+}
+
 // StoreVector handles the request to store a vector.
 // It marshals the request into a command and proposes it to the target shard's Raft group.
 func (s *GrpcServer) StoreVector(ctx context.Context, req *worker.StoreVectorRequest) (*worker.StoreVectorResponse, error) {
@@ -443,6 +458,9 @@ func (s *GrpcServer) StoreVector(ctx context.Context, req *worker.StoreVectorReq
 	// Before proposing, check if the shard is ready on this node.
 	if !s.shardManager.IsShardReady(req.GetShardId()) {
 		return nil, status.Errorf(codes.Unavailable, "shard %d not ready", req.GetShardId())
+	}
+	if err := s.validateVectorDim(req.GetShardId(), len(req.GetVector().GetVector())); err != nil {
+		return nil, err
 	}
 
 	// Create the command for the shard's FSM.
@@ -490,6 +508,9 @@ func (s *GrpcServer) BatchStoreVector(ctx context.Context, req *worker.BatchStor
 	for _, v := range req.GetVectors() {
 		if v == nil || v.GetId() == "" || len(v.GetVector()) == 0 {
 			return nil, status.Error(codes.InvalidArgument, "vector id or vector data missing")
+		}
+		if err := s.validateVectorDim(req.GetShardId(), len(v.GetVector())); err != nil {
+			return nil, err
 		}
 		cmdVectors = append(cmdVectors, shard.VectorEntry{
 			ID:       v.GetId(),
@@ -550,6 +571,9 @@ func (s *GrpcServer) StreamBatchStoreVector(stream worker.WorkerService_StreamBa
 		for _, v := range req.GetVectors() {
 			if v == nil || v.GetId() == "" || len(v.GetVector()) == 0 {
 				return status.Error(codes.InvalidArgument, "vector id or vector data missing")
+			}
+			if err := s.validateVectorDim(req.GetShardId(), len(v.GetVector())); err != nil {
+				return err
 			}
 			cmdVectors = append(cmdVectors, shard.VectorEntry{
 				ID:       v.GetId(),

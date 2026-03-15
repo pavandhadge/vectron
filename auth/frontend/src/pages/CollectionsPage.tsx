@@ -173,7 +173,7 @@ const CollectionsPage: React.FC = () => {
         <div className="overflow-x-auto">
           <table className="min-w-full text-left">
             <thead>
-              <tr className="border-b border-neutral-800 bg-neutral-900/30">
+              <tr className="border-b border-neutral-800 bg-[#0a0a0a]">
                 <th className="px-6 py-3 text-xs font-semibold text-neutral-500 uppercase tracking-wider">
                   {collectionsData.nameColumnHeader}
                 </th>
@@ -206,7 +206,7 @@ const CollectionsPage: React.FC = () => {
                 filteredCollections.map((col, index) => (
                   <tr
                     key={col.name || `collection-${index}`}
-                    className="group hover:bg-neutral-900/40 transition-colors"
+                    className="group hover:bg-[#111111] transition-colors"
                   >
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">

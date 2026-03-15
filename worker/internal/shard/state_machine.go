@@ -461,6 +461,14 @@ func (s *StateMachine) Sync() error {
 	return nil
 }
 
+// Dimension returns the expected vector dimension for this shard.
+func (s *StateMachine) Dimension() int {
+	if s == nil || s.PebbleDB == nil {
+		return 0
+	}
+	return s.PebbleDB.Dimension()
+}
+
 // PrepareSnapshot is a no-op.
 func (s *StateMachine) PrepareSnapshot() (interface{}, error) {
 	return snapshotContext{LastApplied: atomic.LoadUint64(&s.lastApplied)}, nil

@@ -1238,7 +1238,7 @@ func (s *gatewayServer) attachVectorsToResults(ctx context.Context, collection s
 			}
 			r.Vector = getResp.GetVector().GetVector()
 			if r.Payload == nil {
-				r.Payload = getResp.GetVector().GetMetadata()
+				r.Payload = translator.DecodeMetadata(getResp.GetVector().GetMetadata())
 			}
 		}()
 	}
@@ -1390,7 +1390,11 @@ func (s *gatewayServer) startRerankWarmup(key uint64, req *pb.SearchRequest, can
 			defer cancel()
 		}
 
-		rerankResp, err := s.rerankerClient.Rerank(rerankCtx, rerankReq)
+		rerankerClient, err := s.getRerankerClient(rerankCtx)
+		if err != nil {
+			return
+		}
+		rerankResp, err := rerankerClient.Rerank(rerankCtx, rerankReq)
 		if err != nil {
 			return
 		}
@@ -1785,6 +1789,12 @@ type gatewayServer struct {
 	rerankWarmupSem          chan struct{}
 	rerankWarmupMu           sync.Mutex
 	rerankWarmupInFlight     map[uint64]struct{}
+	rerankerPoolMu           sync.Mutex
+	rerankerConns            map[string]*grpc.ClientConn
+	rerankerClients          map[string]reranker.RerankServiceClient
+	rerankerAddrs            []string
+	rerankerAddrExpires      time.Time
+	rerankerRR               uint64
 	inFlightShards           []inFlightShard
 	inflightRoutingShards    []inflightRoutingShard
 	inflightWorkerListShards []inflightWorkerListShard
@@ -1836,6 +1846,122 @@ func (s *gatewayServer) getPlacementClient() (placementpb.PlacementServiceClient
 	}
 	s.leaderMu.RUnlock()
 	return s.updateLeader()
+}
+
+func (s *gatewayServer) getRerankerClient(ctx context.Context) (reranker.RerankServiceClient, error) {
+	if !cfg.RerankerDiscoveryEnabled {
+		if s.rerankerClient == nil {
+			return nil, fmt.Errorf("reranker client not configured")
+		}
+		return s.rerankerClient, nil
+	}
+
+	now := time.Now()
+	s.rerankerPoolMu.Lock()
+	if now.Before(s.rerankerAddrExpires) && len(s.rerankerAddrs) > 0 {
+		addr := s.rerankerAddrs[int(s.rerankerRR)%len(s.rerankerAddrs)]
+		s.rerankerRR++
+		client := s.rerankerClients[addr]
+		conn := s.rerankerConns[addr]
+		if client != nil && conn != nil {
+			state := conn.GetState()
+			if state != connectivity.Shutdown && state != connectivity.TransientFailure {
+				s.rerankerPoolMu.Unlock()
+				return client, nil
+			}
+		}
+	}
+	s.rerankerPoolMu.Unlock()
+
+	placementClient, err := s.getPlacementClient()
+	if err != nil {
+		if s.rerankerClient == nil {
+			return nil, err
+		}
+		return s.rerankerClient, nil
+	}
+
+	listCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	listResp, err := placementClient.ListRerankers(listCtx, &placementpb.ListRerankersRequest{})
+	if err != nil {
+		if s.rerankerClient == nil {
+			return nil, err
+		}
+		return s.rerankerClient, nil
+	}
+
+	addrs := make([]string, 0, len(listResp.Rerankers))
+	for _, r := range listResp.Rerankers {
+		if r.GetGrpcAddress() == "" {
+			continue
+		}
+		if !r.GetHealthy() {
+			continue
+		}
+		addrs = append(addrs, r.GetGrpcAddress())
+	}
+	if len(addrs) == 0 {
+		if s.rerankerClient == nil {
+			return nil, fmt.Errorf("no healthy rerankers available")
+		}
+		return s.rerankerClient, nil
+	}
+
+	s.rerankerPoolMu.Lock()
+	s.rerankerAddrs = addrs
+	ttl := time.Duration(cfg.RerankerDiscoveryTTLms) * time.Millisecond
+	if ttl <= 0 {
+		ttl = 5 * time.Second
+	}
+	s.rerankerAddrExpires = time.Now().Add(ttl)
+	if s.rerankerClients == nil {
+		s.rerankerClients = make(map[string]reranker.RerankServiceClient)
+	}
+	if s.rerankerConns == nil {
+		s.rerankerConns = make(map[string]*grpc.ClientConn)
+	}
+	addr := s.rerankerAddrs[int(s.rerankerRR)%len(s.rerankerAddrs)]
+	s.rerankerRR++
+	s.rerankerPoolMu.Unlock()
+
+	s.rerankerPoolMu.Lock()
+	if client, ok := s.rerankerClients[addr]; ok {
+		conn := s.rerankerConns[addr]
+		if conn != nil {
+			state := conn.GetState()
+			if state != connectivity.Shutdown && state != connectivity.TransientFailure {
+				s.rerankerPoolMu.Unlock()
+				return client, nil
+			}
+		}
+	}
+	s.rerankerPoolMu.Unlock()
+
+	dialCtx, dialCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer dialCancel()
+	opts := append(grpcClientOptions(cfg.GRPCEnableCompression, cfg.GRPCMaxRecvMB, cfg.GRPCMaxSendMB), grpc.WithBlock())
+	conn, err := grpc.DialContext(dialCtx, addr, opts...)
+	if err != nil {
+		if s.rerankerClient == nil {
+			return nil, err
+		}
+		return s.rerankerClient, nil
+	}
+	client := reranker.NewRerankServiceClient(conn)
+
+	s.rerankerPoolMu.Lock()
+	if s.rerankerClients == nil {
+		s.rerankerClients = make(map[string]reranker.RerankServiceClient)
+	}
+	if s.rerankerConns == nil {
+		s.rerankerConns = make(map[string]*grpc.ClientConn)
+	}
+	s.rerankerClients[addr] = client
+	s.rerankerConns[addr] = conn
+	s.rerankerPoolMu.Unlock()
+
+	return client, nil
 }
 
 // RequestCoalescer batches similar requests to reduce fan-out overhead
@@ -3207,7 +3333,11 @@ func (s *gatewayServer) SearchStream(req *pb.SearchRequest, stream pb.VectronSer
 		rerankCtx, cancel = context.WithTimeout(stream.Context(), time.Duration(rerankTimeoutMs)*time.Millisecond)
 		defer cancel()
 	}
-	rerankResp, err := s.rerankerClient.Rerank(rerankCtx, rerankReq)
+	rerankerClient, err := s.getRerankerClient(rerankCtx)
+	if err != nil {
+		return nil
+	}
+	rerankResp, err := rerankerClient.Rerank(rerankCtx, rerankReq)
 	if err != nil {
 		// If rerank fails, end after streamed base results.
 		return nil
@@ -3890,7 +4020,24 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 			rerankCtx, cancel = context.WithTimeout(ctx, time.Duration(rerankTimeoutMs)*time.Millisecond)
 			defer cancel()
 		}
-		rerankResp, err := s.rerankerClient.Rerank(rerankCtx, rerankReq)
+		rerankerClient, err := s.getRerankerClient(rerankCtx)
+		if err != nil {
+			log.Println("Reranking failed, returning original results:", err)
+			sort.Slice(searchResponse.Results, func(i, j int) bool {
+				return searchResponse.Results[i].Score > searchResponse.Results[j].Score
+			})
+			if len(searchResponse.Results) > int(req.TopK) {
+				searchResponse.Results = searchResponse.Results[:req.TopK]
+			}
+			if err := s.maybeAttachVectors(ctx, req, searchResponse); err != nil {
+				return nil, err
+			}
+			if !req.GetIncludeVectors() {
+				s.setSearchCache(ctx, req, searchResponse, nil)
+			}
+			return searchResponse, nil
+		}
+		rerankResp, err := rerankerClient.Rerank(rerankCtx, rerankReq)
 		if err != nil {
 			log.Println("Reranking failed, returning original results:", err)
 			sort.Slice(searchResponse.Results, func(i, j int) bool {
@@ -4136,7 +4283,24 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		rerankCtx, cancel = context.WithTimeout(ctx, time.Duration(rerankTimeoutMs)*time.Millisecond)
 		defer cancel()
 	}
-	rerankResp, err := s.rerankerClient.Rerank(rerankCtx, rerankReq)
+	rerankerClient, err := s.getRerankerClient(rerankCtx)
+	if err != nil {
+		log.Println("Reranking failed, returning original results:", err)
+		sort.Slice(searchResponse.Results, func(i, j int) bool {
+			return searchResponse.Results[i].Score > searchResponse.Results[j].Score
+		})
+		if len(searchResponse.Results) > int(req.TopK) {
+			searchResponse.Results = searchResponse.Results[:req.TopK]
+		}
+		if err := s.maybeAttachVectors(ctx, req, searchResponse); err != nil {
+			return nil, err
+		}
+		if !req.GetIncludeVectors() {
+			s.setSearchCache(ctx, req, searchResponse, nil)
+		}
+		return searchResponse, nil
+	}
+	rerankResp, err := rerankerClient.Rerank(rerankCtx, rerankReq)
 	if err != nil {
 		log.Println("Reranking failed, returning original results:", err)
 		// Sort original results by score in descending order before returning
@@ -4495,12 +4659,21 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 	}
 	authClient := authpb.NewAuthServiceClient(authConn)
 
-	// Establish gRPC connection to Reranker service
-	rerankerConn, err := grpc.Dial(config.RerankerServiceAddr, grpcClientOptions(config.GRPCEnableCompression, config.GRPCMaxRecvMB, config.GRPCMaxSendMB)...)
-	if err != nil {
-		log.Fatalf("Failed to connect to Reranker service: %v", err)
+	// Establish gRPC connection to Reranker service (fallback/static)
+	var rerankerConn *grpc.ClientConn
+	var rerankerClient reranker.RerankServiceClient
+	if config.RerankerServiceAddr != "" {
+		rerankerConn, err = grpc.Dial(config.RerankerServiceAddr, grpcClientOptions(config.GRPCEnableCompression, config.GRPCMaxRecvMB, config.GRPCMaxSendMB)...)
+		if err != nil {
+			if config.RerankerDiscoveryEnabled {
+				log.Printf("Warning: failed to connect to Reranker service at %s (discovery enabled): %v", config.RerankerServiceAddr, err)
+			} else {
+				log.Fatalf("Failed to connect to Reranker service: %v", err)
+			}
+		} else {
+			rerankerClient = reranker.NewRerankServiceClient(rerankerConn)
+		}
 	}
-	rerankerClient := reranker.NewRerankServiceClient(rerankerConn)
 
 	// Initialize feedback service with SQLite
 	feedbackService, err := feedback.NewService(config.FeedbackDBPath)
@@ -4583,9 +4756,15 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 		grpcMaxRecvMB:            config.GRPCMaxRecvMB,
 		grpcMaxSendMB:            config.GRPCMaxSendMB,
 		rerankWarmupInFlight:     make(map[uint64]struct{}),
+		rerankerConns:            make(map[string]*grpc.ClientConn),
+		rerankerClients:          make(map[string]reranker.RerankServiceClient),
 		inFlightShards:           make([]inFlightShard, inFlightShardCount),
 		inflightRoutingShards:    make([]inflightRoutingShard, inflightRoutingShardCount),
 		inflightWorkerListShards: make([]inflightWorkerListShard, inflightWorkerListShardCount),
+	}
+	if rerankerConn != nil && rerankerClient != nil && config.RerankerServiceAddr != "" {
+		server.rerankerConns[config.RerankerServiceAddr] = rerankerConn
+		server.rerankerClients[config.RerankerServiceAddr] = rerankerClient
 	}
 	for i := range server.inFlightShards {
 		server.inFlightShards[i].m = make(map[uint64]*inFlightSearch)

@@ -16,7 +16,7 @@ class ManagementApiService {
     import.meta.env.VITE_APIGATEWAY_API_BASE_URL || 'http://localhost:10012';
 
   private getAuthHeaders() {
-    const token = localStorage.getItem('jwtToken');
+    const token = localStorage.getItem('jwt_token');
     return token ? { Authorization: `Bearer ${token}` } : {};
   }
 

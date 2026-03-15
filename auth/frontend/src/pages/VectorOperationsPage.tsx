@@ -96,6 +96,31 @@ const VectorOperationsPage: React.FC = () => {
     }
   }, [apiGatewayApiClient, selectedCollection]);
 
+  const fetchCollectionStatus = useCallback(
+    async (collectionName: string) => {
+      if (!collectionName) return;
+      try {
+        const response = await apiGatewayApiClient.get(
+          `/v1/collections/${collectionName}/status`
+        );
+        const dimension =
+          typeof response.data?.dimension === "number"
+            ? response.data.dimension
+            : 0;
+        if (dimension > 0) {
+          setCollections((prev) =>
+            prev.map((c) =>
+              c.name === collectionName ? { ...c, dimension } : c
+            )
+          );
+        }
+      } catch {
+        // Non-fatal: keep existing dimension if status fetch fails.
+      }
+    },
+    [apiGatewayApiClient]
+  );
+
   useEffect(() => {
     fetchCollections();
   }, [fetchCollections]);
@@ -108,6 +133,18 @@ const VectorOperationsPage: React.FC = () => {
       .filter((v) => v !== "")
       .map((v) => parseFloat(v))
       .filter((v) => !isNaN(v));
+  };
+
+  const validateVectorDimension = (vector: number[]) => {
+    const expected = selectedCollectionData?.dimension || 0;
+    if (expected > 0 && vector.length !== expected) {
+      setToast({
+        msg: `Vector dimension mismatch: expected ${expected}, got ${vector.length}`,
+        type: "danger",
+      });
+      return false;
+    }
+    return true;
   };
 
   // Handle upsert vector
@@ -124,6 +161,9 @@ const VectorOperationsPage: React.FC = () => {
     const vectorArray = parseVectorString(vectorValues);
     if (vectorArray.length === 0) {
       setToast({ msg: "Please enter valid vector values", type: "danger" });
+      return;
+    }
+    if (!validateVectorDimension(vectorArray)) {
       return;
     }
 
@@ -164,14 +204,17 @@ const VectorOperationsPage: React.FC = () => {
       setToast({ msg: "Please enter a valid query vector", type: "danger" });
       return;
     }
+    if (!validateVectorDimension(vectorArray)) {
+      return;
+    }
 
     setIsActionLoading(true);
     try {
       const response = await apiGatewayApiClient.post(
-        `/v1/collections/${selectedCollection}/search`,
+        `/v1/collections/${selectedCollection}/points/search`,
         {
           vector: vectorArray,
-          limit: topK,
+          top_k: topK,
         }
       );
 
@@ -205,7 +248,14 @@ const VectorOperationsPage: React.FC = () => {
         `/v1/collections/${selectedCollection}/points/${manageVectorId}`
       );
 
-      setFoundVector(response.data);
+      const point = response.data?.point ?? response.data;
+      if (!point) {
+        throw new Error("Vector not found");
+      }
+      setFoundVector({
+        id: point.id,
+        vector: point.vector || [],
+      });
       setToast({ msg: "Vector found", type: "success" });
     } catch (err: any) {
       const msg = err.response?.data?.message || "Vector not found";
@@ -248,6 +298,12 @@ const VectorOperationsPage: React.FC = () => {
   const selectedCollectionData = collections.find(
     (c) => c.name === selectedCollection
   );
+
+  useEffect(() => {
+    if (selectedCollection) {
+      fetchCollectionStatus(selectedCollection);
+    }
+  }, [selectedCollection, fetchCollectionStatus]);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -460,7 +516,7 @@ const VectorOperationsPage: React.FC = () => {
               <div className="overflow-x-auto">
                 <table className="min-w-full text-left">
                   <thead>
-                    <tr className="border-b border-neutral-800 bg-neutral-900/30">
+                    <tr className="border-b border-neutral-800 bg-[#0a0a0a]">
                       <th className="px-6 py-3 text-xs font-semibold text-neutral-500 uppercase tracking-wider">
                         ID
                       </th>
@@ -474,7 +530,7 @@ const VectorOperationsPage: React.FC = () => {
                   </thead>
                   <tbody className="divide-y divide-neutral-800">
                     {searchResults.map((result) => (
-                      <tr key={result.id} className="hover:bg-neutral-900/40">
+                      <tr key={result.id} className="hover:bg-[#111111]">
                         <td className="px-6 py-4 font-mono text-sm text-white">
                           {result.id}
                         </td>

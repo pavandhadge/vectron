@@ -19,7 +19,7 @@ import { formatBytes, formatCompactNumber, formatDateTime, formatNumber } from "
 // --- Components ---
 
 const StatCard = ({ title, value, subtext, icon, trend }: any) => (
-  <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30 hover:bg-neutral-900/50 transition-colors">
+  <div className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a] hover:bg-[#111111] transition-colors">
     <div className="flex items-start justify-between mb-4">
       <div className="p-2 rounded-lg bg-neutral-800 text-neutral-400">
         {icon}
@@ -49,7 +49,7 @@ const QuickAccessCard = ({ title, description, href, icon }: {
 }) => (
   <RouterLink
     to={href}
-    className="block p-4 rounded-lg border border-neutral-800 bg-neutral-900/30 hover:bg-neutral-900/50 hover:border-purple-500/50 transition-all group"
+    className="block p-4 rounded-lg border border-neutral-800 bg-[#0a0a0a] hover:bg-[#111111] hover:border-purple-500/50 transition-all group"
   >
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-3">
@@ -67,7 +67,7 @@ const QuickAccessCard = ({ title, description, href, icon }: {
 );
 
 const EmptyState = () => (
-  <div className="border border-dashed border-neutral-800 rounded-xl p-12 flex flex-col items-center justify-center text-center bg-neutral-900/10">
+  <div className="border border-dashed border-neutral-800 rounded-xl p-12 flex flex-col items-center justify-center text-center bg-[#0a0a0a]">
     <div className="w-16 h-16 bg-neutral-800/50 rounded-full flex items-center justify-center mb-4">
       <Database className="w-8 h-8 text-neutral-500" />
     </div>
@@ -277,7 +277,7 @@ export const Dashboard = () => {
           {/* Recent Activity / Content */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Main Chart Area (Placeholder) */}
-            <div className="lg:col-span-2 p-6 rounded-xl border border-neutral-800 bg-neutral-900/30">
+            <div className="lg:col-span-2 p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a]">
               <h3 className="text-lg font-medium text-white mb-6">
                 Request Volume
               </h3>
@@ -308,7 +308,7 @@ export const Dashboard = () => {
             </div>
 
             {/* Recent Deployments / Events */}
-            <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30">
+            <div className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a]">
               <h3 className="text-lg font-medium text-white mb-4">
                 Recent Activity
               </h3>
@@ -351,7 +351,7 @@ export const Dashboard = () => {
                 {collections.slice(0, 6).map((collection) => (
                   <div
                     key={collection.name}
-                    className="p-4 rounded-lg border border-neutral-800 bg-neutral-900/30"
+                    className="p-4 rounded-lg border border-neutral-800 bg-[#0a0a0a]"
                   >
                     <div className="flex items-center gap-2 mb-2">
                       <Database className="w-4 h-4 text-purple-400" />

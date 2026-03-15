@@ -36,7 +36,7 @@ export const LoginPage = () => {
       {/* Ambient Background Glow */}
       <div className="fixed top-0 left-1/2 -translate-x-1/2 w-[500px] h-[300px] bg-purple-900/20 blur-[120px] rounded-full pointer-events-none" />
 
-      <div className="relative w-full max-w-md p-8 space-y-6 bg-neutral-900/30 backdrop-blur-xl rounded-2xl border border-neutral-800 shadow-2xl">
+      <div className="relative w-full max-w-md p-8 space-y-6 bg-[#0a0a0a] backdrop-blur-xl rounded-2xl border border-neutral-800 shadow-2xl">
         <div className="space-y-2 text-center">
           <h2 className="text-3xl font-bold tracking-tighter">Welcome back</h2>
           <p className="text-sm text-neutral-400">

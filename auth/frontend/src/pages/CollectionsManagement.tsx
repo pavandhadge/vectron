@@ -76,7 +76,7 @@ const CreateCollectionModal = ({ onClose, onCreated }: CreateCollectionModalProp
           <h2 className="text-xl font-semibold text-white">Create Collection</h2>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-neutral-800 rounded-lg transition-colors"
+            className="p-2 hover:bg-neutral-800 rounded-md transition-colors"
           >
             <X className="w-5 h-5 text-neutral-400" />
           </button>
@@ -97,7 +97,7 @@ const CreateCollectionModal = ({ onClose, onCreated }: CreateCollectionModalProp
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white placeholder-neutral-400 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="w-full bg-[#050505] border border-neutral-800 rounded-lg px-3 py-2 text-white placeholder-neutral-400 focus:ring-1 focus:ring-white focus:border-white"
               placeholder="Enter collection name"
               required
             />
@@ -111,7 +111,7 @@ const CreateCollectionModal = ({ onClose, onCreated }: CreateCollectionModalProp
               type="number"
               value={dimension}
               onChange={(e) => setDimension(parseInt(e.target.value) || 0)}
-              className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white placeholder-neutral-400 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="w-full bg-[#050505] border border-neutral-800 rounded-lg px-3 py-2 text-white placeholder-neutral-400 focus:ring-1 focus:ring-white focus:border-white"
               min="1"
               required
             />
@@ -124,7 +124,7 @@ const CreateCollectionModal = ({ onClose, onCreated }: CreateCollectionModalProp
             <select
               value={distance}
               onChange={(e) => setDistance(e.target.value)}
-              className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="w-full bg-[#050505] border border-neutral-800 rounded-lg px-3 py-2 text-white focus:ring-1 focus:ring-white focus:border-white"
             >
               <option value="cosine">Cosine</option>
               <option value="euclidean">Euclidean</option>
@@ -136,14 +136,14 @@ const CreateCollectionModal = ({ onClose, onCreated }: CreateCollectionModalProp
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2 bg-neutral-800 text-white rounded-lg hover:bg-neutral-700 transition-colors"
+              className="flex-1 px-4 py-2 bg-neutral-800 text-white rounded-md hover:bg-neutral-700 transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading || !name.trim()}
-              className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="flex-1 px-4 py-2 bg-white text-black rounded-md hover:bg-neutral-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {loading ? "Creating..." : "Create Collection"}
             </button>
@@ -192,7 +192,7 @@ const CollectionDetailsModal = ({ collection, onClose }: CollectionDetailsModalP
           <h2 className="text-xl font-semibold text-white">Collection Details: {collectionName}</h2>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-neutral-800 rounded-lg transition-colors"
+            className="p-2 hover:bg-neutral-800 rounded-md transition-colors"
           >
             <X className="w-5 h-5 text-neutral-400" />
           </button>
@@ -278,7 +278,7 @@ const CollectionDetailsModal = ({ collection, onClose }: CollectionDetailsModalP
               <h3 className="text-lg font-semibold text-white">Shard Details</h3>
               <div className="overflow-x-auto">
                 <table className="w-full border border-neutral-800 rounded-lg">
-                  <thead className="bg-neutral-800/50">
+                  <thead className="bg-[#0a0a0a]">
                     <tr>
                       <th className="text-left p-3 text-neutral-400 font-medium">Shard ID</th>
                       <th className="text-left p-3 text-neutral-400 font-medium">Leader</th>
@@ -359,7 +359,7 @@ const DeleteConfirmModal = ({ collection, onClose, onConfirm, error }: DeleteCon
           <h2 className="text-xl font-semibold text-white">Delete Collection</h2>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-neutral-800 rounded-lg transition-colors"
+            className="p-2 hover:bg-neutral-800 rounded-md transition-colors"
           >
             <X className="w-5 h-5 text-neutral-400" />
           </button>
@@ -396,7 +396,7 @@ const DeleteConfirmModal = ({ collection, onClose, onConfirm, error }: DeleteCon
               type="text"
               value={confirmText}
               onChange={(e) => setConfirmText(e.target.value)}
-              className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white placeholder-neutral-400 focus:ring-2 focus:ring-red-500 focus:border-transparent"
+              className="w-full bg-[#050505] border border-neutral-800 rounded-lg px-3 py-2 text-white placeholder-neutral-400 focus:ring-2 focus:ring-red-500 focus:border-transparent"
               placeholder={collection.name}
             />
           </div>
@@ -404,14 +404,14 @@ const DeleteConfirmModal = ({ collection, onClose, onConfirm, error }: DeleteCon
           <div className="flex gap-3 pt-4">
             <button
               onClick={onClose}
-              className="flex-1 px-4 py-2 bg-neutral-800 text-white rounded-lg hover:bg-neutral-700 transition-colors"
+              className="flex-1 px-4 py-2 bg-neutral-800 text-white rounded-md hover:bg-neutral-700 transition-colors"
             >
               Cancel
             </button>
             <button
               onClick={handleConfirm}
               disabled={confirmText !== collection.name || loading}
-              className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="flex-1 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {loading ? "Deleting..." : "Delete Collection"}
             </button>
@@ -509,7 +509,7 @@ const CollectionsManagement = () => {
     return (
       <div className="max-w-7xl mx-auto space-y-8 animate-fade-in">
         <div className="flex items-center justify-center py-12">
-          <RefreshCw className="w-8 h-8 text-purple-400 animate-spin" />
+          <RefreshCw className="w-8 h-8 text-neutral-300 animate-spin" />
         </div>
       </div>
     );
@@ -533,7 +533,7 @@ const CollectionsManagement = () => {
             onClick={() => setAutoRefresh(!autoRefresh)}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
               autoRefresh
-                ? "bg-purple-600 text-white hover:bg-purple-700"
+                ? "bg-white text-black hover:bg-neutral-200"
                 : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
             }`}
           >
@@ -543,7 +543,7 @@ const CollectionsManagement = () => {
           
           <button
             onClick={fetchCollections}
-            className="flex items-center gap-2 px-4 py-2 bg-neutral-800 text-white rounded-lg hover:bg-neutral-700 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-neutral-800 text-white rounded-md hover:bg-neutral-700 transition-colors"
           >
             <RefreshCw className="w-4 h-4" />
             Refresh
@@ -551,7 +551,7 @@ const CollectionsManagement = () => {
           
           <button
             onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-lg hover:bg-neutral-200 transition-colors"
           >
             <Plus className="w-4 h-4" />
             Create Collection
@@ -561,7 +561,7 @@ const CollectionsManagement = () => {
 
       {/* Summary Statistics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30">
+        <div className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a]">
           <div className="flex items-center gap-3 mb-4">
             <Database className="w-5 h-5 text-blue-400" />
             <h3 className="font-medium text-white">Total Collections</h3>
@@ -570,7 +570,7 @@ const CollectionsManagement = () => {
           <p className="text-sm text-neutral-400">Vector Collections</p>
         </div>
 
-        <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30">
+        <div className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a]">
           <div className="flex items-center gap-3 mb-4">
             <CheckCircle className="w-5 h-5 text-green-400" />
             <h3 className="font-medium text-white">Active Collections</h3>
@@ -581,9 +581,9 @@ const CollectionsManagement = () => {
           <p className="text-sm text-neutral-400">Ready for Queries</p>
         </div>
 
-        <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30">
+        <div className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a]">
           <div className="flex items-center gap-3 mb-4">
-            <Layers className="w-5 h-5 text-purple-400" />
+            <Layers className="w-5 h-5 text-neutral-300" />
             <h3 className="font-medium text-white">Total Vectors</h3>
           </div>
           <div className="text-2xl font-bold text-white">
@@ -592,7 +592,7 @@ const CollectionsManagement = () => {
           <p className="text-sm text-neutral-400">Across All Collections</p>
         </div>
 
-        <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30">
+        <div className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a]">
           <div className="flex items-center gap-3 mb-4">
             <Database className="w-5 h-5 text-orange-400" />
             <h3 className="font-medium text-white">Storage Used</h3>
@@ -612,7 +612,7 @@ const CollectionsManagement = () => {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-neutral-800 border border-neutral-700 rounded-lg pl-10 pr-3 py-2 text-white placeholder-neutral-400 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+            className="w-full bg-[#050505] border border-neutral-800 rounded-lg pl-10 pr-3 py-2 text-white placeholder-neutral-400 focus:ring-1 focus:ring-white focus:border-white"
             placeholder="Search collections..."
           />
         </div>
@@ -626,7 +626,7 @@ const CollectionsManagement = () => {
           <p className="text-neutral-400 mb-4">{error}</p>
           <button
             onClick={fetchCollections}
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+            className="px-4 py-2 bg-white text-black rounded-md hover:bg-neutral-200 transition-colors"
           >
             Try Again
           </button>
@@ -647,7 +647,7 @@ const CollectionsManagement = () => {
           {collections.length === 0 && (
             <button
               onClick={() => setShowCreateModal(true)}
-              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+              className="px-4 py-2 bg-white text-black rounded-lg hover:bg-neutral-200 transition-colors"
             >
               Create Collection
             </button>
@@ -660,7 +660,7 @@ const CollectionsManagement = () => {
           {filteredCollections.map((collection, index) => (
             <div
               key={collection.name || `collection-${index}`}
-              className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30 hover:bg-neutral-900/50 transition-all"
+              className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a] hover:bg-[#111111] transition-all"
             >
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-center gap-3">

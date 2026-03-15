@@ -54,7 +54,7 @@ const WorkerModal: React.FC<WorkerModalProps> = ({ worker, onClose }) => {
           <h2 className="text-xl font-semibold text-white">Worker Details: {worker.worker_id}</h2>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-neutral-800 rounded-lg transition-colors"
+            className="p-2 hover:bg-neutral-800 rounded-md transition-colors"
           >
             <X className="w-5 h-5 text-neutral-400" />
           </button>
@@ -155,7 +155,7 @@ const WorkerModal: React.FC<WorkerModalProps> = ({ worker, onClose }) => {
               {workerCollections.map((collection) => (
                 <span
                   key={collection}
-                  className="px-3 py-1 bg-purple-500/10 border border-purple-500/20 text-purple-400 rounded-lg text-sm"
+                  className="px-3 py-1 bg-[#0a0a0a] border border-neutral-700 text-neutral-300 rounded-lg text-sm"
                 >
                   {collection}
                 </span>
@@ -171,7 +171,7 @@ const WorkerModal: React.FC<WorkerModalProps> = ({ worker, onClose }) => {
             <h3 className="text-lg font-semibold text-white">Metadata</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {workerMetadataEntries.map(([key, value]) => (
-                <div key={key} className="flex justify-between p-3 bg-neutral-800/50 rounded-lg">
+                <div key={key} className="flex justify-between p-3 bg-[#0a0a0a] rounded-lg">
                   <span className="text-neutral-400 capitalize">{key}:</span>
                   <span className="text-white font-mono">{value}</span>
                 </div>
@@ -188,7 +188,7 @@ const WorkerModal: React.FC<WorkerModalProps> = ({ worker, onClose }) => {
               <h3 className="text-lg font-semibold text-white">Shard Information</h3>
               <div className="overflow-x-auto">
                 <table className="w-full border border-neutral-800 rounded-lg">
-                  <thead className="bg-neutral-800/50">
+                  <thead className="bg-[#0a0a0a]">
                     <tr>
                       <th className="text-left p-3 text-neutral-400 font-medium">Shard ID</th>
                       <th className="text-left p-3 text-neutral-400 font-medium">Collection</th>
@@ -284,7 +284,7 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
     return (
       <div className="max-w-7xl mx-auto space-y-8 animate-fade-in">
         <div className="flex items-center justify-center py-12">
-          <RefreshCw className="w-8 h-8 text-purple-400 animate-spin" />
+          <RefreshCw className="w-8 h-8 text-neutral-300 animate-spin" />
         </div>
       </div>
     );
@@ -299,7 +299,7 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
           <p className="text-neutral-400 mb-4">{error}</p>
           <button
             onClick={fetchWorkers}
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+            className="px-4 py-2 bg-white text-black rounded-md hover:bg-neutral-200 transition-colors"
           >
             Try Again
           </button>
@@ -326,7 +326,7 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
             onClick={() => setAutoRefresh(!autoRefresh)}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
               autoRefresh
-                ? "bg-purple-600 text-white hover:bg-purple-700"
+                ? "bg-white text-black hover:bg-neutral-200"
                 : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
             }`}
           >
@@ -336,7 +336,7 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
           
           <button
             onClick={fetchWorkers}
-            className="flex items-center gap-2 px-4 py-2 bg-neutral-800 text-white rounded-lg hover:bg-neutral-700 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-neutral-800 text-white rounded-md hover:bg-neutral-700 transition-colors"
           >
             <RefreshCw className="w-4 h-4" />
             Refresh
@@ -346,7 +346,7 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
 
       {/* Summary Statistics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30">
+        <div className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a]">
           <div className="flex items-center gap-3 mb-4">
             <Server className="w-5 h-5 text-blue-400" />
             <h3 className="font-medium text-white">Total Workers</h3>
@@ -355,7 +355,7 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
           <p className="text-sm text-neutral-400">Worker Nodes</p>
         </div>
 
-        <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30">
+        <div className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a]">
           <div className="flex items-center gap-3 mb-4">
             <CheckCircle className="w-5 h-5 text-green-400" />
             <h3 className="font-medium text-white">Healthy</h3>
@@ -366,9 +366,9 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
           <p className="text-sm text-neutral-400">Healthy Workers</p>
         </div>
 
-        <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30">
+        <div className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a]">
           <div className="flex items-center gap-3 mb-4">
-            <Database className="w-5 h-5 text-purple-400" />
+            <Database className="w-5 h-5 text-neutral-300" />
             <h3 className="font-medium text-white">Total Vectors</h3>
           </div>
           <div className="text-2xl font-bold text-white">
@@ -377,7 +377,7 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
           <p className="text-sm text-neutral-400">Across All Workers</p>
         </div>
 
-        <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30">
+        <div className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a]">
           <div className="flex items-center gap-3 mb-4">
             <MemoryStick className="w-5 h-5 text-orange-400" />
             <h3 className="font-medium text-white">Memory Usage</h3>
@@ -406,7 +406,7 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
             return (
             <div
               key={worker.worker_id}
-              className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30 hover:bg-neutral-900/50 transition-all cursor-pointer"
+              className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a] hover:bg-[#111111] transition-all cursor-pointer"
               onClick={() => setSelectedWorker(worker)}
             >
               <div className="flex items-start justify-between mb-4">
@@ -492,7 +492,7 @@ const WorkersManagement: React.FC<WorkersManagementProps> = () => {
                   {(worker.collections ?? []).slice(0, 2).map((collection) => (
                     <span
                       key={collection}
-                      className="px-2 py-1 bg-purple-500/10 text-purple-400 rounded text-xs"
+                      className="px-2 py-1 bg-[#0a0a0a] text-neutral-300 rounded text-xs"
                     >
                       {collection}
                     </span>

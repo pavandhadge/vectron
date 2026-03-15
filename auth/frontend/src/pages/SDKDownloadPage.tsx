@@ -154,7 +154,7 @@ const SDKDownloadPage: React.FC = () => {
           {upcoming.map((item) => (
             <div
               key={item.name}
-              className="flex items-center gap-3 p-4 rounded-lg border border-neutral-800 bg-neutral-900/30 text-neutral-500 cursor-not-allowed border-dashed"
+              className="flex items-center gap-3 p-4 rounded-lg border border-neutral-800 bg-[#0a0a0a] text-neutral-500 cursor-not-allowed border-dashed"
             >
               {item.icon}
               <span className="text-sm font-medium">{item.name}</span>
@@ -165,7 +165,7 @@ const SDKDownloadPage: React.FC = () => {
           ))}
           <a
             href="#"
-            className="flex items-center gap-3 p-4 rounded-lg border border-neutral-800 bg-neutral-900/30 text-neutral-400 hover:text-white hover:border-neutral-700 transition-colors group"
+            className="flex items-center gap-3 p-4 rounded-lg border border-neutral-800 bg-[#0a0a0a] text-neutral-400 hover:text-white hover:border-neutral-700 transition-colors group"
           >
             <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             <span className="text-sm font-medium">Request a Language</span>

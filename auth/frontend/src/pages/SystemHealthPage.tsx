@@ -135,7 +135,7 @@ const SystemHealthPage: React.FC<SystemHealthPageProps> = () => {
     return (
       <div className="max-w-7xl mx-auto space-y-8 animate-fade-in">
         <div className="flex items-center justify-center py-12">
-          <RefreshCw className="w-8 h-8 text-purple-400 animate-spin" />
+          <RefreshCw className="w-8 h-8 text-neutral-300 animate-spin" />
         </div>
       </div>
     );
@@ -150,7 +150,7 @@ const SystemHealthPage: React.FC<SystemHealthPageProps> = () => {
           <p className="text-neutral-400 mb-4">{error}</p>
           <button
             onClick={fetchSystemHealth}
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+            className="px-4 py-2 bg-white text-black rounded-md hover:bg-neutral-200 transition-colors"
           >
             Try Again
           </button>
@@ -177,7 +177,7 @@ const SystemHealthPage: React.FC<SystemHealthPageProps> = () => {
             onClick={() => setAutoRefresh(!autoRefresh)}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
               autoRefresh
-                ? "bg-purple-600 text-white hover:bg-purple-700"
+                ? "bg-white text-black hover:bg-neutral-200"
                 : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
             }`}
           >
@@ -187,7 +187,7 @@ const SystemHealthPage: React.FC<SystemHealthPageProps> = () => {
           
           <button
             onClick={fetchSystemHealth}
-            className="flex items-center gap-2 px-4 py-2 bg-neutral-800 text-white rounded-lg hover:bg-neutral-700 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-neutral-800 text-white rounded-md hover:bg-neutral-700 transition-colors"
           >
             <RefreshCw className="w-4 h-4" />
             Refresh
@@ -196,9 +196,9 @@ const SystemHealthPage: React.FC<SystemHealthPageProps> = () => {
       </div>
 
       {/* Overall Status */}
-      <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-6">
+      <div className="rounded-xl border border-neutral-800 bg-[#0a0a0a] p-6">
         <div className="flex items-center gap-4">
-          <div className={`p-3 rounded-full ${getStatusColor(systemHealth.overall_status)}`}>
+          <div className={`p-3 rounded-md ${getStatusColor(systemHealth.overall_status)}`}>
             {getStatusIcon(systemHealth.overall_status)}
           </div>
           <div>
@@ -212,9 +212,9 @@ const SystemHealthPage: React.FC<SystemHealthPageProps> = () => {
 
       {/* Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30">
+        <div className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a]">
           <div className="flex items-center gap-3 mb-4">
-            <Server className="w-5 h-5 text-purple-400" />
+            <Server className="w-5 h-5 text-neutral-300" />
             <h3 className="font-medium text-white">Services</h3>
           </div>
           <div className="text-2xl font-bold text-white">
@@ -223,7 +223,7 @@ const SystemHealthPage: React.FC<SystemHealthPageProps> = () => {
           <p className="text-sm text-neutral-400">Services Online</p>
         </div>
 
-        <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30">
+        <div className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a]">
           <div className="flex items-center gap-3 mb-4">
             <Activity className="w-5 h-5 text-green-400" />
             <h3 className="font-medium text-white">Vectors</h3>
@@ -234,7 +234,7 @@ const SystemHealthPage: React.FC<SystemHealthPageProps> = () => {
           <p className="text-sm text-neutral-400">Total Vectors</p>
         </div>
 
-        <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30">
+        <div className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a]">
           <div className="flex items-center gap-3 mb-4">
             <Zap className="w-5 h-5 text-blue-400" />
             <h3 className="font-medium text-white">Workers</h3>
@@ -245,7 +245,7 @@ const SystemHealthPage: React.FC<SystemHealthPageProps> = () => {
           <p className="text-sm text-neutral-400">Active Workers</p>
         </div>
 
-        <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30">
+        <div className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a]">
           <div className="flex items-center gap-3 mb-4">
             <Shield className="w-5 h-5 text-orange-400" />
             <h3 className="font-medium text-white">Storage</h3>
@@ -258,7 +258,7 @@ const SystemHealthPage: React.FC<SystemHealthPageProps> = () => {
       </div>
 
       {/* Services Status */}
-      <div className="rounded-xl border border-neutral-800 bg-neutral-900/50">
+      <div className="rounded-xl border border-neutral-800 bg-[#0a0a0a]">
         <div className="p-6 border-b border-neutral-800">
           <h2 className="text-xl font-semibold text-white">Service Status</h2>
         </div>
@@ -288,7 +288,7 @@ const SystemHealthPage: React.FC<SystemHealthPageProps> = () => {
       </div>
 
       {/* System Alerts */}
-      <div className="rounded-xl border border-neutral-800 bg-neutral-900/50">
+      <div className="rounded-xl border border-neutral-800 bg-[#0a0a0a]">
         <div className="p-6 border-b border-neutral-800">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold text-white">System Alerts</h2>
@@ -298,7 +298,7 @@ const SystemHealthPage: React.FC<SystemHealthPageProps> = () => {
               <select
                 value={alertFilter}
                 onChange={(e) => setAlertFilter(e.target.value as any)}
-                className="bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-1 text-sm text-white"
+                className="bg-[#050505] border border-neutral-800 rounded-lg px-3 py-1 text-sm text-white"
               >
                 <option value="all">All Alerts</option>
                 <option value="active">Active Only</option>
@@ -344,7 +344,7 @@ const SystemHealthPage: React.FC<SystemHealthPageProps> = () => {
                     ) : (
                       <button
                         onClick={() => resolveAlert(alert.id)}
-                        className="flex items-center gap-1 px-3 py-1 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition-colors"
+                        className="flex items-center gap-1 px-3 py-1 bg-white text-black text-sm rounded-lg hover:bg-neutral-200 transition-colors"
                       >
                         <Square className="w-4 h-4" />
                         Resolve

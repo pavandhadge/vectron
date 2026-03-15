@@ -24,7 +24,7 @@ func encodePayload(payload map[string]string) []byte {
 	return data
 }
 
-func decodeMetadata(metadata []byte) map[string]string {
+func DecodeMetadata(metadata []byte) map[string]string {
 	if len(metadata) == 0 {
 		return nil
 	}
@@ -129,7 +129,7 @@ func FromWorkerGetVectorResponse(res *workerpb.GetVectorResponse) *apigatewaypb.
 		Point: &apigatewaypb.Point{
 			Id:      res.Vector.Id,
 			Vector:  res.Vector.Vector,
-			Payload: decodeMetadata(res.Vector.Metadata),
+			Payload: DecodeMetadata(res.Vector.Metadata),
 		},
 	}
 }

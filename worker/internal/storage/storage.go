@@ -50,6 +50,7 @@ type Storage interface {
 	DeleteVector(id string) error
 	Search(query []float32, k int) ([]string, []float32, error) // Vector search using HNSW
 	BruteForceSearch(query []float32, k int) ([]string, error)  // Brute-force scan for comparison
+	Dimension() int
 
 	// Advanced Features
 	Compact() error
@@ -118,6 +119,14 @@ type indexOp struct {
 // NewPebbleDB creates a new, uninitialized instance of PebbleDB.
 func NewPebbleDB() *PebbleDB {
 	return &PebbleDB{}
+}
+
+// Dimension returns the expected vector dimension for this shard.
+func (r *PebbleDB) Dimension() int {
+	if r == nil || r.opts == nil {
+		return 0
+	}
+	return r.opts.HNSWConfig.Dim
 }
 
 // SetShardID sets the shard ID for WAL streaming.

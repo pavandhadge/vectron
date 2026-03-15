@@ -30,10 +30,10 @@ interface StatCardProps {
 }
 
 const StatCard = ({ title, value, change, icon: Icon, trend = 'neutral' }: StatCardProps) => (
-  <div className="bg-neutral-900/50 border border-neutral-800 rounded-lg p-6 hover:bg-neutral-900/70 transition-colors">
+  <div className="bg-[#0a0a0a] border border-neutral-800 rounded-lg p-6 hover:bg-[#111111] transition-colors">
     <div className="flex items-center justify-between mb-4">
       <div className="flex items-center gap-3">
-        <div className="p-2 rounded-lg bg-purple-500/10 text-purple-400">
+        <div className="p-2 rounded-lg bg-[#0a0a0a] text-neutral-300">
           <Icon className="w-5 h-5" />
         </div>
         <h3 className="text-sm font-medium text-neutral-400">{title}</h3>
@@ -78,7 +78,7 @@ const ServiceStatusCard = ({
   const Icon = config.icon;
 
   return (
-    <div className="bg-neutral-900/50 border border-neutral-800 rounded-lg p-4">
+    <div className="bg-[#0a0a0a] border border-neutral-800 rounded-lg p-4">
       <div className="flex items-center justify-between mb-2">
         <h4 className="font-medium text-white">{name}</h4>
         <div className={`p-1 rounded ${config.bg}`}>
@@ -137,7 +137,7 @@ export const ManagementDashboard = () => {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500" />
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-neutral-400" />
       </div>
     );
   }
@@ -164,7 +164,7 @@ export const ManagementDashboard = () => {
           <p className="text-neutral-400">Monitor and manage your Vectron database cluster</p>
         </div>
         <div className="flex items-center gap-3">
-          <div className={`px-3 py-2 rounded-full border text-sm font-medium ${
+          <div className={`px-3 py-2 rounded-md border text-sm font-medium ${
             overall_status === 'healthy'
               ? 'border-green-500/20 bg-green-500/10 text-green-400'
               : overall_status === 'degraded'
@@ -175,7 +175,7 @@ export const ManagementDashboard = () => {
           </div>
           <button
             onClick={fetchData}
-            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
+            className="px-4 py-2 bg-white text-black rounded-md hover:bg-neutral-200 transition-colors"
           >
             Refresh
           </button>
@@ -214,9 +214,9 @@ export const ManagementDashboard = () => {
 
       {/* System Resources */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-neutral-900/50 border border-neutral-800 rounded-lg p-6">
+        <div className="bg-[#0a0a0a] border border-neutral-800 rounded-lg p-6">
           <div className="flex items-center gap-3 mb-4">
-            <Cpu className="w-5 h-5 text-purple-400" />
+            <Cpu className="w-5 h-5 text-neutral-300" />
             <h3 className="text-lg font-semibold text-white">CPU Usage</h3>
           </div>
           <div className="space-y-3">
@@ -237,9 +237,9 @@ export const ManagementDashboard = () => {
           </div>
         </div>
 
-        <div className="bg-neutral-900/50 border border-neutral-800 rounded-lg p-6">
+        <div className="bg-[#0a0a0a] border border-neutral-800 rounded-lg p-6">
           <div className="flex items-center gap-3 mb-4">
-            <HardDrive className="w-5 h-5 text-purple-400" />
+            <HardDrive className="w-5 h-5 text-neutral-300" />
             <h3 className="text-lg font-semibold text-white">Memory Usage</h3>
           </div>
           <div className="space-y-3">
@@ -252,9 +252,9 @@ export const ManagementDashboard = () => {
           </div>
         </div>
 
-        <div className="bg-neutral-900/50 border border-neutral-800 rounded-lg p-6">
+        <div className="bg-[#0a0a0a] border border-neutral-800 rounded-lg p-6">
           <div className="flex items-center gap-3 mb-4">
-            <Wifi className="w-5 h-5 text-purple-400" />
+            <Wifi className="w-5 h-5 text-neutral-300" />
             <h3 className="text-lg font-semibold text-white">Network I/O</h3>
           </div>
           <div className="space-y-3">
@@ -276,7 +276,7 @@ export const ManagementDashboard = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Services Status */}
-        <div className="bg-neutral-900/30 border border-neutral-800 rounded-lg p-6">
+        <div className="bg-[#0a0a0a] border border-neutral-800 rounded-lg p-6">
           <h3 className="text-lg font-semibold text-white mb-4">Service Status</h3>
           <div className="space-y-4">
             {services.map((service, index) => (
@@ -293,7 +293,7 @@ export const ManagementDashboard = () => {
         </div>
 
         {/* Recent Alerts */}
-        <div className="bg-neutral-900/30 border border-neutral-800 rounded-lg p-6">
+        <div className="bg-[#0a0a0a] border border-neutral-800 rounded-lg p-6">
           <h3 className="text-lg font-semibold text-white mb-4">Recent Alerts</h3>
           <div className="space-y-3">
             {alerts.length === 0 ? (

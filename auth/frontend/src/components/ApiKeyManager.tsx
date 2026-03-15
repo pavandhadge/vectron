@@ -46,11 +46,24 @@ export const ApiKeyManager: React.FC = () => {
   const [openCreateDialog, setOpenCreateDialog] = useState(false);
   const [keyToDelete, setKeyToDelete] = useState<string | null>(null);
 
+  const normalizeKey = (key: any): ApiKey => ({
+    keyPrefix: key?.keyPrefix ?? key?.key_prefix ?? "",
+    userId: key?.userId ?? key?.user_id ?? "",
+    createdAt: key?.createdAt ?? key?.created_at ?? 0,
+    name: key?.name ?? "",
+  });
+
+  const normalizeSdkJwt = (data: any): string => {
+    if (!data) return "";
+    return data.sdkJwt || data.sdk_jwt || "";
+  };
+
   const fetchKeys = useCallback(async () => {
     setLoading(true); // Corrected: use setLoading
     try {
       const response = await authApiClient.get<ListKeysResponse>("/v1/keys");
-      setKeys(response.data.keys || []);
+      const normalized = (response.data.keys || []).map(normalizeKey);
+      setKeys(normalized);
     } catch (err) {
       setToastMessage({ message: "Failed to fetch API keys.", type: "danger" });
       console.error("Error fetching keys:", err);
@@ -82,9 +95,10 @@ export const ApiKeyManager: React.FC = () => {
         createKeyPayload,
       );
 
-      const newKeyInfo =
+      const newKeyInfoRaw =
         keyResponse.data.keyInfo || keyResponse.data.key_info;
-      if (!newKeyInfo) {
+      const newKeyInfo = newKeyInfoRaw ? normalizeKey(newKeyInfoRaw) : null;
+      if (!newKeyInfo || !newKeyInfo.keyPrefix) {
         throw new Error("Failed to get key info after creation.");
       }
 
@@ -93,7 +107,7 @@ export const ApiKeyManager: React.FC = () => {
         { api_key_id: newKeyInfo.keyPrefix } as CreateSDKJWTRequest,
       );
 
-      setNewlyGeneratedToken(sdkJwtResponse.data.sdkJwt);
+      setNewlyGeneratedToken(normalizeSdkJwt(sdkJwtResponse.data));
       setNewKeyName("");
       fetchKeys();
       setToastMessage({
@@ -145,7 +159,7 @@ export const ApiKeyManager: React.FC = () => {
         "/v1/sdk-jwt",
         { api_key_id: key.keyPrefix } as CreateSDKJWTRequest,
       );
-      setSdkJwt(response.data.sdkJwt);
+      setSdkJwt(normalizeSdkJwt(response.data));
       setKeyForJwt(key);
       setToastMessage({ message: "SDK JWT created", type: "success" });
     } catch (err: any) {
@@ -189,7 +203,7 @@ export const ApiKeyManager: React.FC = () => {
         <div className="overflow-x-auto">
           <table className="min-w-full text-left">
             <thead>
-              <tr className="border-b border-neutral-800 bg-neutral-900/30">
+              <tr className="border-b border-neutral-800 bg-[var(--color-bg-card)]">
                 <th className="px-6 py-4 text-xs font-semibold text-neutral-500 uppercase tracking-wider">
                   Name
                 </th>
@@ -222,7 +236,7 @@ export const ApiKeyManager: React.FC = () => {
                 keys.map((key) => (
                   <tr
                     key={key.keyPrefix}
-                    className="group hover:bg-neutral-900/40 transition-colors"
+                    className="group hover:bg-[var(--color-bg-card-hover)] transition-colors"
                   >
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
@@ -382,6 +396,15 @@ export const ApiKeyManager: React.FC = () => {
               short-lived and will only be shown once.
             </p>
           </div>
+          <div className="rounded-lg border border-neutral-800 bg-neutral-950 p-3 text-xs text-neutral-300">
+            <div className="font-semibold text-neutral-200 mb-2">
+              Example Usage (API Gateway)
+            </div>
+            <pre className="whitespace-pre-wrap">
+{`curl -H "Authorization: Bearer ${newlyGeneratedToken}" \\
+  http://localhost:10012/v1/collections`}
+            </pre>
+          </div>
           <div className="relative group">
             <div className="bg-black border border-neutral-800 rounded-lg p-4 font-mono text-sm break-all text-green-400 selection:bg-green-900 selection:text-white">
               {newlyGeneratedToken}
@@ -458,6 +481,15 @@ export const ApiKeyManager: React.FC = () => {
               This is a short-lived JSON Web Token for use in your SDKs. It will
               expire and cannot be refreshed automatically.
             </p>
+          </div>
+          <div className="rounded-lg border border-neutral-800 bg-neutral-950 p-3 text-xs text-neutral-300">
+            <div className="font-semibold text-neutral-200 mb-2">
+              Example Usage (API Gateway)
+            </div>
+            <pre className="whitespace-pre-wrap">
+{`curl -H "Authorization: Bearer ${sdkJwt}" \\
+  http://localhost:10012/v1/collections`}
+            </pre>
           </div>
           <div className="relative group">
             <div className="bg-black border border-neutral-800 rounded-lg p-4 font-mono text-xs break-all text-green-400 selection:bg-green-900 selection:text-white">

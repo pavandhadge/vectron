@@ -183,7 +183,7 @@ export const NewSidebar: React.FC<NewSidebarProps> = ({
       </div>
 
       {/* User Profile / Footer */}
-      <div className="p-4 border-t border-neutral-800 bg-neutral-900/10">
+      <div className="p-4 border-t border-neutral-800 bg-[var(--color-bg-card)]">
         <div className="flex items-center gap-3 mb-3">
           <div className="w-8 h-8 rounded-full bg-gradient-to-br from-neutral-700 to-neutral-600 flex items-center justify-center text-xs font-medium text-white ring-2 ring-black">
             {user?.email?.charAt(0).toUpperCase() || "U"}

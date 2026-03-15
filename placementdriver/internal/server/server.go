@@ -727,6 +727,37 @@ func (s *Server) CreateCollection(ctx context.Context, req *pb.CreateCollectionR
 	return &pb.CreateCollectionResponse{Success: true}, nil
 }
 
+// DeleteCollection handles the RPC to delete an existing collection.
+func (s *Server) DeleteCollection(ctx context.Context, req *pb.DeleteCollectionRequest) (*pb.DeleteCollectionResponse, error) {
+	if req.Name == "" {
+		return nil, status.Error(codes.InvalidArgument, "collection name is required")
+	}
+
+	payload := fsm.DeleteCollectionPayload{
+		Name: req.Name,
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to marshal payload: %v", err)
+	}
+
+	cmd := fsm.Command{Type: fsm.DeleteCollection, Payload: payloadBytes}
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to marshal command: %v", err)
+	}
+
+	res, err := s.raft.Propose(cmdBytes, raftTimeout)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to propose command: %v", err)
+	}
+	if res.Value == 0 {
+		return nil, status.Errorf(codes.Internal, "FSM failed to delete collection")
+	}
+
+	return &pb.DeleteCollectionResponse{Success: true}, nil
+}
+
 // ListCollections returns a list of all collection names from the FSM state.
 func (s *Server) ListCollections(ctx context.Context, req *pb.ListCollectionsRequest) (*pb.ListCollectionsResponse, error) {
 	collections := s.fsm.GetCollections()

@@ -1,6 +1,4 @@
 /* 1. Base Variables & Typography */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
 :root {
   --bg-primary: #0a0a0a; /* Deep OLED Black */
   --bg-secondary: #111111; /* Slightly lighter for cards */
@@ -18,7 +16,8 @@
 
   /* Tailwind theme tokens */
   --color-bg-page: var(--bg-primary);
-  --color-bg-card: var(--bg-secondary);
+  --color-bg-card: #0a0a0a;
+  --color-bg-card-hover: #111111;
   --color-bg-sidebar: #0b0b0b;
   --color-text-primary: var(--fg-primary);
   --color-text-secondary: #d4d4d8;

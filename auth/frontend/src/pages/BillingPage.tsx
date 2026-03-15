@@ -40,7 +40,7 @@ const UsageBar = ({
       </div>
       <div className="h-2 w-full bg-neutral-800 rounded-full overflow-hidden">
         <div
-          className="h-full bg-purple-500 rounded-full transition-all duration-1000 ease-out"
+          className="h-full bg-white rounded-full transition-all duration-1000 ease-out"
           style={{ width: `${percentage}%` }}
         />
       </div>
@@ -61,13 +61,13 @@ const PlanCard = ({
         relative p-6 rounded-xl border flex flex-col h-full
         ${
           isCurrent
-            ? "bg-neutral-900/40 border-purple-500/50 shadow-[0_0_30px_-10px_rgba(168,85,247,0.15)]"
+            ? "bg-[#0a0a0a] border-neutral-700 shadow-[0_0_30px_-10px_rgba(168,85,247,0.15)]"
             : "bg-black border-neutral-800"
         }
     `}
   >
     {isCurrent && (
-      <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-purple-500 text-white text-[10px] font-bold uppercase tracking-wider rounded-full shadow-lg">
+      <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-white text-black text-[10px] font-bold uppercase tracking-wider rounded-md shadow-lg">
         Current Plan
       </div>
     )}
@@ -93,7 +93,7 @@ const PlanCard = ({
       onClick={onAction}
       disabled={isCurrent}
       className={`
-                w-full py-2.5 px-4 rounded-lg text-sm font-medium transition-all
+                w-full py-2.5 px-4 rounded-md text-sm font-medium transition-all
                 ${
                   isCurrent
                     ? "bg-neutral-800 text-neutral-500 cursor-default"
@@ -172,7 +172,7 @@ const BillingPage: React.FC = () => {
         <div className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a] flex flex-col justify-between">
           <div>
             <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-              <CreditCard className="w-4 h-4 text-purple-500" /> Payment Method
+              <CreditCard className="w-4 h-4 text-neutral-300" /> Payment Method
             </h2>
             {isPaid ? (
               <div className="flex items-center gap-3 p-3 rounded-lg bg-neutral-900 border border-neutral-800">
@@ -236,7 +236,7 @@ const BillingPage: React.FC = () => {
 
         <div className="rounded-xl border border-neutral-800 bg-[#0a0a0a] overflow-hidden">
           <table className="w-full text-left text-sm">
-            <thead className="bg-neutral-900/50 text-neutral-400 border-b border-neutral-800">
+            <thead className="bg-[#0a0a0a] text-neutral-400 border-b border-neutral-800">
               <tr>
                 <th className="px-6 py-3 font-medium">Date</th>
                 <th className="px-6 py-3 font-medium">Amount</th>

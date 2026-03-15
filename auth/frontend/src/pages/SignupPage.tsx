@@ -17,11 +17,36 @@ export const SignupPage = () => {
     }
   }, [user, navigate]);
 
+  const validatePassword = (value: string): string | null => {
+    if (!value) return "Password is required.";
+    if (value.length < 8) return "Password must be at least 8 characters long.";
+    if (value.length > 128) return "Password must be at most 128 characters long.";
+
+    let hasUpper = false;
+    let hasLower = false;
+    let hasDigit = false;
+    let hasSpecial = false;
+
+    for (const ch of value) {
+      if (/[A-Z]/.test(ch)) hasUpper = true;
+      else if (/[a-z]/.test(ch)) hasLower = true;
+      else if (/[0-9]/.test(ch)) hasDigit = true;
+      else if (/[^A-Za-z0-9]/.test(ch)) hasSpecial = true;
+    }
+
+    const types = [hasUpper, hasLower, hasDigit, hasSpecial].filter(Boolean).length;
+    if (types < 3) {
+      return "Password must contain at least 3 of: uppercase, lowercase, digits, special characters.";
+    }
+    return null;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
-    if (password.length < 8) {
-      setFormError("Password must be at least 8 characters long.");
+    const pwdError = validatePassword(password);
+    if (pwdError) {
+      setFormError(pwdError);
       return;
     }
     setLoading(true);
@@ -37,7 +62,7 @@ export const SignupPage = () => {
       {/* Ambient Background Glow */}
       <div className="fixed top-0 left-1/2 -translate-x-1/2 w-[500px] h-[300px] bg-purple-900/20 blur-[120px] rounded-full pointer-events-none" />
 
-      <div className="relative w-full max-w-md p-8 space-y-6 bg-neutral-900/30 backdrop-blur-xl rounded-2xl border border-neutral-800 shadow-2xl">
+      <div className="relative w-full max-w-md p-8 space-y-6 bg-[#0a0a0a] backdrop-blur-xl rounded-2xl border border-neutral-800 shadow-2xl">
         <div className="space-y-2 text-center">
           <h2 className="text-3xl font-bold tracking-tighter">
             Create your account

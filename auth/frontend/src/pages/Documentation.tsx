@@ -136,7 +136,7 @@ const getContent = (id: string) => {
               3. Verify Installation
             </h3>
             <p className="text-neutral-400">Check the health endpoint:</p>
-            <CodeBlock code="curl http://localhost:8080/v1/health" />
+            <CodeBlock code="curl http://localhost:8080/v1/system/health" />
           </div>
         </div>
       );
@@ -156,17 +156,25 @@ const getContent = (id: string) => {
           <div className="space-y-4">
             <h3 className="text-xl font-semibold text-white">Using API Keys</h3>
             <p className="text-neutral-400">
-              Include your API key in the{" "}
+              Generate an SDK JWT from your API key, then include it in the{" "}
               <code className="bg-neutral-800 px-1 py-0.5 rounded text-sm text-purple-300">
                 Authorization
               </code>{" "}
               header of every request.
             </p>
             <CodeBlock
-              code={`// Headers
+              code={`// Header (SDK JWT from /v1/sdk-jwt)
 {
-  "Authorization": "Bearer vk_live_5x9..."
+  "Authorization": "Bearer <SDK_JWT>"
 }`}
+            />
+          </div>
+
+          <div className="space-y-4">
+            <h3 className="text-xl font-semibold text-white">Example</h3>
+            <CodeBlock
+              code={`curl -H "Authorization: Bearer <SDK_JWT>" \\
+  http://localhost:10012/v1/collections`}
             />
           </div>
 

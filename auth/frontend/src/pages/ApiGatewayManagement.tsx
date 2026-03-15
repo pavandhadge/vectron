@@ -77,7 +77,7 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
     return (
       <div className="max-w-7xl mx-auto space-y-8 animate-fade-in">
         <div className="flex items-center justify-center py-12">
-          <RefreshCw className="w-8 h-8 text-purple-400 animate-spin" />
+          <RefreshCw className="w-8 h-8 text-neutral-300 animate-spin" />
         </div>
       </div>
     );
@@ -92,7 +92,7 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
           <p className="text-neutral-400 mb-4">{error}</p>
           <button
             onClick={fetchGatewayStats}
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+            className="px-4 py-2 bg-white text-black rounded-md hover:bg-neutral-200 transition-colors"
           >
             Try Again
           </button>
@@ -119,7 +119,7 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
             onClick={() => setAutoRefresh(!autoRefresh)}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
               autoRefresh
-                ? "bg-purple-600 text-white hover:bg-purple-700"
+                ? "bg-white text-black hover:bg-neutral-200"
                 : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
             }`}
           >
@@ -129,7 +129,7 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
           
           <button
             onClick={fetchGatewayStats}
-            className="flex items-center gap-2 px-4 py-2 bg-neutral-800 text-white rounded-lg hover:bg-neutral-700 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-neutral-800 text-white rounded-md hover:bg-neutral-700 transition-colors"
           >
             <RefreshCw className="w-4 h-4" />
             Refresh
@@ -139,7 +139,7 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
 
       {/* Performance Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30">
+        <div className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a]">
           <div className="flex items-center gap-3 mb-4">
             <Clock className="w-5 h-5 text-green-400" />
             <h3 className="font-medium text-white">Uptime</h3>
@@ -150,7 +150,7 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
           <p className="text-sm text-neutral-400">System Uptime</p>
         </div>
 
-        <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30">
+        <div className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a]">
           <div className="flex items-center gap-3 mb-4">
             <BarChart3 className="w-5 h-5 text-blue-400" />
             <h3 className="font-medium text-white">Total Requests</h3>
@@ -161,9 +161,9 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
           <p className="text-sm text-neutral-400">Total Processed</p>
         </div>
 
-        <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30">
+        <div className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a]">
           <div className="flex items-center gap-3 mb-4">
-            <TrendingUp className="w-5 h-5 text-purple-400" />
+            <TrendingUp className="w-5 h-5 text-neutral-300" />
             <h3 className="font-medium text-white">Requests/sec</h3>
           </div>
           <div className="text-2xl font-bold text-white">
@@ -172,7 +172,7 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
           <p className="text-sm text-neutral-400">Current Rate</p>
         </div>
 
-        <div className="p-6 rounded-xl border border-neutral-800 bg-neutral-900/30">
+        <div className="p-6 rounded-xl border border-neutral-800 bg-[#0a0a0a]">
           <div className="flex items-center gap-3 mb-4">
             <AlertCircle className="w-5 h-5 text-red-400" />
             <h3 className="font-medium text-white">Error Rate</h3>
@@ -187,11 +187,11 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
       {/* Network & Performance Stats */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Connection Stats */}
-        <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-6">
+        <div className="rounded-xl border border-neutral-800 bg-[#0a0a0a] p-6">
           <h2 className="text-xl font-semibold text-white mb-6">Network Statistics</h2>
           
           <div className="space-y-4">
-            <div className="flex items-center justify-between p-4 rounded-lg bg-neutral-800/50">
+            <div className="flex items-center justify-between p-4 rounded-lg bg-[#0a0a0a]">
               <div className="flex items-center gap-3">
                 <Users className="w-5 h-5 text-blue-400" />
                 <span className="text-white">Active Connections</span>
@@ -201,7 +201,7 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
               </div>
             </div>
 
-            <div className="flex items-center justify-between p-4 rounded-lg bg-neutral-800/50">
+            <div className="flex items-center justify-between p-4 rounded-lg bg-[#0a0a0a]">
               <div className="flex items-center gap-3">
                 <Activity className="w-5 h-5 text-green-400" />
                 <span className="text-white">Average Response Time</span>
@@ -214,11 +214,11 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
         </div>
 
         {/* Rate Limiting Status */}
-        <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-6">
+        <div className="rounded-xl border border-neutral-800 bg-[#0a0a0a] p-6">
           <h2 className="text-xl font-semibold text-white mb-6">Rate Limiting</h2>
           
           <div className="space-y-4">
-            <div className="flex items-center justify-between p-4 rounded-lg bg-neutral-800/50">
+            <div className="flex items-center justify-between p-4 rounded-lg bg-[#0a0a0a]">
               <div className="flex items-center gap-3">
                 <div className={`w-3 h-3 rounded-full ${gatewayStats.rateLimit.enabled ? "bg-green-400" : "bg-red-400"}`} />
                 <span className="text-white">Status</span>
@@ -230,7 +230,7 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
 
             {gatewayStats.rateLimit.enabled && (
               <>
-                <div className="flex items-center justify-between p-4 rounded-lg bg-neutral-800/50">
+                <div className="flex items-center justify-between p-4 rounded-lg bg-[#0a0a0a]">
                   <div className="flex items-center gap-3">
                     <Zap className="w-5 h-5 text-yellow-400" />
                     <span className="text-white">Rate Limit</span>
@@ -240,9 +240,9 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between p-4 rounded-lg bg-neutral-800/50">
+                <div className="flex items-center justify-between p-4 rounded-lg bg-[#0a0a0a]">
                   <div className="flex items-center gap-3">
-                    <Users className="w-5 h-5 text-purple-400" />
+                    <Users className="w-5 h-5 text-neutral-300" />
                     <span className="text-white">Active Users</span>
                   </div>
                   <div className="text-xl font-bold text-white">
@@ -256,14 +256,14 @@ const ApiGatewayManagement: React.FC<ApiGatewayManagementProps> = () => {
       </div>
 
       {/* Endpoint Statistics */}
-      <div className="rounded-xl border border-neutral-800 bg-neutral-900/50">
+      <div className="rounded-xl border border-neutral-800 bg-[#0a0a0a]">
         <div className="p-6 border-b border-neutral-800">
           <h2 className="text-xl font-semibold text-white">Endpoint Statistics</h2>
         </div>
         
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-neutral-800/50">
+            <thead className="bg-[#0a0a0a]">
               <tr>
                 <th className="text-left p-4 text-neutral-400 font-medium">Method</th>
                 <th className="text-left p-4 text-neutral-400 font-medium">Path</th>
