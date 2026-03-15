@@ -1,0 +1,102 @@
+## Vectron Architecture
+
+```mermaid
+flowchart LR
+    C[Clients\nSDKs / Apps] -->|gRPC/HTTP| G[API Gateway]
+
+    G -->|auth check| A[Auth Service]
+    G -->|routing/meta| PD[Placement Driver]
+
+    G -->|search cache| MC[Gateway Memory Cache]
+    G -->|optional| RC[Redis/Valkey Cache]
+
+    G -->|fanout search| W1[Worker Node 1]
+    G -->|fanout search| W2[Worker Node 2]
+    G -->|fanout search| WN[Worker Node N]
+
+    W1 --> H1[HNSW Index]
+    W1 --> P1[PebbleDB]
+    W2 --> H2[HNSW Index]
+    W2 --> P2[PebbleDB]
+    WN --> HN[HNSW Index]
+    WN --> PN[PebbleDB]
+
+    G -->|optional rerank| R[Reranker]
+
+    PD -->|Shard assignments| W1
+    PD -->|Shard assignments| W2
+    PD -->|Shard assignments| WN
+
+    subgraph Workers
+      W1
+      W2
+      WN
+    end
+```
+
+## Insert/Upsert Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client
+    participant APIGW as API Gateway
+    participant Auth as Auth Service
+    participant PD as Placement Driver
+    participant Worker as Worker Node
+    participant Raft as Raft/Dragonboat
+    participant Pebble as PebbleDB
+    participant HNSW as HNSW Index
+
+    Client->>APIGW: Upsert(collection, points)
+    APIGW->>Auth: Validate JWT/API key
+    APIGW->>PD: Resolve shard routing (cached/refresh)
+    APIGW->>Worker: BatchStoreVector(shard, points)
+    Worker->>Raft: Propose write
+    Raft-->>Worker: Commit
+    Worker->>Pebble: Persist vectors + metadata
+    Worker->>HNSW: Update index (sync or async)
+    Worker-->>APIGW: UpsertResponse(count)
+    APIGW-->>Client: Upserted count
+```
+
+## Search Flow (Optional Vectors)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client
+    participant APIGW as API Gateway
+    participant Auth as Auth Service
+    participant PD as Placement Driver
+    participant Cache as Cache (GW/Redis)
+    participant Worker as Worker Node
+    participant HNSW as HNSW Index
+    participant Rerank as Reranker
+    participant Pebble as PebbleDB
+
+    Client->>APIGW: Search(collection, vector, top_k, include_vectors?)
+    APIGW->>Auth: Validate JWT/API key
+    APIGW->>Cache: Check search cache
+    alt Cache hit
+        Cache-->>APIGW: Cached results
+    else Cache miss
+        APIGW->>PD: Get routing/shards (cached/refresh)
+        APIGW->>Worker: Search shard(s) (fanout or single)
+        Worker->>HNSW: ANN search
+        Worker-->>APIGW: IDs + scores (+ payload)
+        opt Rerank enabled
+            APIGW->>Rerank: Rerank candidates
+            Rerank-->>APIGW: Reranked results
+        end
+        APIGW->>Cache: Store results (no vectors)
+    end
+
+    opt include_vectors = true
+        APIGW->>Worker: GetVector for each result (parallel)
+        Worker->>Pebble: Fetch vector + metadata
+        Worker-->>APIGW: Vector + metadata
+    end
+
+    APIGW-->>Client: Results (metadata + score + optional vector)
+```

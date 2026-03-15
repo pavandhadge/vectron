@@ -82,7 +82,8 @@ export const ApiKeyManager: React.FC = () => {
         createKeyPayload,
       );
 
-      const newKeyInfo = keyResponse.data.key_info;
+      const newKeyInfo =
+        keyResponse.data.keyInfo || keyResponse.data.key_info;
       if (!newKeyInfo) {
         throw new Error("Failed to get key info after creation.");
       }

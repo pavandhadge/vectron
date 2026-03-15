@@ -21,6 +21,9 @@ const (
 	// WorkerTimeout is the maximum time since last heartbeat before a worker is considered unhealthy
 	WorkerTimeout = 30 * time.Second
 
+	// RerankerTimeout is the maximum time since last heartbeat before a reranker is considered unhealthy
+	RerankerTimeout = 30 * time.Second
+
 	// WorkerCleanupTimeout is the time after which a dead worker is removed from the system
 	WorkerCleanupTimeout = 24 * time.Hour
 
@@ -84,6 +87,33 @@ func (f *FSM) GetHealthyWorkers() []WorkerInfo {
 	for _, worker := range f.Workers {
 		if worker.State == WorkerStateReady && time.Since(worker.LastHeartbeat) < WorkerTimeout {
 			healthy = append(healthy, worker)
+		}
+	}
+	return healthy
+}
+
+// IsRerankerHealthy checks if a reranker is healthy based on its last heartbeat.
+func (f *FSM) IsRerankerHealthy(rerankerID uint64) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	reranker, ok := f.Rerankers[rerankerID]
+	if !ok {
+		return false
+	}
+
+	return time.Since(reranker.LastHeartbeat) < RerankerTimeout
+}
+
+// GetHealthyRerankers returns a list of all healthy rerankers.
+func (f *FSM) GetHealthyRerankers() []RerankerInfo {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	var healthy []RerankerInfo
+	for _, reranker := range f.Rerankers {
+		if time.Since(reranker.LastHeartbeat) < RerankerTimeout {
+			healthy = append(healthy, reranker)
 		}
 	}
 	return healthy

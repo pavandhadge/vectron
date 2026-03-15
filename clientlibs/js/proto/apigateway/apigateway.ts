@@ -67,6 +67,8 @@ export interface SearchRequest {
    * If set, slow worker responses may be skipped and partial results returned.
    */
   timeoutMs: number;
+  /** If true, include the full vector for each result (more expensive). */
+  includeVectors: boolean;
 }
 
 export interface SearchResponse {
@@ -77,6 +79,7 @@ export interface SearchResult {
   id: string;
   score: number;
   payload: { [key: string]: string };
+  vector: number[];
 }
 
 export interface SearchResult_PayloadEntry {
@@ -582,7 +585,7 @@ export const UpsertResponse: MessageFns<UpsertResponse> = {
 };
 
 function createBaseSearchRequest(): SearchRequest {
-  return { collection: "", vector: [], topK: 0, query: "", timeoutMs: 0 };
+  return { collection: "", vector: [], topK: 0, query: "", timeoutMs: 0, includeVectors: false };
 }
 
 export const SearchRequest: MessageFns<SearchRequest> = {
@@ -601,6 +604,9 @@ export const SearchRequest: MessageFns<SearchRequest> = {
     }
     if (message.timeoutMs !== 0) {
       writer.uint32(40).uint32(message.timeoutMs);
+    }
+    if (message.includeVectors !== false) {
+      writer.uint32(48).bool(message.includeVectors);
     }
     return writer;
   },
@@ -662,6 +668,14 @@ export const SearchRequest: MessageFns<SearchRequest> = {
           message.timeoutMs = reader.uint32();
           continue;
         }
+        case 6: {
+          if (tag !== 48) {
+            break;
+          }
+
+          message.includeVectors = reader.bool();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -678,6 +692,7 @@ export const SearchRequest: MessageFns<SearchRequest> = {
       topK: isSet(object.topK) ? globalThis.Number(object.topK) : 0,
       query: isSet(object.query) ? globalThis.String(object.query) : "",
       timeoutMs: isSet(object.timeoutMs) ? globalThis.Number(object.timeoutMs) : 0,
+      includeVectors: isSet(object.includeVectors) ? globalThis.Boolean(object.includeVectors) : false,
     };
   },
 
@@ -698,6 +713,9 @@ export const SearchRequest: MessageFns<SearchRequest> = {
     if (message.timeoutMs !== 0) {
       obj.timeoutMs = Math.round(message.timeoutMs);
     }
+    if (message.includeVectors !== false) {
+      obj.includeVectors = message.includeVectors;
+    }
     return obj;
   },
 
@@ -711,6 +729,7 @@ export const SearchRequest: MessageFns<SearchRequest> = {
     message.topK = object.topK ?? 0;
     message.query = object.query ?? "";
     message.timeoutMs = object.timeoutMs ?? 0;
+    message.includeVectors = object.includeVectors ?? false;
     return message;
   },
 };
@@ -778,7 +797,7 @@ export const SearchResponse: MessageFns<SearchResponse> = {
 };
 
 function createBaseSearchResult(): SearchResult {
-  return { id: "", score: 0, payload: {} };
+  return { id: "", score: 0, payload: {}, vector: [] };
 }
 
 export const SearchResult: MessageFns<SearchResult> = {
@@ -792,6 +811,11 @@ export const SearchResult: MessageFns<SearchResult> = {
     globalThis.Object.entries(message.payload).forEach(([key, value]: [string, string]) => {
       SearchResult_PayloadEntry.encode({ key: key as any, value }, writer.uint32(26).fork()).join();
     });
+    writer.uint32(34).fork();
+    for (const v of message.vector) {
+      writer.float(v);
+    }
+    writer.join();
     return writer;
   },
 
@@ -829,6 +853,24 @@ export const SearchResult: MessageFns<SearchResult> = {
           }
           continue;
         }
+        case 4: {
+          if (tag === 37) {
+            message.vector.push(reader.float());
+
+            continue;
+          }
+
+          if (tag === 34) {
+            const end2 = reader.uint32() + reader.pos;
+            while (reader.pos < end2) {
+              message.vector.push(reader.float());
+            }
+
+            continue;
+          }
+
+          break;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -851,6 +893,7 @@ export const SearchResult: MessageFns<SearchResult> = {
           {},
         )
         : {},
+      vector: globalThis.Array.isArray(object?.vector) ? object.vector.map((e: any) => globalThis.Number(e)) : [],
     };
   },
 
@@ -871,6 +914,9 @@ export const SearchResult: MessageFns<SearchResult> = {
         });
       }
     }
+    if (message.vector?.length) {
+      obj.vector = message.vector;
+    }
     return obj;
   },
 
@@ -890,6 +936,7 @@ export const SearchResult: MessageFns<SearchResult> = {
       },
       {},
     );
+    message.vector = object.vector?.map((e) => e) || [];
     return message;
   },
 };

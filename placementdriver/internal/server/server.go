@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pavandhadge/vectron/placementdriver/internal/fsm"
@@ -59,6 +60,8 @@ type Server struct {
 
 	leaderAckMu    sync.RWMutex
 	leaderTransferAcks map[uint64]map[uint64]leaderTransferAck
+
+	rerankerRR uint64
 }
 
 // NewServer creates a new instance of the placement driver gRPC server.
@@ -128,6 +131,49 @@ func (s *Server) RegisterWorker(ctx context.Context, req *pb.RegisterWorkerReque
 	return &pb.RegisterWorkerResponse{
 		WorkerId: strconv.FormatUint(newWorkerID, 10),
 		Success:  true,
+	}, nil
+}
+
+// RegisterReranker handles a reranker's request to join the cluster.
+func (s *Server) RegisterReranker(ctx context.Context, req *pb.RegisterRerankerRequest) (*pb.RegisterRerankerResponse, error) {
+	if req.GetGrpcAddress() == "" {
+		return nil, status.Error(codes.InvalidArgument, "reranker grpc_address is required")
+	}
+
+	payload := fsm.RegisterRerankerPayload{
+		GrpcAddress: req.GetGrpcAddress(),
+		Role:        "rerank",
+		CPUCores:    req.GetCpuCores(),
+		MemoryBytes: req.GetMemoryBytes(),
+		DiskBytes:   req.GetDiskBytes(),
+		Rack:        req.GetRack(),
+		Zone:        req.GetZone(),
+		Region:      req.GetRegion(),
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to marshal payload: %v", err)
+	}
+
+	cmd := fsm.Command{Type: fsm.RegisterReranker, Payload: payloadBytes}
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to marshal command: %v", err)
+	}
+
+	res, err := s.raft.Propose(cmdBytes, raftTimeout)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to propose command: %v", err)
+	}
+
+	newRerankerID := res.Value
+	if newRerankerID == 0 {
+		return nil, status.Errorf(codes.Internal, "FSM failed to assign a reranker ID")
+	}
+
+	return &pb.RegisterRerankerResponse{
+		RerankerId: strconv.FormatUint(newRerankerID, 10),
+		Success:    true,
 	}, nil
 }
 
@@ -331,6 +377,40 @@ func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.H
 	}, nil
 }
 
+// RerankerHeartbeat is called periodically by rerankers to signal they are alive.
+func (s *Server) RerankerHeartbeat(ctx context.Context, req *pb.RerankerHeartbeatRequest) (*pb.RerankerHeartbeatResponse, error) {
+	rerankerID, err := strconv.ParseUint(req.RerankerId, 10, 64)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid reranker_id format: %v", err)
+	}
+
+	hbPayload := fsm.UpdateRerankerHeartbeatPayload{
+		RerankerID:       rerankerID,
+		CPUUsagePercent:  float64(req.GetCpuUsagePercent()),
+		MemoryUsagePercent: float64(req.GetMemoryUsagePercent()),
+		DiskUsagePercent: float64(req.GetDiskUsagePercent()),
+		QueriesPerSecond: float64(req.GetQueriesPerSecond()),
+	}
+	payloadBytes, err := json.Marshal(hbPayload)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to marshal heartbeat payload: %v", err)
+	}
+	cmd := fsm.Command{Type: fsm.UpdateRerankerHeartbeat, Payload: payloadBytes}
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to marshal heartbeat command: %v", err)
+	}
+
+	if _, err := s.raft.Propose(cmdBytes, raftTimeout); err != nil {
+		fmt.Printf("Warning: failed to propose heartbeat for reranker %d: %v\n", rerankerID, err)
+	}
+
+	return &pb.RerankerHeartbeatResponse{
+		Ok:      true,
+		Message: "ok",
+	}, nil
+}
+
 // GetWorker handles a request from the API gateway to find the correct worker for an operation.
 // It uses consistent hashing on the vector ID to determine the shard.
 func (s *Server) GetWorker(ctx context.Context, req *pb.GetWorkerRequest) (*pb.GetWorkerResponse, error) {
@@ -457,6 +537,45 @@ func (s *Server) ListWorkers(ctx context.Context, req *pb.ListWorkersRequest) (*
 
 	return &pb.ListWorkersResponse{
 		Workers: workerInfos,
+	}, nil
+}
+
+// ListRerankers returns a list of all registered rerankers from the FSM state.
+func (s *Server) ListRerankers(ctx context.Context, req *pb.ListRerankersRequest) (*pb.ListRerankersResponse, error) {
+	rerankers := s.fsm.GetRerankers()
+
+	rerankerInfos := make([]*pb.RerankerInfo, 0, len(rerankers))
+	for _, r := range rerankers {
+		metadata := map[string]string{
+			"role": r.Role,
+		}
+		rerankerInfos = append(rerankerInfos, &pb.RerankerInfo{
+			RerankerId:  strconv.FormatUint(r.ID, 10),
+			GrpcAddress: r.GrpcAddress,
+			LastHeartbeat: r.LastHeartbeat.Unix(),
+			Healthy:     s.fsm.IsRerankerHealthy(r.ID),
+			Metadata:    metadata,
+		})
+	}
+
+	return &pb.ListRerankersResponse{
+		Rerankers: rerankerInfos,
+	}, nil
+}
+
+// GetReranker returns a healthy reranker address for routing.
+func (s *Server) GetReranker(ctx context.Context, req *pb.GetRerankerRequest) (*pb.GetRerankerResponse, error) {
+	healthy := s.fsm.GetHealthyRerankers()
+	if len(healthy) == 0 {
+		return nil, status.Errorf(codes.Unavailable, "no healthy rerankers available")
+	}
+
+	idx := int(atomic.AddUint64(&s.rerankerRR, 1) % uint64(len(healthy)))
+	target := healthy[idx]
+
+	return &pb.GetRerankerResponse{
+		RerankerId:  strconv.FormatUint(target.ID, 10),
+		GrpcAddress: target.GrpcAddress,
 	}, nil
 }
 

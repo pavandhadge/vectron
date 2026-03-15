@@ -11,13 +11,21 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math"
+	"math/rand"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	vectron "github.com/pavandhadge/vectron/clientlibs/go"
+	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 // Product represents an e-commerce product
@@ -118,12 +126,40 @@ var products = []Product{
 func main() {
 	const (
 		apiGatewayAddr = "localhost:10010"
-		sdkJWTToken    = "your-sdk-jwt-token"
+		authGRPCAddr   = "localhost:10008"
 		collectionName = "ecommerce-products"
 	)
 
 	fmt.Println("🛍️  E-Commerce Semantic Search Demo")
 	fmt.Println("====================================")
+
+	rand.Seed(time.Now().UnixNano())
+	email := fmt.Sprintf("demo-%d@example.com", rand.Intn(1_000_000))
+	password := "DemoPassword123!"
+	if v := os.Getenv("DEMO_EMAIL"); v != "" {
+		email = v
+	}
+	if v := os.Getenv("DEMO_PASSWORD"); v != "" {
+		password = v
+	}
+
+	jwtToken, err := registerAndLogin(authGRPCAddr, email, password)
+	if err != nil {
+		log.Fatalf("auth failed: %v", err)
+	}
+
+	apiKeyName := fmt.Sprintf("demo-key-%d", rand.Intn(1_000_000))
+	fullKey, keyPrefix, err := createAPIKey(authGRPCAddr, jwtToken, apiKeyName)
+	if err != nil {
+		log.Fatalf("create api key failed: %v", err)
+	}
+	log.Printf("Created API key prefix=%s", keyPrefix)
+
+	sdkJWTToken, err := createSDKJWT(authGRPCAddr, jwtToken, keyPrefix)
+	if err != nil {
+		log.Fatalf("create sdk jwt failed: %v", err)
+	}
+	log.Printf("SDK JWT created from key %s (full key=%s)", keyPrefix, fullKey)
 
 	// Initialize client
 	fmt.Println("\n1️⃣  Connecting to Vectron...")
@@ -142,7 +178,9 @@ func main() {
 	} else {
 		fmt.Printf("✅ Collection created for %d products\n", len(products))
 	}
-	time.Sleep(2 * time.Second)
+	if err := waitForCollectionReady(client, collectionName, 30*time.Second); err != nil {
+		log.Fatalf("collection not ready: %v", err)
+	}
 
 	// Index products
 	fmt.Println("\n3️⃣  Indexing product catalog...")
@@ -155,7 +193,7 @@ func main() {
 		}
 	}
 
-	upserted, err := client.Upsert(collectionName, points)
+	upserted, err := upsertWithRetry(client, collectionName, points, 5)
 	if err != nil {
 		log.Fatalf("Failed to index products: %v", err)
 	}
@@ -266,6 +304,12 @@ func main() {
 		}
 	}
 
+	// if err := client.DeleteCollection(collectionName); err != nil {
+	// 	log.Printf("cleanup failed: delete collection %q: %v", collectionName, err)
+	// } else {
+	// 	fmt.Printf("\n🧹 Deleted collection %q\n", collectionName)
+	// }
+
 	fmt.Println("\n✨ E-commerce demo completed!")
 	fmt.Println("\nKey Takeaways:")
 	fmt.Println("  ✅ Semantic search finds similar products by meaning")
@@ -329,4 +373,124 @@ func calculateSimilarity(a, b []float32) float64 {
 
 	cosine := dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
 	return (cosine + 1) * 50 // Convert to 0-100%
+}
+
+func waitForCollectionReady(client *vectron.Client, collectionName string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		status, err := client.GetCollectionStatus(collectionName)
+		if err == nil && len(status.Shards) > 0 {
+			allReady := true
+			for _, shard := range status.Shards {
+				if !shard.Ready {
+					allReady = false
+					break
+				}
+			}
+			if allReady {
+				return nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("collection %q did not become ready in time", collectionName)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+func upsertWithRetry(client *vectron.Client, collection string, points []*vectron.Point, maxRetries int) (int32, error) {
+	var lastErr error
+	for i := 0; i < maxRetries; i++ {
+		upserted, err := client.Upsert(collection, points)
+		if err == nil {
+			return upserted, nil
+		}
+		lastErr = err
+		errStr := err.Error()
+		if !strings.Contains(errStr, "stale shard epoch") &&
+			!strings.Contains(errStr, "not ready") &&
+			!strings.Contains(errStr, "Unavailable") {
+			return 0, err
+		}
+		backoff := time.Duration(1<<i) * 500 * time.Millisecond
+		if backoff > 5*time.Second {
+			backoff = 5 * time.Second
+		}
+		time.Sleep(backoff)
+	}
+	return 0, lastErr
+}
+
+func registerAndLogin(authAddr, email, password string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, err := grpc.DialContext(ctx, authAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+	client := authpb.NewAuthServiceClient(conn)
+
+	_, err = client.RegisterUser(ctx, &authpb.RegisterUserRequest{
+		Email:    email,
+		Password: password,
+	})
+	if err != nil {
+		log.Printf("register warning: %v", err)
+	}
+
+	loginResp, err := client.Login(ctx, &authpb.LoginRequest{
+		Email:    email,
+		Password: password,
+	})
+	if err != nil {
+		return "", err
+	}
+	if loginResp.GetJwtToken() == "" {
+		return "", fmt.Errorf("empty jwt token after login")
+	}
+	return loginResp.GetJwtToken(), nil
+}
+
+func createAPIKey(authAddr, jwtToken, name string) (fullKey, keyPrefix string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, err := grpc.DialContext(ctx, authAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return "", "", err
+	}
+	defer conn.Close()
+	client := authpb.NewAuthServiceClient(conn)
+
+	authCtx := metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+jwtToken))
+	resp, err := client.CreateAPIKey(authCtx, &authpb.CreateAPIKeyRequest{Name: name})
+	if err != nil {
+		return "", "", err
+	}
+	if resp.GetFullKey() == "" || resp.GetKeyInfo().GetKeyPrefix() == "" {
+		return "", "", fmt.Errorf("missing key info in response")
+	}
+	return resp.GetFullKey(), resp.GetKeyInfo().GetKeyPrefix(), nil
+}
+
+func createSDKJWT(authAddr, jwtToken, keyPrefix string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, err := grpc.DialContext(ctx, authAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+	client := authpb.NewAuthServiceClient(conn)
+
+	authCtx := metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+jwtToken))
+	resp, err := client.CreateSDKJWT(authCtx, &authpb.CreateSDKJWTRequest{ApiKeyId: keyPrefix})
+	if err != nil {
+		return "", err
+	}
+	if resp.GetSdkJwt() == "" {
+		return "", fmt.Errorf("empty sdk jwt")
+	}
+	return resp.GetSdkJwt(), nil
 }

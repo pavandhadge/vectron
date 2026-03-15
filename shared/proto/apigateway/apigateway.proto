@@ -128,6 +128,9 @@ message SearchRequest {
   // Optional per-request timeout budget for search fan-out (milliseconds).
   // If set, slow worker responses may be skipped and partial results returned.
   uint32 timeout_ms = 5;
+
+  // If true, include the full vector for each result (more expensive).
+  bool include_vectors = 6;
 }
 
 message SearchResponse {
@@ -138,6 +141,7 @@ message SearchResult {
   string id = 1;
   float score = 2;
   map<string, string> payload = 3;
+  repeated float vector = 4;
 }
 
 message GetRequest {

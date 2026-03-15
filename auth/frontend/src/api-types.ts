@@ -37,8 +37,10 @@ export interface CreateKeyRequest {
 }
 
 export interface CreateKeyResponse {
-  full_key: string;
-  key_info: ApiKey;
+  full_key?: string;
+  key_info?: ApiKey;
+  fullKey?: string;
+  keyInfo?: ApiKey;
 }
 
 export interface DeleteKeyRequest {

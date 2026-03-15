@@ -1125,6 +1125,11 @@ func computeSearchCacheKeyWithMode(req *pb.SearchRequest, rerankMode string, rer
 	}
 	binary.LittleEndian.PutUint32(buf[:], uint32(req.TopK))
 	h.Write(buf[:])
+	if req.GetIncludeVectors() {
+		h.Write([]byte{1})
+	} else {
+		h.Write([]byte{0})
+	}
 	return h.Sum64()
 }
 
@@ -1166,6 +1171,84 @@ func (s *gatewayServer) setSearchCache(ctx context.Context, req *pb.SearchReques
 			key = computeSearchCacheKey(req)
 		}
 		s.distributedCache.SetSearch(ctx, key, resp, 0)
+	}
+}
+
+func resultsNeedVectors(results []*pb.SearchResult) bool {
+	for _, r := range results {
+		if r == nil || r.Id == "" {
+			continue
+		}
+		if len(r.Vector) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *gatewayServer) maybeAttachVectors(ctx context.Context, req *pb.SearchRequest, resp *pb.SearchResponse) error {
+	if resp == nil || !req.GetIncludeVectors() {
+		return nil
+	}
+	if !resultsNeedVectors(resp.Results) {
+		return nil
+	}
+	return s.attachVectorsToResults(ctx, req.Collection, resp.Results)
+}
+
+func (s *gatewayServer) attachVectorsToResults(ctx context.Context, collection string, results []*pb.SearchResult) error {
+	if len(results) == 0 {
+		return nil
+	}
+	concurrency := envIntDefault("VECTRON_GW_VECTOR_FETCH_CONCURRENCY", adaptiveConcurrency(2, 16))
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	errCh := make(chan error, 1)
+
+	for _, result := range results {
+		r := result
+		if r == nil || r.Id == "" || len(r.Vector) > 0 {
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			res, err := s.forwardToWorker(ctx, collection, r.Id, func(c workerpb.WorkerServiceClient, shardID uint64, shardEpoch uint64, leaseExpiryUnixMs int64) (interface{}, error) {
+				req := &workerpb.GetVectorRequest{
+					ShardId:           shardID,
+					ShardEpoch:        shardEpoch,
+					LeaseExpiryUnixMs: leaseExpiryUnixMs,
+					Id:                r.Id,
+				}
+				return c.GetVector(ctx, req)
+			})
+			if err != nil {
+				select {
+				case errCh <- err:
+				default:
+				}
+				return
+			}
+			getResp, ok := res.(*workerpb.GetVectorResponse)
+			if !ok || getResp.GetVector() == nil {
+				return
+			}
+			r.Vector = getResp.GetVector().GetVector()
+			if r.Payload == nil {
+				r.Payload = getResp.GetVector().GetMetadata()
+			}
+		}()
+	}
+
+	wg.Wait()
+	select {
+	case err := <-errCh:
+		return err
+	default:
+		return nil
 	}
 }
 
@@ -3022,6 +3105,12 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 	// Check cache for identical queries to avoid redundant computation
 	var keys searchCacheKeys
 	if cached, found := s.getSearchCache(ctx, req, &keys); found {
+		if err := s.maybeAttachVectors(ctx, req, cached); err != nil {
+			return nil, err
+		}
+		if req.GetIncludeVectors() {
+			s.setSearchCache(ctx, req, cached, &keys)
+		}
 		if logEnabled {
 			log.Printf("search cache_hit=search collection=%s topK=%d vecDim=%d total=%s",
 				req.Collection, req.TopK, len(req.Vector), time.Since(startTotal))
@@ -3037,6 +3126,15 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 		return resp, err
 	}
 	resp, err := s.searchUncached(ctx, req, warmupKey, warmupKeySet)
+	if err == nil {
+		if err := s.maybeAttachVectors(ctx, req, resp); err != nil {
+			s.finishInFlight(flightKey, nil, err)
+			return nil, err
+		}
+		if req.GetIncludeVectors() {
+			s.setSearchCache(ctx, req, resp, &keys)
+		}
+	}
 	s.finishInFlight(flightKey, resp, err)
 	if logEnabled {
 		log.Printf("search cache_hit=miss collection=%s topK=%d vecDim=%d total=%s err=%v",
@@ -3051,6 +3149,9 @@ func (s *gatewayServer) SearchStream(req *pb.SearchRequest, stream pb.VectronSer
 	}
 	if len(req.Vector) == 0 {
 		return status.Error(codes.InvalidArgument, "search vector cannot be empty")
+	}
+	if req.GetIncludeVectors() {
+		return status.Error(codes.InvalidArgument, "include_vectors is not supported on SearchStream")
 	}
 	if req.TopK == 0 {
 		req.TopK = 10
@@ -3714,7 +3815,12 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 			if len(searchResponse.Results) > int(req.TopK) {
 				searchResponse.Results = searchResponse.Results[:req.TopK]
 			}
-			s.setSearchCache(ctx, req, searchResponse, nil)
+			if err := s.maybeAttachVectors(ctx, req, searchResponse); err != nil {
+				return nil, err
+			}
+			if !req.GetIncludeVectors() {
+				s.setSearchCache(ctx, req, searchResponse, nil)
+			}
 			return searchResponse, nil
 		}
 
@@ -3762,7 +3868,12 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 			if len(searchResponse.Results) > int(req.TopK) {
 				searchResponse.Results = searchResponse.Results[:req.TopK]
 			}
-			s.setSearchCache(ctx, req, searchResponse, nil)
+			if err := s.maybeAttachVectors(ctx, req, searchResponse); err != nil {
+				return nil, err
+			}
+			if !req.GetIncludeVectors() {
+				s.setSearchCache(ctx, req, searchResponse, nil)
+			}
 			return searchResponse, nil
 		}
 
@@ -3788,7 +3899,12 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 			if len(searchResponse.Results) > int(req.TopK) {
 				searchResponse.Results = searchResponse.Results[:req.TopK]
 			}
-			s.setSearchCache(ctx, req, searchResponse, nil)
+			if err := s.maybeAttachVectors(ctx, req, searchResponse); err != nil {
+				return nil, err
+			}
+			if !req.GetIncludeVectors() {
+				s.setSearchCache(ctx, req, searchResponse, nil)
+			}
 			return searchResponse, nil
 		}
 
@@ -3809,7 +3925,12 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		finalResponse := &pb.SearchResponse{
 			Results: rerankedResults,
 		}
-		s.setSearchCache(ctx, req, finalResponse, nil)
+		if err := s.maybeAttachVectors(ctx, req, finalResponse); err != nil {
+			return nil, err
+		}
+		if !req.GetIncludeVectors() {
+			s.setSearchCache(ctx, req, finalResponse, nil)
+		}
 		return finalResponse, nil
 	}
 
@@ -3943,7 +4064,12 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		if len(searchResponse.Results) > int(req.TopK) {
 			searchResponse.Results = searchResponse.Results[:req.TopK]
 		}
-		s.setSearchCache(ctx, req, searchResponse, nil)
+		if err := s.maybeAttachVectors(ctx, req, searchResponse); err != nil {
+			return nil, err
+		}
+		if !req.GetIncludeVectors() {
+			s.setSearchCache(ctx, req, searchResponse, nil)
+		}
 		return searchResponse, nil
 	}
 
@@ -3988,7 +4114,12 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		if len(searchResponse.Results) > int(req.TopK) {
 			searchResponse.Results = searchResponse.Results[:req.TopK]
 		}
-		s.setSearchCache(ctx, req, searchResponse, nil)
+		if err := s.maybeAttachVectors(ctx, req, searchResponse); err != nil {
+			return nil, err
+		}
+		if !req.GetIncludeVectors() {
+			s.setSearchCache(ctx, req, searchResponse, nil)
+		}
 		return searchResponse, nil
 	}
 
@@ -4016,8 +4147,12 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		if len(searchResponse.Results) > int(req.TopK) {
 			searchResponse.Results = searchResponse.Results[:req.TopK]
 		}
-		// Cache the results before returning
-		s.setSearchCache(ctx, req, searchResponse, nil)
+		if err := s.maybeAttachVectors(ctx, req, searchResponse); err != nil {
+			return nil, err
+		}
+		if !req.GetIncludeVectors() {
+			s.setSearchCache(ctx, req, searchResponse, nil)
+		}
 		return searchResponse, nil
 	}
 
@@ -4038,8 +4173,12 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 	finalResponse := &pb.SearchResponse{
 		Results: rerankedResults,
 	}
-	// Cache the results before returning
-	s.setSearchCache(ctx, req, finalResponse, nil)
+	if err := s.maybeAttachVectors(ctx, req, finalResponse); err != nil {
+		return nil, err
+	}
+	if !req.GetIncludeVectors() {
+		s.setSearchCache(ctx, req, finalResponse, nil)
+	}
 	return finalResponse, nil
 }
 

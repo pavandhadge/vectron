@@ -13,19 +13,54 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"math/rand"
+	"os"
 	"time"
 
 	vectron "github.com/pavandhadge/vectron/clientlibs/go"
+	authpb "github.com/pavandhadge/vectron/shared/proto/auth"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 func main() {
 	const (
 		apiGatewayAddr = "localhost:10010"
-		sdkJWTToken    = "your-sdk-jwt-token" // Replace with your actual token
-		collectionName = "showcase-demo-collection"
+		authGRPCAddr   = "localhost:10008"
+		collectionName = "testy"
 	)
+
+	rand.Seed(time.Now().UnixNano())
+	email := fmt.Sprintf("demo-%d@example.com", rand.Intn(1_000_000))
+	password := "DemoPassword123!"
+	if v := os.Getenv("DEMO_EMAIL"); v != "" {
+		email = v
+	}
+	if v := os.Getenv("DEMO_PASSWORD"); v != "" {
+		password = v
+	}
+
+	jwtToken, err := registerAndLogin(authGRPCAddr, email, password)
+	if err != nil {
+		log.Fatalf("auth failed: %v", err)
+	}
+
+	apiKeyName := fmt.Sprintf("demo-key-%d", rand.Intn(1_000_000))
+	fullKey, keyPrefix, err := createAPIKey(authGRPCAddr, jwtToken, apiKeyName)
+	if err != nil {
+		log.Fatalf("create api key failed: %v", err)
+	}
+	log.Printf("Created API key prefix=%s", keyPrefix)
+
+	sdkJWTToken, err := createSDKJWT(authGRPCAddr, jwtToken, keyPrefix)
+	if err != nil {
+		log.Fatalf("create sdk jwt failed: %v", err)
+	}
+	log.Printf("SDK JWT created from key %s (full key=%s)", keyPrefix, fullKey)
 
 	// Configure client options for production-friendly defaults.
 	opts := vectron.DefaultClientOptions()
@@ -124,4 +159,78 @@ func main() {
 		log.Fatalf("delete failed: %v", err)
 	}
 	fmt.Println("Deleted point doc-003")
+}
+
+func registerAndLogin(authAddr, email, password string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, err := grpc.DialContext(ctx, authAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+	client := authpb.NewAuthServiceClient(conn)
+
+	_, err = client.RegisterUser(ctx, &authpb.RegisterUserRequest{
+		Email:    email,
+		Password: password,
+	})
+	if err != nil {
+		log.Printf("register warning: %v", err)
+	}
+
+	loginResp, err := client.Login(ctx, &authpb.LoginRequest{
+		Email:    email,
+		Password: password,
+	})
+	if err != nil {
+		return "", err
+	}
+	if loginResp.GetJwtToken() == "" {
+		return "", fmt.Errorf("empty jwt token after login")
+	}
+	return loginResp.GetJwtToken(), nil
+}
+
+func createAPIKey(authAddr, jwtToken, name string) (fullKey, keyPrefix string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, err := grpc.DialContext(ctx, authAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return "", "", err
+	}
+	defer conn.Close()
+	client := authpb.NewAuthServiceClient(conn)
+
+	authCtx := metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+jwtToken))
+	resp, err := client.CreateAPIKey(authCtx, &authpb.CreateAPIKeyRequest{Name: name})
+	if err != nil {
+		return "", "", err
+	}
+	if resp.GetFullKey() == "" || resp.GetKeyInfo().GetKeyPrefix() == "" {
+		return "", "", fmt.Errorf("missing key info in response")
+	}
+	return resp.GetFullKey(), resp.GetKeyInfo().GetKeyPrefix(), nil
+}
+
+func createSDKJWT(authAddr, jwtToken, keyPrefix string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, err := grpc.DialContext(ctx, authAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+	client := authpb.NewAuthServiceClient(conn)
+
+	authCtx := metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+jwtToken))
+	resp, err := client.CreateSDKJWT(authCtx, &authpb.CreateSDKJWTRequest{ApiKeyId: keyPrefix})
+	if err != nil {
+		return "", err
+	}
+	if resp.GetSdkJwt() == "" {
+		return "", fmt.Errorf("empty sdk jwt")
+	}
+	return resp.GetSdkJwt(), nil
 }

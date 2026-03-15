@@ -188,6 +188,7 @@ type SearchResult struct {
 	ID      string
 	Score   float32
 	Payload map[string]string
+	Vector  []float32
 }
 
 // Client is the primary entrypoint for interacting with the Vectron API.
@@ -589,6 +590,11 @@ func (c *Client) Upsert(collection string, points []*Point) (int32, error) {
 
 // Search finds the k-nearest neighbors to a query vector in a collection.
 func (c *Client) Search(collection string, vector []float32, topK uint32) ([]*SearchResult, error) {
+	return c.SearchWithOptions(collection, vector, topK, false)
+}
+
+// SearchWithOptions finds the k-nearest neighbors with optional vector inclusion.
+func (c *Client) SearchWithOptions(collection string, vector []float32, topK uint32, includeVectors bool) ([]*SearchResult, error) {
 	if collection == "" {
 		return nil, fmt.Errorf("%w: collection name cannot be empty", ErrInvalidArgument)
 	}
@@ -603,6 +609,7 @@ func (c *Client) Search(collection string, vector []float32, topK uint32) ([]*Se
 		Collection: collection,
 		Vector:     vector,
 		TopK:       topK,
+		IncludeVectors: includeVectors,
 	}
 
 	resRaw, err := c.doRPCWithResponse(false, func(ctx context.Context) (interface{}, error) {
@@ -623,6 +630,7 @@ func (c *Client) Search(collection string, vector []float32, topK uint32) ([]*Se
 			ID:      r.Id,
 			Score:   r.Score,
 			Payload: r.Payload,
+			Vector:  r.Vector,
 		}
 	}
 	return results, nil

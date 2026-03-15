@@ -24,10 +24,14 @@ const (
 	RegisterPeer CommandType = iota
 	// RegisterWorker adds a new worker node to the cluster.
 	RegisterWorker
+	// RegisterReranker adds a new reranker node to the cluster.
+	RegisterReranker
 	// CreateCollection creates a new collection and its initial shards.
 	CreateCollection
 	// UpdateWorkerHeartbeat updates the last heartbeat timestamp for a worker.
 	UpdateWorkerHeartbeat
+	// UpdateRerankerHeartbeat updates the last heartbeat timestamp for a reranker.
+	UpdateRerankerHeartbeat
 	// UpdateWorkerState updates a worker's lifecycle state.
 	UpdateWorkerState
 	// RemoveWorker removes a worker from the cluster state.
@@ -73,6 +77,20 @@ type RegisterWorkerPayload struct {
 	Region string `json:"region"`
 }
 
+// RegisterRerankerPayload is the data for the RegisterReranker command.
+type RegisterRerankerPayload struct {
+	GrpcAddress string `json:"grpc_address"`
+	Role        string `json:"role"`
+	// Capacity information for capacity-weighted placement
+	CPUCores    int32 `json:"cpu_cores"`
+	MemoryBytes int64 `json:"memory_bytes"`
+	DiskBytes   int64 `json:"disk_bytes"`
+	// Failure domain information for fault-tolerant placement
+	Rack   string `json:"rack"`
+	Zone   string `json:"zone"`
+	Region string `json:"region"`
+}
+
 // UpdateWorkerStatePayload is the data for the UpdateWorkerState command.
 type UpdateWorkerStatePayload struct {
 	WorkerID uint64      `json:"worker_id"`
@@ -103,6 +121,15 @@ type UpdateWorkerHeartbeatPayload struct {
 	VectorCount        int64   `json:"vector_count"`
 	MemoryBytes        int64   `json:"memory_bytes"`
 	RunningShards      []uint64 `json:"running_shards"`
+}
+
+// UpdateRerankerHeartbeatPayload is the data for the UpdateRerankerHeartbeat command.
+type UpdateRerankerHeartbeatPayload struct {
+	RerankerID       uint64  `json:"reranker_id"`
+	CPUUsagePercent  float64 `json:"cpu_usage_percent"`
+	MemoryUsagePercent float64 `json:"memory_usage_percent"`
+	DiskUsagePercent float64 `json:"disk_usage_percent"`
+	QueriesPerSecond float64 `json:"queries_per_second"`
 }
 
 // UpdateShardLeaderPayload is the data for the UpdateShardLeader command.
@@ -216,6 +243,28 @@ type WorkerInfo struct {
 	Region string `json:"region"` // Region
 }
 
+// RerankerInfo holds information about a registered reranker node.
+type RerankerInfo struct {
+	ID            uint64    `json:"id"`
+	GrpcAddress   string    `json:"grpc_address"`
+	LastHeartbeat time.Time `json:"last_heartbeat"`
+	Role          string    `json:"role"`
+	// Load metrics for load-aware placement
+	CPUUsagePercent    float64 `json:"cpu_usage_percent"`
+	MemoryUsagePercent float64 `json:"memory_usage_percent"`
+	DiskUsagePercent   float64 `json:"disk_usage_percent"`
+	QueriesPerSecond   float64 `json:"queries_per_second"`
+	// Capacity information
+	CPUCores      int32 `json:"cpu_cores"`
+	TotalMemory   int64 `json:"total_memory"`
+	TotalDisk     int64 `json:"total_disk"`
+	TotalCapacity int64 `json:"total_capacity"`
+	// Failure domain information
+	Rack   string `json:"rack"`
+	Zone   string `json:"zone"`
+	Region string `json:"region"`
+}
+
 // ======================================================================================
 // FSM Implementation
 // ======================================================================================
@@ -228,6 +277,8 @@ type FSM struct {
 	Peers map[string]PeerInfo `json:"peers"`
 	// Workers stores information about all registered worker nodes.
 	Workers map[uint64]WorkerInfo `json:"workers"`
+	// Rerankers stores information about all registered reranker nodes.
+	Rerankers map[uint64]RerankerInfo `json:"rerankers"`
 	// Collections stores all the collections and their shard information.
 	Collections map[string]*Collection `json:"collections"`
 	// AssignmentsEpoch is a monotonic epoch for shard assignments.
@@ -236,6 +287,8 @@ type FSM struct {
 	NextShardID uint64 `json:"next_shard_id"`
 	// NextWorkerID is a counter for generating unique worker IDs.
 	NextWorkerID uint64 `json:"next_worker_id"`
+	// NextRerankerID is a counter for generating unique reranker IDs.
+	NextRerankerID uint64 `json:"next_reranker_id"`
 }
 
 // NewFSM creates a new, empty FSM.
@@ -243,10 +296,12 @@ func NewFSM() *FSM {
 	return &FSM{
 		Peers:        make(map[string]PeerInfo),
 		Workers:      make(map[uint64]WorkerInfo),
+		Rerankers:    make(map[uint64]RerankerInfo),
 		Collections:  make(map[string]*Collection),
 		AssignmentsEpoch: 1,
 		NextShardID:  1,
 		NextWorkerID: 1,
+		NextRerankerID: 1,
 	}
 }
 
@@ -283,6 +338,13 @@ func (f *FSM) Update(entries []sm.Entry) ([]sm.Entry, error) {
 			} else {
 				result = f.applyRegisterWorker(payload)
 			}
+		case RegisterReranker:
+			var payload RegisterRerankerPayload
+			if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
+				appErr = fmt.Errorf("failed to unmarshal RegisterReranker payload: %w", err)
+			} else {
+				result = f.applyRegisterReranker(payload)
+			}
 		case CreateCollection:
 			var payload CreateCollectionPayload
 			if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
@@ -301,6 +363,13 @@ func (f *FSM) Update(entries []sm.Entry) ([]sm.Entry, error) {
 				appErr = fmt.Errorf("failed to unmarshal UpdateWorkerHeartbeat payload: %w", err)
 			} else {
 				f.applyUpdateWorkerHeartbeat(payload)
+			}
+		case UpdateRerankerHeartbeat:
+			var payload UpdateRerankerHeartbeatPayload
+			if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
+				appErr = fmt.Errorf("failed to unmarshal UpdateRerankerHeartbeat payload: %w", err)
+			} else {
+				f.applyUpdateRerankerHeartbeat(payload)
 			}
 		case UpdateWorkerState:
 			var payload UpdateWorkerStatePayload
@@ -447,6 +516,55 @@ func (f *FSM) applyRegisterWorker(payload RegisterWorkerPayload) uint64 {
 	fmt.Printf("Registered new worker %d with GRPC address %s, Raft address %s, capacity=%d, rack=%s, zone=%s, region=%s\n",
 		workerID, payload.GrpcAddress, payload.RaftAddress, totalCapacity, payload.Rack, payload.Zone, payload.Region)
 	return workerID
+}
+
+func (f *FSM) applyRegisterReranker(payload RegisterRerankerPayload) uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	for id, info := range f.Rerankers {
+		if info.GrpcAddress == payload.GrpcAddress {
+			info.LastHeartbeat = time.Now().UTC()
+			if payload.Role != "" {
+				info.Role = payload.Role
+			}
+			f.Rerankers[id] = info
+			fmt.Printf("Reranker already registered as %d (GRPC %s)\n", id, info.GrpcAddress)
+			return id
+		}
+	}
+
+	rerankerID := f.NextRerankerID
+	f.NextRerankerID++
+
+	cpuScore := float64(payload.CPUCores) / 8.0 * 300.0
+	memScore := float64(payload.MemoryBytes) / (32 * 1024 * 1024 * 1024) * 400.0
+	diskScore := float64(payload.DiskBytes) / (500 * 1024 * 1024 * 1024) * 300.0
+	totalCapacity := int64(cpuScore + memScore + diskScore)
+	if totalCapacity < 100 {
+		totalCapacity = 100
+	}
+
+	role := payload.Role
+	if role == "" {
+		role = "rerank"
+	}
+	f.Rerankers[rerankerID] = RerankerInfo{
+		ID:            rerankerID,
+		GrpcAddress:   payload.GrpcAddress,
+		LastHeartbeat: time.Now().UTC(),
+		Role:          role,
+		CPUCores:      payload.CPUCores,
+		TotalMemory:   payload.MemoryBytes,
+		TotalDisk:     payload.DiskBytes,
+		TotalCapacity: totalCapacity,
+		Rack:          payload.Rack,
+		Zone:          payload.Zone,
+		Region:        payload.Region,
+	}
+	fmt.Printf("Registered new reranker %d with GRPC address %s, capacity=%d, rack=%s, zone=%s, region=%s\n",
+		rerankerID, payload.GrpcAddress, totalCapacity, payload.Rack, payload.Zone, payload.Region)
+	return rerankerID
 }
 
 func (f *FSM) applyCreateCollection(payload CreateCollectionPayload) error {
@@ -775,6 +893,20 @@ func (f *FSM) applyUpdateWorkerHeartbeat(payload UpdateWorkerHeartbeatPayload) {
 	}
 }
 
+func (f *FSM) applyUpdateRerankerHeartbeat(payload UpdateRerankerHeartbeatPayload) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if reranker, ok := f.Rerankers[payload.RerankerID]; ok {
+		reranker.LastHeartbeat = time.Now().UTC()
+		reranker.CPUUsagePercent = reranker.CPUUsagePercent*loadMetricDecayFactor + payload.CPUUsagePercent*(1-loadMetricDecayFactor)
+		reranker.MemoryUsagePercent = reranker.MemoryUsagePercent*loadMetricDecayFactor + payload.MemoryUsagePercent*(1-loadMetricDecayFactor)
+		reranker.DiskUsagePercent = reranker.DiskUsagePercent*loadMetricDecayFactor + payload.DiskUsagePercent*(1-loadMetricDecayFactor)
+		reranker.QueriesPerSecond = reranker.QueriesPerSecond*loadMetricDecayFactor + payload.QueriesPerSecond*(1-loadMetricDecayFactor)
+		f.Rerankers[payload.RerankerID] = reranker
+	}
+}
+
 func (f *FSM) applyUpdateWorkerState(payload UpdateWorkerStatePayload) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -996,10 +1128,12 @@ func (f *FSM) Lookup(query interface{}) (interface{}, error) {
 	return &fsmSnapshot{
 		Peers:        f.Peers,
 		Workers:      f.Workers,
+		Rerankers:    f.Rerankers,
 		Collections:  f.Collections,
 		AssignmentsEpoch: f.AssignmentsEpoch,
 		NextShardID:  f.NextShardID,
 		NextWorkerID: f.NextWorkerID,
+		NextRerankerID: f.NextRerankerID,
 	}, nil
 }
 
@@ -1007,10 +1141,12 @@ func (f *FSM) Lookup(query interface{}) (interface{}, error) {
 type fsmSnapshot struct {
 	Peers        map[string]PeerInfo    `json:"peers"`
 	Workers      map[uint64]WorkerInfo  `json:"workers"`
+	Rerankers    map[uint64]RerankerInfo `json:"rerankers"`
 	Collections  map[string]*Collection `json:"collections"`
 	AssignmentsEpoch uint64             `json:"assignments_epoch"`
 	NextShardID  uint64                 `json:"next_shard_id"`
 	NextWorkerID uint64                 `json:"next_worker_id"`
+	NextRerankerID uint64               `json:"next_reranker_id"`
 }
 
 // PrepareSnapshot is called by Dragonboat to get a snapshot of the current state.
@@ -1028,10 +1164,12 @@ func (f *FSM) SaveSnapshot(ctx interface{}, w io.Writer, done <-chan struct{}) e
 	data := fsmSnapshot{
 		Peers:        f.Peers,
 		Workers:      f.Workers,
+		Rerankers:    f.Rerankers,
 		Collections:  f.Collections,
 		AssignmentsEpoch: f.AssignmentsEpoch,
 		NextShardID:  f.NextShardID,
 		NextWorkerID: f.NextWorkerID,
+		NextRerankerID: f.NextRerankerID,
 	}
 
 	return json.NewEncoder(w).Encode(data)
@@ -1050,12 +1188,20 @@ func (f *FSM) RecoverFromSnapshot(r io.Reader, done <-chan struct{}) error {
 
 	f.Peers = data.Peers
 	f.Workers = data.Workers
+	f.Rerankers = data.Rerankers
 	f.Collections = data.Collections
 	f.AssignmentsEpoch = data.AssignmentsEpoch
 	f.NextShardID = data.NextShardID
 	f.NextWorkerID = data.NextWorkerID
+	f.NextRerankerID = data.NextRerankerID
 	if f.AssignmentsEpoch == 0 {
 		f.AssignmentsEpoch = 1
+	}
+	if f.NextWorkerID == 0 {
+		f.NextWorkerID = 1
+	}
+	if f.NextRerankerID == 0 {
+		f.NextRerankerID = 1
 	}
 
 	return nil
@@ -1121,6 +1267,25 @@ func (f *FSM) GetWorkers() []WorkerInfo {
 		workers = append(workers, w)
 	}
 	return workers
+}
+
+// GetReranker returns information about a specific reranker.
+func (f *FSM) GetReranker(id uint64) (RerankerInfo, bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	reranker, ok := f.Rerankers[id]
+	return reranker, ok
+}
+
+// GetRerankers returns a slice of all registered rerankers.
+func (f *FSM) GetRerankers() []RerankerInfo {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	rerankers := make([]RerankerInfo, 0, len(f.Rerankers))
+	for _, r := range f.Rerankers {
+		rerankers = append(rerankers, r)
+	}
+	return rerankers
 }
 
 // GetCollection returns information about a specific collection.

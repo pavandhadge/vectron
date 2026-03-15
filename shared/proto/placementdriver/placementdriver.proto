@@ -21,6 +21,18 @@ service PlacementService {
   // List all workers (for monitoring)
   rpc ListWorkers(ListWorkersRequest) returns (ListWorkersResponse) {}
 
+  // Reranker registers itself on startup
+  rpc RegisterReranker(RegisterRerankerRequest) returns (RegisterRerankerResponse) {}
+
+  // Reranker sends heartbeat
+  rpc RerankerHeartbeat(RerankerHeartbeatRequest) returns (RerankerHeartbeatResponse) {}
+
+  // List all rerankers (for monitoring)
+  rpc ListRerankers(ListRerankersRequest) returns (ListRerankersResponse) {}
+
+  // Get reranker address for routing
+  rpc GetReranker(GetRerankerRequest) returns (GetRerankerResponse) {}
+
   rpc ListWorkersForCollection(ListWorkersForCollectionRequest) returns (ListWorkersForCollectionResponse) {}
 
   // Admin: drain a worker (move shards away, stop new assignments)
@@ -183,6 +195,55 @@ message ListWorkersResponse {
   repeated WorkerInfo workers = 1;
 }
 
+message RegisterRerankerRequest {
+  string grpc_address = 1;
+  repeated string capabilities = 2;
+  int64 timestamp = 3;
+
+  // Capacity information for capacity-weighted placement
+  int32 cpu_cores = 4;
+  int64 memory_bytes = 5;
+  int64 disk_bytes = 6;
+
+  // Failure domain information for fault-tolerant placement
+  string rack = 7;
+  string zone = 8;
+  string region = 9;
+}
+
+message RegisterRerankerResponse {
+  string reranker_id = 1;
+  bool success = 2;
+}
+
+message RerankerHeartbeatRequest {
+  string reranker_id = 1;
+  int64 timestamp = 2;
+
+  float cpu_usage_percent = 3;
+  float memory_usage_percent = 4;
+  float disk_usage_percent = 5;
+  float queries_per_second = 6;
+}
+
+message RerankerHeartbeatResponse {
+  bool ok = 1;
+  string message = 2;
+}
+
+message ListRerankersRequest {}
+
+message ListRerankersResponse {
+  repeated RerankerInfo rerankers = 1;
+}
+
+message GetRerankerRequest {}
+
+message GetRerankerResponse {
+  string reranker_id = 1;
+  string grpc_address = 2;
+}
+
 message ListWorkersForCollectionRequest {
   string collection = 1;
 }
@@ -207,6 +268,14 @@ message WorkerInfo {
   bool healthy = 6;
   map<string, string> metadata = 7;
   WorkerState state = 8;
+}
+
+message RerankerInfo {
+  string reranker_id = 1;
+  string grpc_address = 2;
+  int64 last_heartbeat = 3;
+  bool healthy = 4;
+  map<string, string> metadata = 5;
 }
 
 message DrainWorkerRequest {

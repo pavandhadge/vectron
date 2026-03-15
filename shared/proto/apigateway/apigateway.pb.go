@@ -323,9 +323,11 @@ type SearchRequest struct {
 	Query string `protobuf:"bytes,4,opt,name=query,proto3" json:"query,omitempty"`
 	// Optional per-request timeout budget for search fan-out (milliseconds).
 	// If set, slow worker responses may be skipped and partial results returned.
-	TimeoutMs     uint32 `protobuf:"varint,5,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	TimeoutMs uint32 `protobuf:"varint,5,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
+	// If true, include the full vector for each result (more expensive).
+	IncludeVectors bool `protobuf:"varint,6,opt,name=include_vectors,json=includeVectors,proto3" json:"include_vectors,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *SearchRequest) Reset() {
@@ -393,6 +395,13 @@ func (x *SearchRequest) GetTimeoutMs() uint32 {
 	return 0
 }
 
+func (x *SearchRequest) GetIncludeVectors() bool {
+	if x != nil {
+		return x.IncludeVectors
+	}
+	return false
+}
+
 type SearchResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Results       []*SearchResult        `protobuf:"bytes,1,rep,name=results,proto3" json:"results,omitempty"`
@@ -442,6 +451,7 @@ type SearchResult struct {
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Score         float32                `protobuf:"fixed32,2,opt,name=score,proto3" json:"score,omitempty"`
 	Payload       map[string]string      `protobuf:"bytes,3,rep,name=payload,proto3" json:"payload,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Vector        []float32              `protobuf:"fixed32,4,rep,packed,name=vector,proto3" json:"vector,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -493,6 +503,13 @@ func (x *SearchResult) GetScore() float32 {
 func (x *SearchResult) GetPayload() map[string]string {
 	if x != nil {
 		return x.Payload
+	}
+	return nil
+}
+
+func (x *SearchResult) GetVector() []float32 {
+	if x != nil {
+		return x.Vector
 	}
 	return nil
 }
@@ -1315,7 +1332,7 @@ const file_apigateway_apigateway_proto_rawDesc = "" +
 	"collection\x12)\n" +
 	"\x06points\x18\x02 \x03(\v2\x11.vectron.v1.PointR\x06points\",\n" +
 	"\x0eUpsertResponse\x12\x1a\n" +
-	"\bupserted\x18\x01 \x01(\x05R\bupserted\"\xa4\x01\n" +
+	"\bupserted\x18\x01 \x01(\x05R\bupserted\"\xcd\x01\n" +
 	"\rSearchRequest\x12#\n" +
 	"\n" +
 	"collection\x18\x01 \x01(\tB\x03\xe0A\x02R\n" +
@@ -1324,13 +1341,15 @@ const file_apigateway_apigateway_proto_rawDesc = "" +
 	"\x05top_k\x18\x03 \x01(\rB\a\x92A\x04:\x0210R\x04topK\x12\x14\n" +
 	"\x05query\x18\x04 \x01(\tR\x05query\x12\x1d\n" +
 	"\n" +
-	"timeout_ms\x18\x05 \x01(\rR\ttimeoutMs\"D\n" +
+	"timeout_ms\x18\x05 \x01(\rR\ttimeoutMs\x12'\n" +
+	"\x0finclude_vectors\x18\x06 \x01(\bR\x0eincludeVectors\"D\n" +
 	"\x0eSearchResponse\x122\n" +
-	"\aresults\x18\x01 \x03(\v2\x18.vectron.v1.SearchResultR\aresults\"\xb1\x01\n" +
+	"\aresults\x18\x01 \x03(\v2\x18.vectron.v1.SearchResultR\aresults\"\xc9\x01\n" +
 	"\fSearchResult\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05score\x18\x02 \x01(\x02R\x05score\x12?\n" +
-	"\apayload\x18\x03 \x03(\v2%.vectron.v1.SearchResult.PayloadEntryR\apayload\x1a:\n" +
+	"\apayload\x18\x03 \x03(\v2%.vectron.v1.SearchResult.PayloadEntryR\apayload\x12\x16\n" +
+	"\x06vector\x18\x04 \x03(\x02R\x06vector\x1a:\n" +
 	"\fPayloadEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"<\n" +
