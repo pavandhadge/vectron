@@ -394,6 +394,7 @@ type routingShard struct {
 type collectionRoutingEntry struct {
 	shards  []routingShard
 	expires time.Time
+	dimension int32
 }
 
 type CollectionRoutingCache struct {
@@ -486,6 +487,15 @@ func (c *DistributedCache) SetBytes(ctx context.Context, prefix, key string, dat
 	_ = c.client.Set(cacheCtx, c.key(prefix, key), data, ttl).Err()
 }
 
+func (c *DistributedCache) DeleteBytes(ctx context.Context, prefix, key string) {
+	if c == nil || c.client == nil {
+		return
+	}
+	cacheCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	_ = c.client.Del(cacheCtx, c.key(prefix, key)).Err()
+}
+
 func (c *DistributedCache) GetSearch(ctx context.Context, key uint64) (*pb.SearchResponse, bool) {
 	data, ok := c.GetBytes(ctx, "search", fmt.Sprintf("%x", key))
 	if !ok {
@@ -530,6 +540,10 @@ func (c *DistributedCache) SetWorkerList(ctx context.Context, collection string,
 		return
 	}
 	c.SetBytes(ctx, "workers", collection, data, ttl)
+}
+
+func (c *DistributedCache) DeleteWorkerList(ctx context.Context, collection string) {
+	c.DeleteBytes(ctx, "workers", collection)
 }
 
 func (c *DistributedCache) GetRouting(ctx context.Context, collection string) (*collectionRoutingEntry, bool) {
@@ -582,6 +596,10 @@ func (c *DistributedCache) SetRouting(ctx context.Context, collection string, en
 	c.SetBytes(ctx, "routing", collection, data, ttl)
 }
 
+func (c *DistributedCache) DeleteRouting(ctx context.Context, collection string) {
+	c.DeleteBytes(ctx, "routing", collection)
+}
+
 func (c *DistributedCache) GetResolve(ctx context.Context, key string) (resolveCacheEntry, bool) {
 	data, ok := c.GetBytes(ctx, "resolve", key)
 	if !ok {
@@ -620,6 +638,16 @@ func (c *CollectionRoutingCache) Set(collection string, entry *collectionRouting
 	shard := &c.shards[fnv32(collection)%uint32(len(c.shards))]
 	shard.mu.Lock()
 	shard.entries[collection] = entry
+	shard.mu.Unlock()
+}
+
+func (c *CollectionRoutingCache) Delete(collection string) {
+	if c == nil {
+		return
+	}
+	shard := &c.shards[fnv32(collection)%uint32(len(c.shards))]
+	shard.mu.Lock()
+	delete(shard.entries, collection)
 	shard.mu.Unlock()
 }
 
@@ -804,6 +832,23 @@ func (c *WorkerResolveCache) Set(collection, vectorID string, addr string, shard
 	shard.mu.Unlock()
 }
 
+func (c *WorkerResolveCache) DeleteCollection(collection string) {
+	if c == nil {
+		return
+	}
+	prefix := collection + "|"
+	for i := range c.shards {
+		shard := &c.shards[i]
+		shard.mu.Lock()
+		for key := range shard.entries {
+			if strings.HasPrefix(key, prefix) {
+				delete(shard.entries, key)
+			}
+		}
+		shard.mu.Unlock()
+	}
+}
+
 func NewWorkerListCache(ttl time.Duration) *WorkerListCache {
 	cache := &WorkerListCache{
 		shards: make([]workerListShard, workerListShardCount),
@@ -848,6 +893,16 @@ func (c *WorkerListCache) Set(collection string, addresses []string) {
 		Addresses: addresses,
 		Timestamp: time.Now(),
 	}
+	shard.mu.Unlock()
+}
+
+func (c *WorkerListCache) Delete(collection string) {
+	if c == nil {
+		return
+	}
+	shard := &c.shards[fnv32(collection)%uint32(len(c.shards))]
+	shard.mu.Lock()
+	delete(shard.entries, collection)
 	shard.mu.Unlock()
 }
 
@@ -2288,6 +2343,7 @@ func (s *gatewayServer) getCollectionRouting(ctx context.Context, collection str
 	entry = &collectionRoutingEntry{
 		shards:  make([]routingShard, 0, len(resp.Shards)),
 		expires: time.Now().Add(ttl),
+		dimension: resp.Dimension,
 	}
 	for _, shard := range resp.Shards {
 		if shard == nil {
@@ -2890,6 +2946,22 @@ func (s *gatewayServer) DeleteCollection(ctx context.Context, req *pb.DeleteColl
 		}
 	}
 
+	if res.Success {
+		if s.routingCache != nil {
+			s.routingCache.Delete(req.Name)
+		}
+		if s.workerListCache != nil {
+			s.workerListCache.Delete(req.Name)
+		}
+		if s.resolveCache != nil {
+			s.resolveCache.DeleteCollection(req.Name)
+		}
+		if s.distributedCache != nil {
+			s.distributedCache.DeleteRouting(ctx, req.Name)
+			s.distributedCache.DeleteWorkerList(ctx, req.Name)
+		}
+	}
+
 	return &pb.DeleteCollectionResponse{Success: res.Success}, nil
 }
 
@@ -2918,6 +2990,17 @@ func (s *gatewayServer) Upsert(ctx context.Context, req *pb.UpsertRequest) (*pb.
 			log.Printf("Routing cache warm failed for collection %q: %v", req.Collection, err)
 		} else {
 			routingEntry = entry
+		}
+	}
+	if routingEntry != nil && routingEntry.dimension > 0 {
+		expected := int(routingEntry.dimension)
+		for _, point := range req.Points {
+			if point == nil {
+				continue
+			}
+			if len(point.Vector) != expected {
+				return nil, status.Errorf(codes.InvalidArgument, "vector dimension %d does not match index dimension %d", len(point.Vector), expected)
+			}
 		}
 	}
 
@@ -3208,6 +3291,12 @@ func (s *gatewayServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 	if len(req.Vector) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "search vector cannot be empty")
 	}
+	if routingEntry, err := s.getCollectionRouting(ctx, req.Collection, false); err == nil && routingEntry != nil && routingEntry.dimension > 0 {
+		expected := int(routingEntry.dimension)
+		if len(req.Vector) != expected {
+			return nil, status.Errorf(codes.InvalidArgument, "search vector dimension %d does not match index dimension %d", len(req.Vector), expected)
+		}
+	}
 
 	if req.TopK == 0 {
 		req.TopK = 10
@@ -3275,6 +3364,12 @@ func (s *gatewayServer) SearchStream(req *pb.SearchRequest, stream pb.VectronSer
 	}
 	if len(req.Vector) == 0 {
 		return status.Error(codes.InvalidArgument, "search vector cannot be empty")
+	}
+	if routingEntry, err := s.getCollectionRouting(stream.Context(), req.Collection, false); err == nil && routingEntry != nil && routingEntry.dimension > 0 {
+		expected := int(routingEntry.dimension)
+		if len(req.Vector) != expected {
+			return status.Errorf(codes.InvalidArgument, "search vector dimension %d does not match index dimension %d", len(req.Vector), expected)
+		}
 	}
 	if req.GetIncludeVectors() {
 		return status.Error(codes.InvalidArgument, "include_vectors is not supported on SearchStream")
@@ -4761,6 +4856,30 @@ func Start(config Config, grpcListener net.Listener) (*grpc.Server, *grpc.Client
 		inFlightShards:           make([]inFlightShard, inFlightShardCount),
 		inflightRoutingShards:    make([]inflightRoutingShard, inflightRoutingShardCount),
 		inflightWorkerListShards: make([]inflightWorkerListShard, inflightWorkerListShardCount),
+	}
+	if config.RerankerDiscoveryEnabled {
+		refreshInterval := time.Duration(config.RerankerDiscoveryTTLms) * time.Millisecond
+		if refreshInterval <= 0 {
+			refreshInterval = 5 * time.Second
+		}
+		if refreshInterval < 5*time.Second {
+			refreshInterval = 5 * time.Second
+		}
+		go func() {
+			refresh := func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				if _, err := server.getRerankerClient(ctx); err != nil {
+					log.Printf("Reranker discovery refresh failed: %v", err)
+				}
+			}
+			refresh()
+			ticker := time.NewTicker(refreshInterval)
+			defer ticker.Stop()
+			for range ticker.C {
+				refresh()
+			}
+		}()
 	}
 	if rerankerConn != nil && rerankerClient != nil && config.RerankerServiceAddr != "" {
 		server.rerankerConns[config.RerankerServiceAddr] = rerankerConn

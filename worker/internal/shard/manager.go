@@ -11,6 +11,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -107,6 +109,12 @@ func (m *Manager) SyncShards(assignments []*pd.ShardAssignment) {
 		if err := m.nodeHost.StopCluster(shardID); err != nil {
 			log.Printf("ShardManager: Failed to stop replica for shard %d: %v", shardID, err)
 			// Continue even if stopping fails.
+		}
+		if shouldCleanupShardData() {
+			shardDir := filepath.Join(m.workerDataDir, fmt.Sprintf("shard-%d", shardID))
+			if err := os.RemoveAll(shardDir); err != nil {
+				log.Printf("ShardManager: Failed to remove shard data dir %s: %v", shardDir, err)
+			}
 		}
 	}
 
@@ -225,6 +233,18 @@ func (m *Manager) getShardEpoch(shardID uint64) uint64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.shardEpochs[shardID]
+}
+
+func shouldCleanupShardData() bool {
+	val := strings.TrimSpace(os.Getenv("VECTRON_CLEANUP_SHARD_DATA"))
+	if val == "" {
+		return true
+	}
+	parsed, err := strconv.ParseBool(val)
+	if err != nil {
+		return true
+	}
+	return parsed
 }
 
 // GetStateMachine returns the local state machine for a shard, if present.
