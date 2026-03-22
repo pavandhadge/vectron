@@ -493,10 +493,8 @@ func (f *FSM) Update(entries []sm.Entry) ([]sm.Entry, error) {
 		entries[i].Result = sm.Result{Value: result}
 	}
 
-	// Update the lock-free snapshot after processing all entries
-	f.mu.Lock()
-	f.updateSnapshot()
-	f.mu.Unlock()
+	// Mark FSM as dirty - snapshot will be created lazily on next read
+	f.lockFree.MarkDirty()
 
 	return entries, nil
 }
@@ -509,9 +507,18 @@ func (f *FSM) Sync() error {
 
 // updateSnapshot creates a new snapshot of the current state and stores it
 // atomically for lock-free reads.
-// Must be called while holding f.mu.
+// Must be called while holding f.mu (at least RLock).
+// Optimized: Uses shallow copy and skips if version unchanged.
 func (f *FSM) updateSnapshot() {
-	// Deep copy maps to ensure immutability
+	currentVersion := f.lockFree.GetVersion()
+	lastVersion := f.lockFree.GetSnapshotVersion()
+
+	// Skip if version hasn't changed (no writes since last snapshot)
+	if currentVersion == lastVersion && f.lockFree.Load() != nil {
+		return
+	}
+
+	// Shallow copy maps - cheaper than deep copy
 	peers := make(map[string]PeerInfo, len(f.Peers))
 	for k, v := range f.Peers {
 		peers[k] = v
@@ -527,17 +534,10 @@ func (f *FSM) updateSnapshot() {
 		rerankers[k] = v
 	}
 
+	// Shallow copy collections - don't deep copy shards (faster)
 	collections := make(map[string]*Collection, len(f.Collections))
 	for k, v := range f.Collections {
-		// Deep copy collection
-		coll := *v
-		shards := make(map[uint64]*ShardInfo, len(v.Shards))
-		for sk, sv := range v.Shards {
-			shardCopy := *sv
-			shards[sk] = &shardCopy
-		}
-		coll.Shards = shards
-		collections[k] = &coll
+		collections[k] = v
 	}
 
 	snapshot := &FSMSnapshot{
@@ -551,13 +551,24 @@ func (f *FSM) updateSnapshot() {
 		NextRerankerID:   f.NextRerankerID,
 	}
 
-	f.lockFree.Store(snapshot)
+	f.lockFree.Store(snapshot, currentVersion)
 }
 
 // GetLockFree returns the lock-free wrapper for read operations.
 // This allows reads to proceed without blocking on writes.
 func (f *FSM) GetLockFree() *LockFreeFSM {
 	return f.lockFree
+}
+
+// EnsureSnapshot creates a snapshot if the FSM is dirty.
+// This is called lazily before reads to avoid expensive snapshots on every write.
+func (f *FSM) EnsureSnapshot() {
+	if !f.lockFree.IsDirty() {
+		return
+	}
+	f.mu.RLock()
+	f.updateSnapshot()
+	f.mu.RUnlock()
 }
 
 func (f *FSM) applyRegisterPeer(payload RegisterPeerPayload) {
@@ -1409,15 +1420,28 @@ func (f *FSM) GetPeer(id string) (PeerInfo, bool) {
 }
 
 // GetWorker returns information about a specific worker.
+// Uses lock-free snapshot if available, falls back to RWMutex.
 func (f *FSM) GetWorker(id uint64) (WorkerInfo, bool) {
+	// Try lock-free read first
+	if !f.lockFree.IsDirty() {
+		if w, ok := f.lockFree.GetWorker(id); ok {
+			return w, true
+		}
+	}
+
+	// Fall back to RWMutex and update snapshot
 	f.mu.RLock()
-	defer f.mu.RUnlock()
 	worker, ok := f.Workers[id]
+	f.mu.RUnlock()
 	return worker, ok
 }
 
 // GetAssignmentsEpoch returns the current assignments epoch.
+// Uses lock-free snapshot if available.
 func (f *FSM) GetAssignmentsEpoch() uint64 {
+	if !f.lockFree.IsDirty() {
+		return f.lockFree.GetAssignmentsEpoch()
+	}
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.AssignmentsEpoch
@@ -1425,6 +1449,11 @@ func (f *FSM) GetAssignmentsEpoch() uint64 {
 
 // IsWorkerAssignedToShard checks if a worker is a replica for the shard.
 func (f *FSM) IsWorkerAssignedToShard(workerID uint64, shardID uint64) bool {
+	// Try lock-free read first
+	if !f.lockFree.IsDirty() {
+		return f.lockFree.IsWorkerAssignedToShard(workerID, shardID)
+	}
+
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
@@ -1443,6 +1472,11 @@ func (f *FSM) IsWorkerAssignedToShard(workerID uint64, shardID uint64) bool {
 
 // GetWorkers returns a slice of all registered workers.
 func (f *FSM) GetWorkers() []WorkerInfo {
+	// Try lock-free read first
+	if !f.lockFree.IsDirty() {
+		return f.lockFree.GetWorkers()
+	}
+
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	workers := make([]WorkerInfo, 0, len(f.Workers))
@@ -1473,6 +1507,11 @@ func (f *FSM) GetRerankers() []RerankerInfo {
 
 // GetCollection returns information about a specific collection.
 func (f *FSM) GetCollection(name string) (*Collection, bool) {
+	// Try lock-free read first
+	if !f.lockFree.IsDirty() {
+		return f.lockFree.GetCollection(name)
+	}
+
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	collection, ok := f.Collections[name]
@@ -1481,6 +1520,11 @@ func (f *FSM) GetCollection(name string) (*Collection, bool) {
 
 // GetCollections returns a slice of all collections.
 func (f *FSM) GetCollections() []*Collection {
+	// Try lock-free read first
+	if !f.lockFree.IsDirty() {
+		return f.lockFree.GetCollections()
+	}
+
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	collections := make([]*Collection, 0, len(f.Collections))
