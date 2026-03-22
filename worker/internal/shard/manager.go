@@ -20,8 +20,8 @@ import (
 	"github.com/lni/dragonboat/v3/config"
 	sm "github.com/lni/dragonboat/v3/statemachine"
 	"github.com/pavandhadge/vectron/shared/proto/placementdriver"
-	"github.com/pavandhadge/vectron/worker/internal/storage"
 	"github.com/pavandhadge/vectron/worker/internal/pd"
+	"github.com/pavandhadge/vectron/worker/internal/storage"
 )
 
 // Manager is responsible for managing the lifecycle of shard replicas on a worker node.
@@ -31,28 +31,28 @@ type Manager struct {
 	nodeID        uint64               // The ID of this worker node.
 	walHub        *storage.WALHub
 
-	mu               sync.RWMutex
-	runningReplicas  map[uint64]bool // A set of shard IDs for replicas currently running on this node.
-	shardCollections map[uint64]string
-	membershipReportedAt map[uint64]time.Time
-	shardEpochs      map[uint64]uint64
+	mu                     sync.RWMutex
+	runningReplicas        map[uint64]bool // A set of shard IDs for replicas currently running on this node.
+	shardCollections       map[uint64]string
+	membershipReportedAt   map[uint64]time.Time
+	shardEpochs            map[uint64]uint64
 	pendingLeaderTransfers map[uint64]uint64
-	stateMachines   map[uint64]*StateMachine
+	stateMachines          map[uint64]*StateMachine
 }
 
 // NewManager creates a new instance of the ShardManager.
 func NewManager(nh *dragonboat.NodeHost, workerDataDir string, nodeID uint64, walHub *storage.WALHub) *Manager {
 	return &Manager{
-		nodeHost:         nh,
-		workerDataDir:    workerDataDir,
-		nodeID:           nodeID,
-		walHub:           walHub,
-		runningReplicas:  make(map[uint64]bool),
-		shardCollections: make(map[uint64]string),
-		membershipReportedAt: make(map[uint64]time.Time),
-		shardEpochs:      make(map[uint64]uint64),
+		nodeHost:               nh,
+		workerDataDir:          workerDataDir,
+		nodeID:                 nodeID,
+		walHub:                 walHub,
+		runningReplicas:        make(map[uint64]bool),
+		shardCollections:       make(map[uint64]string),
+		membershipReportedAt:   make(map[uint64]time.Time),
+		shardEpochs:            make(map[uint64]uint64),
 		pendingLeaderTransfers: make(map[uint64]uint64),
-		stateMachines:   make(map[uint64]*StateMachine),
+		stateMachines:          make(map[uint64]*StateMachine),
 	}
 }
 
@@ -146,14 +146,15 @@ func (m *Manager) SyncShards(assignments []*pd.ShardAssignment) {
 		log.Printf("ShardManager: Starting replica for shard %d (join=%v, bootstrapped=%v, bootstrap=%v)", shardID, join, assignment.ShardInfo.Bootstrapped, assignment.Bootstrap)
 
 		// Configure the new Raft cluster for the shard.
+		// Optimized for performance: increased timeouts reduce Raft overhead
 		rc := config.Config{
 			NodeID:             m.nodeID,
 			ClusterID:          shardID,
-			ElectionRTT:        10,
-			HeartbeatRTT:       1,
+			ElectionRTT:        20, // Increased from 10 - reduces election overhead
+			HeartbeatRTT:       2,  // Increased from 1 - reduces heartbeat overhead
 			CheckQuorum:        true,
-			SnapshotEntries:    100,
-			CompactionOverhead: 50,
+			SnapshotEntries:    500, // Increased from 100 - less frequent snapshots
+			CompactionOverhead: 250, // Increased from 50 - matches snapshot frequency
 		}
 
 		// The factory function that Dragonboat will call to create the shard's state machine.
@@ -512,11 +513,11 @@ func (m *Manager) GetLeaderTransferAcks() []*placementdriver.ShardLeaderTransfer
 			continue
 		}
 		acks = append(acks, &placementdriver.ShardLeaderTransferAck{
-			ShardId:          shardID,
-			FromNodeId:       m.nodeID,
-			ToNodeId:         leaderID,
-			ShardEpoch:       epoch,
-			TimestampUnixMs:  now,
+			ShardId:         shardID,
+			FromNodeId:      m.nodeID,
+			ToNodeId:        leaderID,
+			ShardEpoch:      epoch,
+			TimestampUnixMs: now,
 		})
 		delete(m.pendingLeaderTransfers, shardID)
 	}

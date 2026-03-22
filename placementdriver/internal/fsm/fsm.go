@@ -48,6 +48,9 @@ const (
 	AddShardReplica
 	// RemoveShardReplica removes a replica from a shard's desired replica set.
 	RemoveShardReplica
+	// BatchHeartbeat is a batched command containing worker heartbeat, shard metrics, and shard leaders.
+	// This reduces Raft proposals from N+1 to 1 per heartbeat.
+	BatchHeartbeat
 )
 
 // Command is the structure that is serialized and sent to the Raft log.
@@ -119,24 +122,24 @@ type DeleteCollectionPayload struct {
 
 // UpdateWorkerHeartbeatPayload is the data for the UpdateWorkerHeartbeat command.
 type UpdateWorkerHeartbeatPayload struct {
-	WorkerID           uint64  `json:"worker_id"`
-	CPUUsagePercent    float64 `json:"cpu_usage_percent"`
-	MemoryUsagePercent float64 `json:"memory_usage_percent"`
-	DiskUsagePercent   float64 `json:"disk_usage_percent"`
-	QueriesPerSecond   float64 `json:"queries_per_second"`
-	ActiveShards       int64   `json:"active_shards"`
-	VectorCount        int64   `json:"vector_count"`
-	MemoryBytes        int64   `json:"memory_bytes"`
+	WorkerID           uint64   `json:"worker_id"`
+	CPUUsagePercent    float64  `json:"cpu_usage_percent"`
+	MemoryUsagePercent float64  `json:"memory_usage_percent"`
+	DiskUsagePercent   float64  `json:"disk_usage_percent"`
+	QueriesPerSecond   float64  `json:"queries_per_second"`
+	ActiveShards       int64    `json:"active_shards"`
+	VectorCount        int64    `json:"vector_count"`
+	MemoryBytes        int64    `json:"memory_bytes"`
 	RunningShards      []uint64 `json:"running_shards"`
 }
 
 // UpdateRerankerHeartbeatPayload is the data for the UpdateRerankerHeartbeat command.
 type UpdateRerankerHeartbeatPayload struct {
-	RerankerID       uint64  `json:"reranker_id"`
-	CPUUsagePercent  float64 `json:"cpu_usage_percent"`
+	RerankerID         uint64  `json:"reranker_id"`
+	CPUUsagePercent    float64 `json:"cpu_usage_percent"`
 	MemoryUsagePercent float64 `json:"memory_usage_percent"`
-	DiskUsagePercent float64 `json:"disk_usage_percent"`
-	QueriesPerSecond float64 `json:"queries_per_second"`
+	DiskUsagePercent   float64 `json:"disk_usage_percent"`
+	QueriesPerSecond   float64 `json:"queries_per_second"`
 }
 
 // UpdateShardLeaderPayload is the data for the UpdateShardLeader command.
@@ -173,22 +176,36 @@ type ShardMetricsPayload struct {
 	AvgLatencyMs     float64 `json:"avg_latency_ms"`
 }
 
+// ShardLeaderPayload contains shard leader information
+type ShardLeaderPayload struct {
+	ShardID  uint64 `json:"shard_id"`
+	LeaderID uint64 `json:"leader_id"`
+}
+
+// BatchHeartbeatPayload contains all heartbeat data in a single batch.
+// This reduces Raft proposals from N+1 to 1 per heartbeat.
+type BatchHeartbeatPayload struct {
+	WorkerHeartbeat UpdateWorkerHeartbeatPayload `json:"worker_heartbeat"`
+	ShardMetrics    []ShardMetricsPayload        `json:"shard_metrics,omitempty"`
+	ShardLeaders    []ShardLeaderPayload         `json:"shard_leaders,omitempty"`
+}
+
 // ======================================================================================
 // State Machine Data Structures
 // ======================================================================================
 
 // ShardInfo holds the metadata for a single shard, including its key range and replicas.
 type ShardInfo struct {
-	ShardID       uint64   `json:"shard_id"`
-	Collection    string   `json:"collection"`
-	KeyRangeStart uint64   `json:"key_range_start"`
-	KeyRangeEnd   uint64   `json:"key_range_end"`
-	Replicas      []uint64 `json:"replicas"`  // Slice of worker node IDs that host this shard.
-	LeaderID      uint64   `json:"leader_id"` // The current leader of the shard's Raft group.
-	Epoch         uint64   `json:"epoch"`     // Monotonic shard config epoch.
-	Dimension     int32    `json:"dimension"`
-	Distance      string   `json:"distance"`
-	Bootstrapped  bool     `json:"bootstrapped"` // Whether the raft group has been bootstrapped.
+	ShardID          uint64   `json:"shard_id"`
+	Collection       string   `json:"collection"`
+	KeyRangeStart    uint64   `json:"key_range_start"`
+	KeyRangeEnd      uint64   `json:"key_range_end"`
+	Replicas         []uint64 `json:"replicas"`  // Slice of worker node IDs that host this shard.
+	LeaderID         uint64   `json:"leader_id"` // The current leader of the shard's Raft group.
+	Epoch            uint64   `json:"epoch"`     // Monotonic shard config epoch.
+	Dimension        int32    `json:"dimension"`
+	Distance         string   `json:"distance"`
+	Bootstrapped     bool     `json:"bootstrapped"`      // Whether the raft group has been bootstrapped.
 	BootstrapMembers []uint64 `json:"bootstrap_members"` // Initial members allowed to bootstrap.
 	// Metrics for hot-shard detection
 	QueriesPerSecond float64   `json:"queries_per_second"` // Current query rate
@@ -224,13 +241,13 @@ const (
 
 // WorkerInfo holds information about a registered worker node.
 type WorkerInfo struct {
-	ID            uint64    `json:"id"`
-	GrpcAddress   string    `json:"grpc_address"`
-	RaftAddress   string    `json:"raft_address"`
-	LastHeartbeat time.Time `json:"last_heartbeat"`
+	ID            uint64      `json:"id"`
+	GrpcAddress   string      `json:"grpc_address"`
+	RaftAddress   string      `json:"raft_address"`
+	LastHeartbeat time.Time   `json:"last_heartbeat"`
 	State         WorkerState `json:"state"`
-	RunningShards []uint64  `json:"running_shards"`
-	Role          string    `json:"role"`
+	RunningShards []uint64    `json:"running_shards"`
+	Role          string      `json:"role"`
 	// Load metrics for load-aware placement
 	CPUUsagePercent    float64 `json:"cpu_usage_percent"`
 	MemoryUsagePercent float64 `json:"memory_usage_percent"`
@@ -296,20 +313,26 @@ type FSM struct {
 	NextWorkerID uint64 `json:"next_worker_id"`
 	// NextRerankerID is a counter for generating unique reranker IDs.
 	NextRerankerID uint64 `json:"next_reranker_id"`
+	// Lock-free read access to FSM state
+	lockFree *LockFreeFSM
 }
 
 // NewFSM creates a new, empty FSM.
 func NewFSM() *FSM {
-	return &FSM{
-		Peers:        make(map[string]PeerInfo),
-		Workers:      make(map[uint64]WorkerInfo),
-		Rerankers:    make(map[uint64]RerankerInfo),
-		Collections:  make(map[string]*Collection),
+	f := &FSM{
+		Peers:            make(map[string]PeerInfo),
+		Workers:          make(map[uint64]WorkerInfo),
+		Rerankers:        make(map[uint64]RerankerInfo),
+		Collections:      make(map[string]*Collection),
 		AssignmentsEpoch: 1,
-		NextShardID:  1,
-		NextWorkerID: 1,
-		NextRerankerID: 1,
+		NextShardID:      1,
+		NextWorkerID:     1,
+		NextRerankerID:   1,
+		lockFree:         NewLockFreeFSM(),
 	}
+	// Initialize with empty snapshot
+	f.updateSnapshot()
+	return f
 }
 
 // Open is called by Dragonboat when the FSM is started.
@@ -452,6 +475,13 @@ func (f *FSM) Update(entries []sm.Entry) ([]sm.Entry, error) {
 					appErr = err
 				}
 			}
+		case BatchHeartbeat:
+			var payload BatchHeartbeatPayload
+			if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
+				appErr = fmt.Errorf("failed to unmarshal BatchHeartbeat payload: %w", err)
+			} else {
+				f.applyBatchHeartbeat(payload)
+			}
 		default:
 			appErr = fmt.Errorf("unknown command type: %d", cmd.Type)
 		}
@@ -462,6 +492,12 @@ func (f *FSM) Update(entries []sm.Entry) ([]sm.Entry, error) {
 		// The result of the update is passed back to the proposer.
 		entries[i].Result = sm.Result{Value: result}
 	}
+
+	// Update the lock-free snapshot after processing all entries
+	f.mu.Lock()
+	f.updateSnapshot()
+	f.mu.Unlock()
+
 	return entries, nil
 }
 
@@ -469,6 +505,59 @@ func (f *FSM) Update(entries []sm.Entry) ([]sm.Entry, error) {
 // In this implementation, all state is in memory, so this is a no-op.
 func (f *FSM) Sync() error {
 	return nil
+}
+
+// updateSnapshot creates a new snapshot of the current state and stores it
+// atomically for lock-free reads.
+// Must be called while holding f.mu.
+func (f *FSM) updateSnapshot() {
+	// Deep copy maps to ensure immutability
+	peers := make(map[string]PeerInfo, len(f.Peers))
+	for k, v := range f.Peers {
+		peers[k] = v
+	}
+
+	workers := make(map[uint64]WorkerInfo, len(f.Workers))
+	for k, v := range f.Workers {
+		workers[k] = v
+	}
+
+	rerankers := make(map[uint64]RerankerInfo, len(f.Rerankers))
+	for k, v := range f.Rerankers {
+		rerankers[k] = v
+	}
+
+	collections := make(map[string]*Collection, len(f.Collections))
+	for k, v := range f.Collections {
+		// Deep copy collection
+		coll := *v
+		shards := make(map[uint64]*ShardInfo, len(v.Shards))
+		for sk, sv := range v.Shards {
+			shardCopy := *sv
+			shards[sk] = &shardCopy
+		}
+		coll.Shards = shards
+		collections[k] = &coll
+	}
+
+	snapshot := &FSMSnapshot{
+		Peers:            peers,
+		Workers:          workers,
+		Rerankers:        rerankers,
+		Collections:      collections,
+		AssignmentsEpoch: f.AssignmentsEpoch,
+		NextShardID:      f.NextShardID,
+		NextWorkerID:     f.NextWorkerID,
+		NextRerankerID:   f.NextRerankerID,
+	}
+
+	f.lockFree.Store(snapshot)
+}
+
+// GetLockFree returns the lock-free wrapper for read operations.
+// This allows reads to proceed without blocking on writes.
+func (f *FSM) GetLockFree() *LockFreeFSM {
+	return f.lockFree
 }
 
 func (f *FSM) applyRegisterPeer(payload RegisterPeerPayload) {
@@ -648,15 +737,15 @@ func (f *FSM) applyCreateCollection(payload CreateCollectionPayload) error {
 		replicas := f.selectReplicasWithFailureDomain(workerIDs, actualReplication)
 
 		shard := &ShardInfo{
-			ShardID:       shardID,
-			Collection:    payload.Name,
-			KeyRangeStart: startKey,
-			KeyRangeEnd:   endKey,
-			Replicas:      replicas,
-			Epoch:         1,
+			ShardID:          shardID,
+			Collection:       payload.Name,
+			KeyRangeStart:    startKey,
+			KeyRangeEnd:      endKey,
+			Replicas:         replicas,
+			Epoch:            1,
 			BootstrapMembers: append([]uint64(nil), replicas...),
-			Dimension:     payload.Dimension,
-			Distance:      payload.Distance,
+			Dimension:        payload.Dimension,
+			Distance:         payload.Distance,
 		}
 		collection.Shards[shardID] = shard
 	}
@@ -929,6 +1018,64 @@ func (f *FSM) applyUpdateWorkerHeartbeat(payload UpdateWorkerHeartbeatPayload) {
 	}
 }
 
+// applyBatchHeartbeat applies a batched heartbeat update in a single operation.
+// This reduces Raft proposals from N+1 to 1 per heartbeat.
+func (f *FSM) applyBatchHeartbeat(payload BatchHeartbeatPayload) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	// Apply worker heartbeat
+	workerID := payload.WorkerHeartbeat.WorkerID
+	if worker, ok := f.Workers[workerID]; ok {
+		worker.LastHeartbeat = time.Now().UTC()
+		if worker.State == WorkerStateJoining || worker.State == WorkerStateUnknown {
+			worker.State = WorkerStateReady
+		}
+
+		// Apply exponential decay to smooth load metrics
+		worker.CPUUsagePercent = worker.CPUUsagePercent*loadMetricDecayFactor + payload.WorkerHeartbeat.CPUUsagePercent*(1-loadMetricDecayFactor)
+		worker.MemoryUsagePercent = worker.MemoryUsagePercent*loadMetricDecayFactor + payload.WorkerHeartbeat.MemoryUsagePercent*(1-loadMetricDecayFactor)
+		worker.DiskUsagePercent = worker.DiskUsagePercent*loadMetricDecayFactor + payload.WorkerHeartbeat.DiskUsagePercent*(1-loadMetricDecayFactor)
+		worker.QueriesPerSecond = worker.QueriesPerSecond*loadMetricDecayFactor + payload.WorkerHeartbeat.QueriesPerSecond*(1-loadMetricDecayFactor)
+
+		// Direct values (not decayed)
+		worker.ActiveShards = payload.WorkerHeartbeat.ActiveShards
+		worker.VectorCount = payload.WorkerHeartbeat.VectorCount
+		worker.MemoryBytes = payload.WorkerHeartbeat.MemoryBytes
+		worker.RunningShards = append([]uint64(nil), payload.WorkerHeartbeat.RunningShards...)
+
+		f.Workers[workerID] = worker
+	}
+
+	// Apply shard metrics
+	for _, metrics := range payload.ShardMetrics {
+		for _, collection := range f.Collections {
+			if shard, ok := collection.Shards[metrics.ShardID]; ok {
+				const decayFactor = 0.7
+				shard.QueriesPerSecond = shard.QueriesPerSecond*decayFactor + metrics.QueriesPerSecond*(1-decayFactor)
+				shard.AvgLatencyMs = shard.AvgLatencyMs*decayFactor + metrics.AvgLatencyMs*(1-decayFactor)
+				shard.TotalQueries += int64(metrics.QueriesPerSecond) // Approximate
+				shard.LastUpdated = time.Now().UTC()
+				break
+			}
+		}
+	}
+
+	// Apply shard leaders
+	for _, leader := range payload.ShardLeaders {
+		for _, collection := range f.Collections {
+			if shard, ok := collection.Shards[leader.ShardID]; ok {
+				shard.LeaderID = leader.LeaderID
+				if leader.LeaderID > 0 {
+					shard.Bootstrapped = true
+					shard.BootstrapMembers = nil
+				}
+				break
+			}
+		}
+	}
+}
+
 func (f *FSM) applyUpdateRerankerHeartbeat(payload UpdateRerankerHeartbeatPayload) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1162,27 +1309,27 @@ func (f *FSM) Lookup(query interface{}) (interface{}, error) {
 	// A more advanced implementation could use it to specify which part of the state to return.
 	// For now, we return a snapshot of the entire FSM state.
 	return &fsmSnapshot{
-		Peers:        f.Peers,
-		Workers:      f.Workers,
-		Rerankers:    f.Rerankers,
-		Collections:  f.Collections,
+		Peers:            f.Peers,
+		Workers:          f.Workers,
+		Rerankers:        f.Rerankers,
+		Collections:      f.Collections,
 		AssignmentsEpoch: f.AssignmentsEpoch,
-		NextShardID:  f.NextShardID,
-		NextWorkerID: f.NextWorkerID,
-		NextRerankerID: f.NextRerankerID,
+		NextShardID:      f.NextShardID,
+		NextWorkerID:     f.NextWorkerID,
+		NextRerankerID:   f.NextRerankerID,
 	}, nil
 }
 
 // fsmSnapshot is a struct used for serializing the FSM state for snapshotting.
 type fsmSnapshot struct {
-	Peers        map[string]PeerInfo    `json:"peers"`
-	Workers      map[uint64]WorkerInfo  `json:"workers"`
-	Rerankers    map[uint64]RerankerInfo `json:"rerankers"`
-	Collections  map[string]*Collection `json:"collections"`
-	AssignmentsEpoch uint64             `json:"assignments_epoch"`
-	NextShardID  uint64                 `json:"next_shard_id"`
-	NextWorkerID uint64                 `json:"next_worker_id"`
-	NextRerankerID uint64               `json:"next_reranker_id"`
+	Peers            map[string]PeerInfo     `json:"peers"`
+	Workers          map[uint64]WorkerInfo   `json:"workers"`
+	Rerankers        map[uint64]RerankerInfo `json:"rerankers"`
+	Collections      map[string]*Collection  `json:"collections"`
+	AssignmentsEpoch uint64                  `json:"assignments_epoch"`
+	NextShardID      uint64                  `json:"next_shard_id"`
+	NextWorkerID     uint64                  `json:"next_worker_id"`
+	NextRerankerID   uint64                  `json:"next_reranker_id"`
 }
 
 // PrepareSnapshot is called by Dragonboat to get a snapshot of the current state.
@@ -1198,14 +1345,14 @@ func (f *FSM) SaveSnapshot(ctx interface{}, w io.Writer, done <-chan struct{}) e
 	defer f.mu.RUnlock()
 
 	data := fsmSnapshot{
-		Peers:        f.Peers,
-		Workers:      f.Workers,
-		Rerankers:    f.Rerankers,
-		Collections:  f.Collections,
+		Peers:            f.Peers,
+		Workers:          f.Workers,
+		Rerankers:        f.Rerankers,
+		Collections:      f.Collections,
 		AssignmentsEpoch: f.AssignmentsEpoch,
-		NextShardID:  f.NextShardID,
-		NextWorkerID: f.NextWorkerID,
-		NextRerankerID: f.NextRerankerID,
+		NextShardID:      f.NextShardID,
+		NextWorkerID:     f.NextWorkerID,
+		NextRerankerID:   f.NextRerankerID,
 	}
 
 	return json.NewEncoder(w).Encode(data)

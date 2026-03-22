@@ -9,8 +9,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"hash/fnv"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -52,26 +52,36 @@ type Server struct {
 	raft *raft.Node // The underlying Raft node for proposing state changes.
 	fsm  *fsm.FSM   // A direct reference to the FSM for read-only operations.
 
-	membershipMu   sync.RWMutex
+	membershipMu    sync.RWMutex
 	shardMembership map[uint64]shardMembershipSnapshot
 
-	progressMu     sync.RWMutex
-	shardProgress  map[uint64]map[uint64]shardProgressSnapshot
+	progressMu    sync.RWMutex
+	shardProgress map[uint64]map[uint64]shardProgressSnapshot
 
-	leaderAckMu    sync.RWMutex
+	leaderAckMu        sync.RWMutex
 	leaderTransferAcks map[uint64]map[uint64]leaderTransferAck
 
 	rerankerRR uint64
+
+	// Routing cache for faster GetWorker lookups
+	routingCache    sync.Map // map[string]*routingCacheEntry
+	routingCacheTTL time.Duration
+}
+
+type routingCacheEntry struct {
+	response  *pb.GetWorkerResponse
+	expiresAt time.Time
 }
 
 // NewServer creates a new instance of the placement driver gRPC server.
 func NewServer(r *raft.Node, f *fsm.FSM) *Server {
 	return &Server{
-		raft: r,
-		fsm:  f,
-		shardMembership: make(map[uint64]shardMembershipSnapshot),
-		shardProgress: make(map[uint64]map[uint64]shardProgressSnapshot),
+		raft:               r,
+		fsm:                f,
+		shardMembership:    make(map[uint64]shardMembershipSnapshot),
+		shardProgress:      make(map[uint64]map[uint64]shardProgressSnapshot),
 		leaderTransferAcks: make(map[uint64]map[uint64]leaderTransferAck),
+		routingCacheTTL:    100 * time.Millisecond, // Cache routing decisions for 100ms
 	}
 }
 
@@ -203,100 +213,76 @@ type shardProgressSnapshot struct {
 const progressStaleAfter = 30 * time.Second
 
 type leaderTransferAck struct {
-	toNodeID  uint64
+	toNodeID   uint64
 	shardEpoch uint64
-	updatedAt time.Time
+	updatedAt  time.Time
 }
 
 const leaderAckStaleAfter = 5 * time.Minute
 
 // Heartbeat is called periodically by workers to signal they are alive.
 // It also serves as the mechanism for the placement driver to send shard assignments to workers.
+// Uses batched heartbeat to reduce Raft proposals from N+1 to 1 per heartbeat.
 func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.HeartbeatResponse, error) {
 	workerID, err := strconv.ParseUint(req.WorkerId, 10, 64)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid worker_id format: %v", err)
 	}
 
-	// Propose a command to update the worker's last heartbeat time and load metrics in the FSM.
-	hbPayload := fsm.UpdateWorkerHeartbeatPayload{
-		WorkerID:           workerID,
-		CPUUsagePercent:    float64(req.GetCpuUsagePercent()),
-		MemoryUsagePercent: float64(req.GetMemoryUsagePercent()),
-		DiskUsagePercent:   float64(req.GetDiskUsagePercent()),
-		QueriesPerSecond:   float64(req.GetQueriesPerSecond()),
-		ActiveShards:       req.GetActiveShards(),
-		VectorCount:        req.GetVectorCount(),
-		MemoryBytes:        req.GetMemoryBytes(),
-		RunningShards:      req.GetRunningShards(),
-	}
-	payloadBytes, err := json.Marshal(hbPayload)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to marshal heartbeat payload: %v", err)
-	}
-	cmd := fsm.Command{Type: fsm.UpdateWorkerHeartbeat, Payload: payloadBytes}
-	cmdBytes, err := json.Marshal(cmd)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to marshal heartbeat command: %v", err)
+	// Build the batched heartbeat payload
+	batchPayload := fsm.BatchHeartbeatPayload{
+		WorkerHeartbeat: fsm.UpdateWorkerHeartbeatPayload{
+			WorkerID:           workerID,
+			CPUUsagePercent:    float64(req.GetCpuUsagePercent()),
+			MemoryUsagePercent: float64(req.GetMemoryUsagePercent()),
+			DiskUsagePercent:   float64(req.GetDiskUsagePercent()),
+			QueriesPerSecond:   float64(req.GetQueriesPerSecond()),
+			ActiveShards:       req.GetActiveShards(),
+			VectorCount:        req.GetVectorCount(),
+			MemoryBytes:        req.GetMemoryBytes(),
+			RunningShards:      req.GetRunningShards(),
+		},
 	}
 
-	// Propose the heartbeat update. We log a warning on failure but don't fail the request,
-	// as the primary goal is to return shard assignments.
-	if _, err := s.raft.Propose(cmdBytes, raftTimeout); err != nil {
-		fmt.Printf("Warning: failed to propose heartbeat for worker %d: %v\n", workerID, err)
-	}
-
-	// Propose commands to update shard metrics for hot-shard detection
+	// Add shard metrics to batch
 	for _, shardMetric := range req.GetShardMetrics() {
-		metricsPayload := fsm.ShardMetricsPayload{
+		batchPayload.ShardMetrics = append(batchPayload.ShardMetrics, fsm.ShardMetricsPayload{
 			WorkerID:         workerID,
 			ShardID:          shardMetric.GetShardId(),
 			QueriesPerSecond: float64(shardMetric.GetQueriesPerSecond()),
 			VectorCount:      shardMetric.GetVectorCount(),
 			AvgLatencyMs:     float64(shardMetric.GetAvgLatencyMs()),
-		}
-		metricsPayloadBytes, err := json.Marshal(metricsPayload)
-		if err != nil {
-			fmt.Printf("Warning: failed to marshal shard metrics payload: %v\n", err)
-			continue
-		}
-		metricsCmd := fsm.Command{Type: fsm.UpdateShardMetrics, Payload: metricsPayloadBytes}
-		metricsCmdBytes, err := json.Marshal(metricsCmd)
-		if err != nil {
-			fmt.Printf("Warning: failed to marshal shard metrics command: %v\n", err)
-			continue
-		}
-		if _, err := s.raft.Propose(metricsCmdBytes, raftTimeout); err != nil {
-			fmt.Printf("Warning: failed to propose shard metrics for shard %d: %v\n", shardMetric.GetShardId(), err)
-		}
+		})
 	}
 
+	// Add shard leaders to batch (only for shards this worker is assigned to)
 	leaderMap := make(map[uint64]uint64, len(req.ShardLeaderInfo))
-
-	// Propose commands to update shard leader information.
 	for _, leaderInfo := range req.ShardLeaderInfo {
 		if !s.fsm.IsWorkerAssignedToShard(workerID, leaderInfo.ShardId) {
 			continue
 		}
 		leaderMap[leaderInfo.ShardId] = leaderInfo.LeaderId
-		leaderPayload := fsm.UpdateShardLeaderPayload{
+		batchPayload.ShardLeaders = append(batchPayload.ShardLeaders, fsm.ShardLeaderPayload{
 			ShardID:  leaderInfo.ShardId,
 			LeaderID: leaderInfo.LeaderId,
-		}
-		leaderPayloadBytes, err := json.Marshal(leaderPayload)
-		if err != nil {
-			fmt.Printf("Warning: failed to marshal leader payload: %v\n", err)
-			continue
-		}
-		leaderCmd := fsm.Command{Type: fsm.UpdateShardLeader, Payload: leaderPayloadBytes}
-		leaderCmdBytes, err := json.Marshal(leaderCmd)
-		if err != nil {
-			fmt.Printf("Warning: failed to marshal leader command: %v\n", err)
-			continue
-		}
-		if _, err := s.raft.Propose(leaderCmdBytes, raftTimeout); err != nil {
-			fmt.Printf("Warning: failed to propose leader update for shard %d: %v\n", leaderInfo.ShardId, err)
-		}
+		})
+	}
+
+	// Marshal and propose the batched command (ONE proposal instead of N+1)
+	payloadBytes, err := json.Marshal(batchPayload)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to marshal batch heartbeat payload: %v", err)
+	}
+	cmd := fsm.Command{Type: fsm.BatchHeartbeat, Payload: payloadBytes}
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to marshal batch heartbeat command: %v", err)
+	}
+
+	// Propose the batched heartbeat update. We log a warning on failure but don't fail the request,
+	// as the primary goal is to return shard assignments.
+	if _, err := s.raft.Propose(cmdBytes, raftTimeout); err != nil {
+		fmt.Printf("Warning: failed to propose batch heartbeat for worker %d: %v\n", workerID, err)
 	}
 
 	// Update shard membership info (leader-reported).
@@ -385,11 +371,11 @@ func (s *Server) RerankerHeartbeat(ctx context.Context, req *pb.RerankerHeartbea
 	}
 
 	hbPayload := fsm.UpdateRerankerHeartbeatPayload{
-		RerankerID:       rerankerID,
-		CPUUsagePercent:  float64(req.GetCpuUsagePercent()),
+		RerankerID:         rerankerID,
+		CPUUsagePercent:    float64(req.GetCpuUsagePercent()),
 		MemoryUsagePercent: float64(req.GetMemoryUsagePercent()),
-		DiskUsagePercent: float64(req.GetDiskUsagePercent()),
-		QueriesPerSecond: float64(req.GetQueriesPerSecond()),
+		DiskUsagePercent:   float64(req.GetDiskUsagePercent()),
+		QueriesPerSecond:   float64(req.GetQueriesPerSecond()),
 	}
 	payloadBytes, err := json.Marshal(hbPayload)
 	if err != nil {
@@ -413,9 +399,21 @@ func (s *Server) RerankerHeartbeat(ctx context.Context, req *pb.RerankerHeartbea
 
 // GetWorker handles a request from the API gateway to find the correct worker for an operation.
 // It uses consistent hashing on the vector ID to determine the shard.
+// Results are cached for routingCacheTTL to reduce repeated computations.
 func (s *Server) GetWorker(ctx context.Context, req *pb.GetWorkerRequest) (*pb.GetWorkerResponse, error) {
 	if req.Collection == "" {
 		return nil, status.Error(codes.InvalidArgument, "collection name is required")
+	}
+
+	// Check routing cache first
+	cacheKey := req.Collection + ":" + req.VectorId
+	if cached, ok := s.routingCache.Load(cacheKey); ok {
+		entry := cached.(*routingCacheEntry)
+		if time.Now().Before(entry.expiresAt) {
+			return entry.response, nil
+		}
+		// Expired, remove from cache
+		s.routingCache.Delete(cacheKey)
 	}
 
 	// Read from the local FSM state. This is a read-only operation.
@@ -482,12 +480,20 @@ func (s *Server) GetWorker(ctx context.Context, req *pb.GetWorkerRequest) (*pb.G
 		return nil, status.Errorf(codes.Unavailable, "no healthy replicas available for shard '%d'", targetShard.ShardID)
 	}
 
-	return &pb.GetWorkerResponse{
-		GrpcAddress: targetWorker.GrpcAddress,
-		ShardId:     uint32(targetShard.ShardID),
-		ShardEpoch:  targetShard.Epoch,
+	resp := &pb.GetWorkerResponse{
+		GrpcAddress:       targetWorker.GrpcAddress,
+		ShardId:           uint32(targetShard.ShardID),
+		ShardEpoch:        targetShard.Epoch,
 		LeaseExpiryUnixMs: time.Now().Add(shardLeaseTTL).UnixMilli(),
-	}, nil
+	}
+
+	// Cache the result
+	s.routingCache.Store(cacheKey, &routingCacheEntry{
+		response:  resp,
+		expiresAt: time.Now().Add(s.routingCacheTTL),
+	})
+
+	return resp, nil
 }
 
 // ListWorkers returns a list of all registered workers from the FSM state.
@@ -550,11 +556,11 @@ func (s *Server) ListRerankers(ctx context.Context, req *pb.ListRerankersRequest
 			"role": r.Role,
 		}
 		rerankerInfos = append(rerankerInfos, &pb.RerankerInfo{
-			RerankerId:  strconv.FormatUint(r.ID, 10),
-			GrpcAddress: r.GrpcAddress,
+			RerankerId:    strconv.FormatUint(r.ID, 10),
+			GrpcAddress:   r.GrpcAddress,
 			LastHeartbeat: r.LastHeartbeat.Unix(),
-			Healthy:     s.fsm.IsRerankerHealthy(r.ID),
-			Metadata:    metadata,
+			Healthy:       s.fsm.IsRerankerHealthy(r.ID),
+			Metadata:      metadata,
 		})
 	}
 
@@ -987,9 +993,9 @@ func (s *Server) updateLeaderTransferAcks(workerID uint64, infos []*pb.ShardLead
 			s.leaderTransferAcks[ack.ShardId] = shardMap
 		}
 		shardMap[ack.FromNodeId] = leaderTransferAck{
-			toNodeID:  ack.ToNodeId,
+			toNodeID:   ack.ToNodeId,
 			shardEpoch: ack.ShardEpoch,
-			updatedAt: now,
+			updatedAt:  now,
 		}
 	}
 }

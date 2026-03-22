@@ -109,6 +109,7 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 		WarmupEnabled:            false,
 		WarmupMaxVectors:         10000,
 		WarmupDelay:              5 * time.Second,
+		SearchParallelism:        runtime.GOMAXPROCS(0), // Enable parallel search by default
 	}
 }
 

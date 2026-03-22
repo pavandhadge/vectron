@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strconv"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -67,14 +67,15 @@ func NewNode(cfg Config) (*Node, error) {
 	}
 
 	// Configure the specific Raft cluster.
+	// Optimized for performance: slightly increased timeouts reduce overhead
 	rc := config.Config{
 		NodeID:             cfg.NodeID,
 		ClusterID:          cfg.ClusterID,
-		ElectionRTT:        10, // Number of message round-trip-times for an election.
-		HeartbeatRTT:       1,  // Number of message round-trip-times for a heartbeat.
+		ElectionRTT:        15, // Increased from 10 - reduces election overhead
+		HeartbeatRTT:       1,  // Keep at 1 for quick failure detection
 		CheckQuorum:        true,
-		SnapshotEntries:    1000,
-		CompactionOverhead: 500,
+		SnapshotEntries:    2000, // Increased from 1000 - less frequent snapshots
+		CompactionOverhead: 1000, // Increased from 500 - matches snapshot frequency
 	}
 
 	// The factory function that Dragonboat will call to create the state machine.
