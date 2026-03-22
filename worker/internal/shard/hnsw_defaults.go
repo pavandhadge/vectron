@@ -15,6 +15,9 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 	quantizeEnabled := distance == "cosine"
 	keepFloatVectors := quantizeEnabled
 
+	// Vector compression is optional - consumes computation
+	compressionEnabled := os.Getenv("VECTRON_VECTOR_COMPRESSION") == "1"
+
 	adaptiveScale := 1.0
 	if dim >= 1024 {
 		adaptiveScale = 0.5
@@ -63,8 +66,8 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 		}
 	}
 
-	hotEnabled := true  // Enable hot indexing by default for faster searches
-	hotMaxSize := 50000 // Increased from 30000
+	hotEnabled := true // Enable hot indexing by default for faster searches
+	hotMaxSize := 50000
 	if v := os.Getenv("VECTRON_HOT_INDEX_ENABLED"); v != "" {
 		hotEnabled = v == "1"
 	}
@@ -89,8 +92,9 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 		NormalizeVectors:         distance == "cosine",
 		QuantizeVectors:          quantizeEnabled,
 		QuantizeKeepFloatVectors: keepFloatVectors,
-		VectorCompressionEnabled: false,
+		VectorCompressionEnabled: compressionEnabled, // Optional - set VECTRON_VECTOR_COMPRESSION=1
 		MultiStageEnabled:        quantizeEnabled,
+		EnableNorms:              quantizeEnabled,
 		HotIndexEnabled:          hotEnabled,
 		HotIndexMaxSize:          hotMaxSize,
 		HotIndexColdEfScale:      hotColdScale,
@@ -103,7 +107,8 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 		MaintenanceInterval:      30 * time.Minute,
 		PruneEnabled:             false,
 		PruneMaxNodes:            2000,
-		MmapVectorsEnabled:       false,
+		MmapVectorsEnabled:       true, // Enable memory-mapped vectors for larger datasets
+		MmapInitialMB:            1024, // Start with 1GB
 		WALBatchEnabled:          true,
 		AsyncIndexingEnabled:     true,
 		IndexingQueueSize:        indexQueueSize,
@@ -113,6 +118,9 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 		WarmupMaxVectors:         50000,
 		WarmupDelay:              2 * time.Second,
 		SearchParallelism:        runtime.GOMAXPROCS(0),
+		AdaptiveQualityEnabled:   true,
+		LowNormThreshold:         0.5,
+		LowQualityEfScale:        1.5,
 	}
 }
 

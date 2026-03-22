@@ -323,7 +323,7 @@ func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dime
 		syncMaxInterval = 5 * time.Second
 	}
 	// Keep the default small to avoid large WAL preallocation on small datasets.
-	writeBufferSize := 32 * 1024 * 1024
+	writeBufferSize := 64 * 1024 * 1024 // Increased from 32MB for better performance
 	if v := os.Getenv("VECTRON_WRITE_BUFFER_MB"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			writeBufferSize = n * 1024 * 1024
