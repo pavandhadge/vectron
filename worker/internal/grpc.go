@@ -32,7 +32,7 @@ import (
 
 const (
 	// raftTimeout is the default timeout for Raft proposals.
-	raftTimeout = 5 * time.Second
+	raftTimeout = 15 * time.Second
 )
 
 var (

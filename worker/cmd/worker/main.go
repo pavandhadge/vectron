@@ -64,7 +64,7 @@ func Start(nodeID uint64, raftAddr, grpcAddr string, pdAddrs []string, workerDat
 		NodeHostDir:       nhDataDir,
 		RaftAddress:       raftAddr,
 		ListenAddress:     raftAddr,
-		RTTMillisecond:    200,
+		RTTMillisecond:    50,
 		RaftEventListener: listener,
 	}
 	applyLogDBProfile(&nhc)

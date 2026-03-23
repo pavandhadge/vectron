@@ -1062,7 +1062,7 @@ func runScalabilityBenchmark(t *testing.T, ctx context.Context, client apigatewa
 	require.NoError(t, waitForCollectionReady(ctx, client, collectionName, 120*time.Second))
 
 	// Insert vectors in batches
-	batchSize := 1000
+	batchSize := 256
 	insertLatencies := make([]time.Duration, 0, datasetSize/batchSize)
 	insertCount := int64(0)
 
@@ -2156,11 +2156,11 @@ func generateSummaryStats(t *testing.T, results []*BenchmarkResult) {
 		if r == nil || r.InsertMetrics == nil {
 			continue
 		}
-			totalInsertThroughput += r.InsertMetrics.VectorsPerSec
-			if r.SearchMetrics != nil {
-				totalSearchThroughput += r.SearchMetrics.OpsPerSecond
-			}
-			count++
+		totalInsertThroughput += r.InsertMetrics.VectorsPerSec
+		if r.SearchMetrics != nil {
+			totalSearchThroughput += r.SearchMetrics.OpsPerSecond
+		}
+		count++
 	}
 
 	if count > 0 {
