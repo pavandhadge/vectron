@@ -55,9 +55,7 @@ import (
 )
 
 func fnv32(s string) uint32 {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(s))
-	return h.Sum32()
+	return uint32(maphash.String(cacheHashSeed, s))
 }
 
 var cfg Config
@@ -392,8 +390,8 @@ type routingShard struct {
 }
 
 type collectionRoutingEntry struct {
-	shards  []routingShard
-	expires time.Time
+	shards    []routingShard
+	expires   time.Time
 	dimension int32
 }
 
@@ -459,6 +457,7 @@ func NewDistributedCache(addr, password string, db int, ttl, timeout time.Durati
 }
 
 func (c *DistributedCache) key(prefix, key string) string {
+	// Use string concatenation (Go compiler optimizes this to a single alloc).
 	return "vectron:" + prefix + ":" + key
 }
 
@@ -2341,8 +2340,8 @@ func (s *gatewayServer) getCollectionRouting(ctx context.Context, collection str
 		ttl = s.routingCache.ttl
 	}
 	entry = &collectionRoutingEntry{
-		shards:  make([]routingShard, 0, len(resp.Shards)),
-		expires: time.Now().Add(ttl),
+		shards:    make([]routingShard, 0, len(resp.Shards)),
+		expires:   time.Now().Add(ttl),
 		dimension: resp.Dimension,
 	}
 	for _, shard := range resp.Shards {

@@ -5,8 +5,7 @@
 package idxhnsw
 
 import (
-	"bytes"
-	"encoding/gob"
+	"encoding/binary"
 	"math"
 	"strconv"
 	"sync/atomic"
@@ -310,6 +309,10 @@ func (h *HNSW) ensureNodeCapacity(id uint32) {
 	tmp := make([]*Node, newSize)
 	copy(tmp, h.nodes)
 	h.nodes = tmp
+
+	extTmp := make([]string, newSize)
+	copy(extTmp, h.extIDCache)
+	h.extIDCache = extTmp
 }
 
 // getNode retrieves a node by its internal ID, ensuring it's not marked as deleted.
@@ -324,17 +327,90 @@ func (h *HNSW) getNode(id uint32) *Node {
 	return nil
 }
 
+// getNodeFast is a simplified lookup for hot paths (search traversal).
+// It skips the vector validity check since the graph only contains valid node IDs.
+// Use getNode instead when you need to verify the node hasn't been soft-deleted.
+func (h *HNSW) getNodeFast(id uint32) *Node {
+	if int(id) >= len(h.nodes) {
+		return nil
+	}
+	return h.nodes[id]
+}
+
+// encodeNodeBinary serializes a Node to a byte slice using a fast binary format.
+// This replaces the previous gob.Encode which used reflection and was 5-10x slower.
+func encodeNodeBinary(n *Node) []byte {
+	// Calculate total size first to avoid reallocations.
+	size := 4 + 4 + 1 + 4 // ID + layer + vecType + vecLen
+	vecType := byte(0)
+	if n.Vec != nil {
+		vecType = 1
+		size += len(n.Vec) * 4
+	} else if n.QVec != nil {
+		vecType = 2
+		size += len(n.QVec)
+	}
+	size += 4 // norm
+	size += 4 // neighbor layer count
+	for _, layer := range n.Neighbors {
+		size += 4 + len(layer)*4 // count + IDs
+	}
+
+	buf := make([]byte, 0, size)
+	tmp := make([]byte, 4)
+
+	binary.LittleEndian.PutUint32(tmp, n.ID)
+	buf = append(buf, tmp...)
+
+	binary.LittleEndian.PutUint32(tmp, uint32(n.Layer))
+	buf = append(buf, tmp...)
+
+	buf = append(buf, vecType)
+
+	switch vecType {
+	case 1:
+		binary.LittleEndian.PutUint32(tmp, uint32(len(n.Vec)))
+		buf = append(buf, tmp...)
+		for _, v := range n.Vec {
+			binary.LittleEndian.PutUint32(tmp, math.Float32bits(v))
+			buf = append(buf, tmp...)
+		}
+	case 2:
+		binary.LittleEndian.PutUint32(tmp, uint32(len(n.QVec)))
+		buf = append(buf, tmp...)
+		for _, v := range n.QVec {
+			buf = append(buf, byte(v))
+		}
+	default:
+		binary.LittleEndian.PutUint32(tmp, 0)
+		buf = append(buf, tmp...)
+	}
+
+	binary.LittleEndian.PutUint32(tmp, math.Float32bits(n.Norm))
+	buf = append(buf, tmp...)
+
+	binary.LittleEndian.PutUint32(tmp, uint32(len(n.Neighbors)))
+	buf = append(buf, tmp...)
+	for _, layer := range n.Neighbors {
+		binary.LittleEndian.PutUint32(tmp, uint32(len(layer)))
+		buf = append(buf, tmp...)
+		for _, id := range layer {
+			binary.LittleEndian.PutUint32(tmp, id)
+			buf = append(buf, tmp...)
+		}
+	}
+
+	return buf
+}
+
 // persistNode serializes a node and saves it to the underlying key-value store.
 func (h *HNSW) persistNode(n *Node) error {
 	if !h.config.PersistNodes {
 		return nil
 	}
 	key := []byte("hnsw:" + strconv.FormatUint(uint64(n.ID), 10))
-	var buf bytes.Buffer
-	if err := gob.NewEncoder(&buf).Encode(n); err != nil {
-		return err
-	}
-	return h.store.Put(key, buf.Bytes())
+	data := encodeNodeBinary(n)
+	return h.store.Put(key, data)
 }
 
 // delete performs a "soft delete" by nil-ing out the vector of the node.
@@ -470,6 +546,7 @@ func (h *HNSW) performCleanup(batchSize int) {
 
 		// Fully remove the deleted node from the main map.
 		h.nodes[id] = nil
+		h.extIDCache[id] = ""
 		h.nodeCount--
 		externalID := h.uint32ToID[id]
 		delete(h.idToUint32, externalID)

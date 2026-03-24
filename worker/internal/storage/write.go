@@ -12,9 +12,38 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 )
+
+// vectorKeyBufPool reuses byte buffers for vector key construction to avoid
+// allocations on the hot write path.
+var vectorKeyBufPool = sync.Pool{
+	New: func() interface{} {
+		return make([]byte, 0, 128)
+	},
+}
+
+// vectorKey creates the database key for a vector from its string ID.
+// Uses a pooled buffer to avoid allocation per call.
+func vectorKey(id string) []byte {
+	buf := vectorKeyBufPool.Get().([]byte)
+	buf = buf[:0]
+	buf = append(buf, 'v', '_')
+	buf = append(buf, id...)
+	result := make([]byte, len(buf))
+	copy(result, buf)
+	vectorKeyBufPool.Put(buf)
+	return result
+}
+
+// encodeBufPool reuses buffers for vector encoding to reduce GC pressure.
+var encodeBufPool = sync.Pool{
+	New: func() interface{} {
+		return make([]byte, 0, 8192)
+	},
+}
 
 // Put inserts or updates a single key-value pair in the database.
 func (r *PebbleDB) Put(key []byte, value []byte) error {
@@ -80,11 +109,6 @@ func (r *PebbleDB) BatchPut(puts map[string][]byte) error {
 // BatchDelete performs a series of deletes in a single atomic batch.
 func (r *PebbleDB) BatchDelete(keys []string) error {
 	return r.BatchWrite(BatchOperations{Deletes: keys})
-}
-
-// vectorKey creates the database key for a vector from its string ID.
-func vectorKey(id string) []byte {
-	return []byte("v_" + id)
 }
 
 // StoreVector stores a vector and its metadata in both the HNSW index and PebbleDB.
@@ -494,7 +518,13 @@ func encodeVectorWithMeta(vector []float32, metadata []byte, compress bool) ([]b
 	}
 	if !compress {
 		totalLen := 4 + vecLen*4 + len(metadata)
-		buf := make([]byte, totalLen)
+		buf := encodeBufPool.Get().([]byte)
+		if cap(buf) < totalLen {
+			encodeBufPool.Put(buf)
+			buf = make([]byte, totalLen)
+		} else {
+			buf = buf[:totalLen]
+		}
 		binary.LittleEndian.PutUint32(buf[:4], uint32(vecLen))
 		offset := 4
 		for _, v := range vector {
@@ -504,7 +534,10 @@ func encodeVectorWithMeta(vector []float32, metadata []byte, compress bool) ([]b
 		if len(metadata) > 0 {
 			copy(buf[offset:], metadata)
 		}
-		return buf, nil
+		result := make([]byte, len(buf))
+		copy(result, buf)
+		encodeBufPool.Put(buf)
+		return result, nil
 	}
 
 	if vecLen > int(^vectorCompressionFlag) {
@@ -524,7 +557,13 @@ func encodeVectorWithMeta(vector []float32, metadata []byte, compress bool) ([]b
 	invScale := 127.0 / float64(scale)
 
 	totalLen := 4 + 4 + vecLen + len(metadata)
-	buf := make([]byte, totalLen)
+	buf := encodeBufPool.Get().([]byte)
+	if cap(buf) < totalLen {
+		encodeBufPool.Put(buf)
+		buf = make([]byte, totalLen)
+	} else {
+		buf = buf[:totalLen]
+	}
 	binary.LittleEndian.PutUint32(buf[:4], uint32(vecLen)|vectorCompressionFlag)
 	binary.LittleEndian.PutUint32(buf[4:8], math.Float32bits(scale))
 	for i, v := range vector {
@@ -539,7 +578,10 @@ func encodeVectorWithMeta(vector []float32, metadata []byte, compress bool) ([]b
 	if len(metadata) > 0 {
 		copy(buf[8+vecLen:], metadata)
 	}
-	return buf, nil
+	result := make([]byte, len(buf))
+	copy(result, buf)
+	encodeBufPool.Put(buf)
+	return result, nil
 }
 
 func encodeWALBatchEncoded(ids []string, values [][]byte) []byte {

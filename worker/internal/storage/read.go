@@ -8,9 +8,80 @@ import (
 	"encoding/binary"
 	"errors"
 	"math"
+	"sync"
 
 	"github.com/cockroachdb/pebble"
 )
+
+// decodeVecPool reuses float32 slices for vector decoding to reduce GC pressure.
+var decodeVecPool = sync.Pool{
+	New: func() interface{} {
+		return make([]float32, 0, 1536)
+	},
+}
+
+// decodeVectorWithMetaPooled is like decodeVectorWithMeta but uses a pooled float32 slice.
+func decodeVectorWithMetaPooled(data []byte) ([]float32, []byte, error) {
+	if len(data) == 0 {
+		return nil, nil, nil
+	}
+	if len(data) < 4 {
+		return nil, nil, errors.New("data too short to contain vector length")
+	}
+
+	vecLen32 := binary.LittleEndian.Uint32(data[:4])
+	compressed := (vecLen32 & vectorCompressionFlag) != 0
+	vecLen := int(vecLen32 & ^vectorCompressionFlag)
+
+	if !compressed {
+		expectedLen := 4 + vecLen*4
+		if len(data) < expectedLen {
+			return nil, nil, errors.New("data too short for declared vector length")
+		}
+		poolVec := decodeVecPool.Get().([]float32)
+		if cap(poolVec) < vecLen {
+			decodeVecPool.Put(poolVec)
+			poolVec = make([]float32, vecLen)
+		} else {
+			poolVec = poolVec[:vecLen]
+		}
+		for i := 0; i < vecLen; i++ {
+			start := 4 + i*4
+			poolVec[i] = math.Float32frombits(binary.LittleEndian.Uint32(data[start : start+4]))
+		}
+		var metadata []byte
+		if len(data) > expectedLen {
+			metadata = data[expectedLen:]
+		}
+		return poolVec, metadata, nil
+	}
+
+	expectedLen := 4 + 4 + vecLen
+	if len(data) < expectedLen {
+		return nil, nil, errors.New("data too short for declared compressed vector length")
+	}
+	scaleBits := binary.LittleEndian.Uint32(data[4:8])
+	scale := math.Float32frombits(scaleBits)
+	if scale == 0 {
+		scale = 1
+	}
+	mult := scale / 127.0
+	poolVec := decodeVecPool.Get().([]float32)
+	if cap(poolVec) < vecLen {
+		decodeVecPool.Put(poolVec)
+		poolVec = make([]float32, vecLen)
+	} else {
+		poolVec = poolVec[:vecLen]
+	}
+	for i := 0; i < vecLen; i++ {
+		poolVec[i] = float32(int8(data[8+i])) * mult
+	}
+	var metadata []byte
+	if len(data) > expectedLen {
+		metadata = data[expectedLen:]
+	}
+	return poolVec, metadata, nil
+}
 
 // Get retrieves the value for a given key from the database.
 // It returns nil if the key is not found.

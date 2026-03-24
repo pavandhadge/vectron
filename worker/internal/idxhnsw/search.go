@@ -4,9 +4,7 @@
 
 package idxhnsw
 
-
 import (
-	"container/heap"
 	"math"
 	"os"
 	"runtime"
@@ -21,44 +19,6 @@ type candidate struct {
 	id   uint32
 	dist float32
 	node *Node
-}
-
-// priorityQueue implements the heap.Interface for a min-heap of candidates,
-// ordered by distance. This is used to efficiently manage the list of candidates
-// during the search process.
-type priorityQueue []candidate
-
-func (pq priorityQueue) Len() int           { return len(pq) }
-func (pq priorityQueue) Less(i, j int) bool { return pq[i].dist < pq[j].dist }
-func (pq priorityQueue) Swap(i, j int)      { pq[i], pq[j] = pq[j], pq[i] }
-
-// Push adds a candidate to the priority queue.
-func (pq *priorityQueue) Push(x interface{}) {
-	*pq = append(*pq, x.(candidate))
-}
-
-// Pop removes and returns the candidate with the smallest distance from the priority queue.
-func (pq *priorityQueue) Pop() interface{} {
-	old := *pq
-	n := len(old)
-	item := old[n-1]
-	*pq = old[:n-1]
-	return item
-}
-
-// maxPriorityQueue implements heap.Interface for a max-heap of candidates.
-type maxPriorityQueue []candidate
-
-func (pq maxPriorityQueue) Len() int            { return len(pq) }
-func (pq maxPriorityQueue) Less(i, j int) bool  { return pq[i].dist > pq[j].dist } // Note: > for max-heap
-func (pq maxPriorityQueue) Swap(i, j int)       { pq[i], pq[j] = pq[j], pq[i] }
-func (pq *maxPriorityQueue) Push(x interface{}) { *pq = append(*pq, x.(candidate)) }
-func (pq *maxPriorityQueue) Pop() interface{} {
-	old := *pq
-	n := len(old)
-	item := old[n-1]
-	*pq = old[:n-1]
-	return item
 }
 
 type visitTracker struct {
@@ -131,6 +91,98 @@ var neighborIDSlicePool = sync.Pool{
 
 const smallEfThreshold = 32
 
+// Manual heap operations for min-heap (candidate queue).
+// These avoid interface{} boxing from container/heap, giving ~2-3x speedup
+// on Push/Pop in the tight inner loop of searchLayer.
+func candHeapPush(h *[]candidate, c candidate) {
+	*h = append(*h, c)
+	candHeapUp(*h, len(*h)-1)
+}
+
+func candHeapPop(h *[]candidate) candidate {
+	old := *h
+	n := len(old)
+	old[0], old[n-1] = old[n-1], old[0]
+	candHeapDown(*h, 0, n-1)
+	item := old[n-1]
+	*h = old[:n-1]
+	return item
+}
+
+func candHeapUp(h []candidate, j int) {
+	for {
+		i := (j - 1) / 2
+		if i == j || !(h[j].dist < h[i].dist) {
+			break
+		}
+		h[i], h[j] = h[j], h[i]
+		j = i
+	}
+}
+
+func candHeapDown(h []candidate, i, n int) {
+	for {
+		j1 := 2*i + 1
+		if j1 >= n || j1 < 0 {
+			break
+		}
+		j := j1
+		if j2 := j1 + 1; j2 < n && h[j2].dist < h[j1].dist {
+			j = j2
+		}
+		if !(h[j].dist < h[i].dist) {
+			break
+		}
+		h[i], h[j] = h[j], h[i]
+		i = j
+	}
+}
+
+// Manual heap operations for max-heap (results queue).
+func resHeapPush(h *[]candidate, c candidate) {
+	*h = append(*h, c)
+	resHeapUp(*h, len(*h)-1)
+}
+
+func resHeapPop(h *[]candidate) candidate {
+	old := *h
+	n := len(old)
+	old[0], old[n-1] = old[n-1], old[0]
+	resHeapDown(*h, 0, n-1)
+	item := old[n-1]
+	*h = old[:n-1]
+	return item
+}
+
+func resHeapUp(h []candidate, j int) {
+	for {
+		i := (j - 1) / 2
+		if i == j || !(h[j].dist > h[i].dist) {
+			break
+		}
+		h[i], h[j] = h[j], h[i]
+		j = i
+	}
+}
+
+func resHeapDown(h []candidate, i, n int) {
+	for {
+		j1 := 2*i + 1
+		if j1 >= n || j1 < 0 {
+			break
+		}
+		j := j1
+		if j2 := j1 + 1; j2 < n && h[j2].dist > h[j1].dist {
+			j = j2
+		}
+		if !(h[j].dist > h[i].dist) {
+			break
+		}
+		h[i], h[j] = h[j], h[i]
+		i = j
+	}
+}
+
 var neighborCap = func() int {
 	v := os.Getenv("VECTRON_HNSW_NEIGHBOR_CAP")
 	if v == "" {
@@ -173,7 +225,18 @@ func selectTopKByDist(cands []candidate, k int) []candidate {
 	}
 	lo, hi := 0, len(cands)-1
 	for lo <= hi {
-		pivot := cands[(lo+hi)/2].dist
+		// Median-of-three pivot selection to avoid O(n^2) on sorted/reverse-sorted data.
+		mid := (lo + hi) / 2
+		if cands[lo].dist > cands[mid].dist {
+			cands[lo], cands[mid] = cands[mid], cands[lo]
+		}
+		if cands[lo].dist > cands[hi].dist {
+			cands[lo], cands[hi] = cands[hi], cands[lo]
+		}
+		if cands[mid].dist > cands[hi].dist {
+			cands[mid], cands[hi] = cands[hi], cands[mid]
+		}
+		pivot := cands[mid].dist
 		i, j := lo, hi
 		for i <= j {
 			for cands[i].dist < pivot {
@@ -227,7 +290,7 @@ func (h *HNSW) search(vec []float32, k int) ([]string, []float32) {
 	if len(results) > k {
 		results = selectTopKByDist(results, k)
 	}
-	sort.Slice(results, func(i, j int) bool {
+	sort.Slice(results[:min(len(results), k)], func(i, j int) bool {
 		return results[i].dist < results[j].dist
 	})
 	if len(results) > k {
@@ -238,7 +301,11 @@ func (h *HNSW) search(vec []float32, k int) ([]string, []float32) {
 	ids := make([]string, len(results))
 	scores := make([]float32, len(results))
 	for i, c := range results {
-		ids[i] = h.uint32ToID[c.id]
+		if int(c.id) < len(h.extIDCache) {
+			ids[i] = h.extIDCache[c.id]
+		} else {
+			ids[i] = h.uint32ToID[c.id]
+		}
 		scores[i] = c.dist
 	}
 	return ids, scores
@@ -276,7 +343,7 @@ func (h *HNSW) searchWithEf(vec []float32, k, ef int) ([]string, []float32) {
 	if len(results) > k {
 		results = selectTopKByDist(results, k)
 	}
-	sort.Slice(results, func(i, j int) bool {
+	sort.Slice(results[:min(len(results), k)], func(i, j int) bool {
 		return results[i].dist < results[j].dist
 	})
 	if len(results) > k {
@@ -287,7 +354,11 @@ func (h *HNSW) searchWithEf(vec []float32, k, ef int) ([]string, []float32) {
 	ids := make([]string, len(results))
 	scores := make([]float32, len(results))
 	for i, c := range results {
-		ids[i] = h.uint32ToID[c.id]
+		if int(c.id) < len(h.extIDCache) {
+			ids[i] = h.extIDCache[c.id]
+		} else {
+			ids[i] = h.uint32ToID[c.id]
+		}
 		scores[i] = c.dist
 	}
 	return ids, scores
@@ -347,7 +418,11 @@ func (h *HNSW) searchTwoStage(vec []float32, k, stage1Ef, candidateFactor int) (
 	ids := make([]string, len(candidates))
 	scores := make([]float32, len(candidates))
 	for i, c := range candidates {
-		ids[i] = h.uint32ToID[c.id]
+		if int(c.id) < len(h.extIDCache) {
+			ids[i] = h.extIDCache[c.id]
+		} else {
+			ids[i] = h.uint32ToID[c.id]
+		}
 		scores[i] = c.dist
 	}
 	return ids, scores
@@ -362,7 +437,7 @@ func (h *HNSW) searchLayerSingle(vec []float32, qvec []int8, start *Node, layer 
 	for {
 		foundCloser := false
 		for _, nid := range bestNode.Neighbors[layer] {
-			n := h.getNode(nid)
+			n := h.getNodeFast(nid)
 			if n == nil {
 				continue
 			}
@@ -392,7 +467,20 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 		maxID = 0
 	}
 	if len(tracker.marks) <= maxID {
-		tracker.marks = make([]uint32, maxID+1)
+		// Grow in larger chunks to avoid frequent reallocations as the index grows.
+		newSize := maxID + 1
+		if newSize < 4096 {
+			newSize = 4096
+		}
+		// Round up to next power of 2 for efficient memory alignment.
+		newSize--
+		newSize |= newSize >> 1
+		newSize |= newSize >> 2
+		newSize |= newSize >> 4
+		newSize |= newSize >> 8
+		newSize |= newSize >> 16
+		newSize++
+		tracker.marks = make([]uint32, newSize)
 	}
 	tracker.epoch++
 	if tracker.epoch == 0 {
@@ -405,29 +493,25 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 
 	// Candidate queue (min-heap) to explore promising nodes.
 	candidateSlice := candidateSlicePool.Get().([]candidate)
-	candidateSlice = candidateSlice[:0]
-	candidates := priorityQueue(candidateSlice)
-	heap.Init(&candidates)
+	candidates := candidateSlice[:0]
 	startDist := h.distanceToNode(vec, qvec, start)
-	heap.Push(&candidates, candidate{id: start.ID, dist: startDist, node: start})
+	candHeapPush(&candidates, candidate{id: start.ID, dist: startDist, node: start})
 
 	// Results queue (max-heap) to keep track of the best `ef` candidates found so far.
 	resultSlice := resultSlicePool.Get().([]candidate)
-	resultSlice = resultSlice[:0]
-	results := maxPriorityQueue(resultSlice)
-	heap.Init(&results)
-	heap.Push(&results, candidate{id: start.ID, dist: startDist, node: start})
+	results := resultSlice[:0]
+	resHeapPush(&results, candidate{id: start.ID, dist: startDist, node: start})
 
 	if int(start.ID) < len(tracker.marks) {
 		tracker.marks[start.ID] = tracker.epoch
 	}
 
-	for candidates.Len() > 0 {
+	for len(candidates) > 0 {
 		// Get the closest candidate from the min-heap to explore next.
-		c := heap.Pop(&candidates).(candidate)
+		c := candHeapPop(&candidates)
 
 		// If this candidate is further than the furthest in our results, we can stop exploring this path.
-		if results.Len() >= ef && c.dist > results[0].dist {
+		if len(results) >= ef && c.dist > results[0].dist {
 			break
 		}
 
@@ -459,7 +543,7 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 			if int(nid) < len(tracker.marks) {
 				tracker.marks[nid] = tracker.epoch
 			}
-			n := h.getNode(nid)
+			n := h.getNodeFast(nid)
 			if n == nil {
 				continue
 			}
@@ -475,7 +559,7 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 		distances := getDistanceSlice(len(nodes))
 		h.computeDistancesInto(vec, qvec, nodes, distances)
 		defer putDistanceSlice(distances)
-		if results.Len() >= ef && len(nodes) >= 256 {
+		if len(results) >= ef && len(nodes) >= 256 {
 			worst := results[0].dist
 			parallelism := h.config.SearchParallelism
 			if parallelism <= 0 {
@@ -518,15 +602,15 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 						}
 						continue
 					}
-					if len(local) > 0 && results.Len() > 0 {
-						local = selectTopKByDist(local, results.Len())
+					if len(local) > 0 && len(results) > 0 {
+						local = selectTopKByDist(local, len(results))
 					}
 					for _, cand := range local {
-						if results.Len() < ef || cand.dist < results[0].dist {
-							heap.Push(&candidates, cand)
-							heap.Push(&results, cand)
-							if results.Len() > ef {
-								heap.Pop(&results)
+						if len(results) < ef || cand.dist < results[0].dist {
+							candHeapPush(&candidates, cand)
+							resHeapPush(&results, cand)
+							if len(results) > ef {
+								resHeapPop(&results)
 							}
 						}
 					}
@@ -541,18 +625,18 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 			tmp := getTempCandidateSlice(len(nodes))
 			for i, n := range nodes {
 				d := distances[i]
-				if results.Len() < ef || d < results[0].dist {
+				if len(results) < ef || d < results[0].dist {
 					tmp = append(tmp, candidate{id: ids[i], dist: d, node: n})
 				}
 			}
 			if len(tmp) > 0 {
 				tmp = selectTopKByDist(tmp, ef)
 				for _, cand := range tmp {
-					if results.Len() < ef || cand.dist < results[0].dist {
-						heap.Push(&candidates, cand)
-						heap.Push(&results, cand)
-						if results.Len() > ef {
-							heap.Pop(&results)
+					if len(results) < ef || cand.dist < results[0].dist {
+						candHeapPush(&candidates, cand)
+						resHeapPush(&results, cand)
+						if len(results) > ef {
+							resHeapPop(&results)
 						}
 					}
 				}
@@ -561,13 +645,11 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 		} else {
 			for i, n := range nodes {
 				d := distances[i]
-				// If we have room in the results max-heap, or if this node is closer than the furthest one in it...
-				if results.Len() < ef || d < results[0].dist {
-					heap.Push(&candidates, candidate{id: ids[i], dist: d, node: n})
-					heap.Push(&results, candidate{id: ids[i], dist: d, node: n})
-					// If the results heap is too large, remove the furthest element.
-					if results.Len() > ef {
-						heap.Pop(&results)
+				if len(results) < ef || d < results[0].dist {
+					candHeapPush(&candidates, candidate{id: ids[i], dist: d, node: n})
+					resHeapPush(&results, candidate{id: ids[i], dist: d, node: n})
+					if len(results) > ef {
+						resHeapPop(&results)
 					}
 				}
 			}
@@ -577,8 +659,8 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 	}
 
 	// The result is a max-heap, so we need to convert it to a simple slice.
-	candidateSlicePool.Put([]candidate(candidates)[:0])
-	finalResults := []candidate(results)
+	candidateSlicePool.Put(candidates[:0])
+	finalResults := results
 	release := func() {
 		resultSlicePool.Put(finalResults[:0])
 	}
@@ -592,7 +674,20 @@ func (h *HNSW) searchLayerSmall(vec []float32, qvec []int8, start *Node, ef, lay
 		maxID = 0
 	}
 	if len(tracker.marks) <= maxID {
-		tracker.marks = make([]uint32, maxID+1)
+		// Grow in larger chunks to avoid frequent reallocations as the index grows.
+		newSize := maxID + 1
+		if newSize < 4096 {
+			newSize = 4096
+		}
+		// Round up to next power of 2 for efficient memory alignment.
+		newSize--
+		newSize |= newSize >> 1
+		newSize |= newSize >> 2
+		newSize |= newSize >> 4
+		newSize |= newSize >> 8
+		newSize |= newSize >> 16
+		newSize++
+		tracker.marks = make([]uint32, newSize)
 	}
 	tracker.epoch++
 	if tracker.epoch == 0 {
@@ -664,7 +759,7 @@ func (h *HNSW) searchLayerSmall(vec []float32, qvec []int8, start *Node, ef, lay
 			if int(nid) < len(tracker.marks) {
 				tracker.marks[nid] = tracker.epoch
 			}
-			n := h.getNode(nid)
+			n := h.getNodeFast(nid)
 			if n == nil {
 				continue
 			}

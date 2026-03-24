@@ -194,6 +194,7 @@ func (h *HNSW) addNoLock(id string, vec []float32) error {
 		return err
 	}
 	h.ensureNodeCapacity(internalID)
+	h.extIDCache[internalID] = id
 	if h.nodes[internalID] == nil {
 		h.nodeCount++
 	}
