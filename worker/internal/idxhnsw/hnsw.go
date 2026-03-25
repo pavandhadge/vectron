@@ -95,6 +95,10 @@ type HNSW struct {
 	mmapStore       *vectorMmap
 	pruneMu         sync.Mutex
 	pruneCandidates map[uint32]struct{}
+	isCosine        bool // cached: config.Distance == "cosine"
+	isNormalized    bool // cached: config.NormalizeVectors && cosine
+	useNorms        bool // cached: config.EnableNorms && cosine
+	useQuantize     bool // cached: config.QuantizeVectors
 
 	// Deletion-related fields
 	deletedCount int64
@@ -148,6 +152,10 @@ func NewHNSW(store NodeStore, dim int, config HNSWConfig) *HNSW {
 		extIDCache:      make([]string, 1),
 		nextID:          1, // Start internal IDs from 1.
 		pruneCandidates: make(map[uint32]struct{}),
+		isCosine:        config.Distance == "cosine",
+		isNormalized:    config.NormalizeVectors && config.Distance == "cosine",
+		useNorms:        config.EnableNorms && config.Distance == "cosine",
+		useQuantize:     config.QuantizeVectors,
 	}
 	// Start the background cleanup process for marked-for-deletion nodes.
 	h.StartCleanup(DefaultCleanupConfig)

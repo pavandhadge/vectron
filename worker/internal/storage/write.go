@@ -12,37 +12,62 @@ import (
 	"fmt"
 	"math"
 	"strconv"
-	"sync"
 	"sync/atomic"
 	"time"
 )
 
-// vectorKeyBufPool reuses byte buffers for vector key construction to avoid
-// allocations on the hot write path.
-var vectorKeyBufPool = sync.Pool{
-	New: func() interface{} {
-		return make([]byte, 0, 128)
-	},
-}
-
 // vectorKey creates the database key for a vector from its string ID.
-// Uses a pooled buffer to avoid allocation per call.
 func vectorKey(id string) []byte {
-	buf := vectorKeyBufPool.Get().([]byte)
-	buf = buf[:0]
-	buf = append(buf, 'v', '_')
-	buf = append(buf, id...)
-	result := make([]byte, len(buf))
-	copy(result, buf)
-	vectorKeyBufPool.Put(buf)
-	return result
+	buf := make([]byte, 2+len(id))
+	buf[0] = 'v'
+	buf[1] = '_'
+	copy(buf[2:], id)
+	return buf
 }
 
-// encodeBufPool reuses buffers for vector encoding to reduce GC pressure.
-var encodeBufPool = sync.Pool{
-	New: func() interface{} {
-		return make([]byte, 0, 8192)
-	},
+// walKey builds a WAL key without fmt.Sprintf to avoid allocations.
+func walKey(ts int64, id string) []byte {
+	prefix := hnswWALPrefix
+	tsStr := strconv.FormatInt(ts, 10)
+	buf := make([]byte, len(prefix)+len(tsStr)+1+len(id))
+	copy(buf, prefix)
+	off := len(prefix)
+	copy(buf[off:], tsStr)
+	off += len(tsStr)
+	buf[off] = '_'
+	copy(buf[off+1:], id)
+	return buf
+}
+
+// walKeySuffix builds a WAL key with a suffix (e.g., "delete") without fmt.Sprintf.
+func walKeySuffix(ts int64, id, suffix string) []byte {
+	prefix := hnswWALPrefix
+	tsStr := strconv.FormatInt(ts, 10)
+	buf := make([]byte, len(prefix)+len(tsStr)+1+len(id)+1+len(suffix))
+	copy(buf, prefix)
+	off := len(prefix)
+	copy(buf[off:], tsStr)
+	off += len(tsStr)
+	buf[off] = '_'
+	off++
+	copy(buf[off:], id)
+	off += len(id)
+	buf[off] = '_'
+	copy(buf[off+1:], suffix)
+	return buf
+}
+
+// walKeyBatch builds a batch WAL key without fmt.Sprintf.
+func walKeyBatch(baseTS int64) []byte {
+	prefix := hnswWALPrefix
+	tsStr := strconv.FormatInt(baseTS, 10)
+	buf := make([]byte, len(prefix)+6+len(tsStr)) // "batch_" = 6 chars
+	copy(buf, prefix)
+	off := len(prefix)
+	copy(buf[off:], "batch_")
+	off += 6
+	copy(buf[off:], tsStr)
+	return buf
 }
 
 // Put inserts or updates a single key-value pair in the database.
@@ -141,8 +166,8 @@ func (r *PebbleDB) StoreVector(id string, vector []float32, metadata []byte) err
 	ts := time.Now().UnixNano()
 	// If the WAL is enabled, also add a WAL entry to the batch.
 	if r.opts.HNSWConfig.WALEnabled {
-		walKey := []byte(fmt.Sprintf("%s%d_%s", hnswWALPrefix, ts, id))
-		if err := batch.Set(walKey, val, nil); err != nil {
+		wk := walKey(ts, id)
+		if err := batch.Set(wk, val, nil); err != nil {
 			return fmt.Errorf("failed to set WAL in batch: %w", err)
 		}
 	}
@@ -238,8 +263,8 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 
 		ts := baseTS + int64(i)
 		if r.opts.HNSWConfig.WALEnabled && !walBatchEnabled {
-			walKey := []byte(fmt.Sprintf("%s%d_%s", hnswWALPrefix, ts, v.ID))
-			if err := batch.Set(walKey, val, nil); err != nil {
+			wk := walKey(ts, v.ID)
+			if err := batch.Set(wk, val, nil); err != nil {
 				return fmt.Errorf("failed to set WAL in batch: %w", err)
 			}
 		}
@@ -256,8 +281,8 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 		if walBatchBuf == nil {
 			return fmt.Errorf("failed to encode WAL batch")
 		}
-		walKey := []byte(fmt.Sprintf("%s%s%d", hnswWALPrefix, "batch_", baseTS))
-		if err := batch.Set(walKey, walBatchBuf, nil); err != nil {
+		wk := walKeyBatch(baseTS)
+		if err := batch.Set(wk, walBatchBuf, nil); err != nil {
 			return fmt.Errorf("failed to set WAL batch: %w", err)
 		}
 		// Updates already recorded above when walHub is enabled.
@@ -344,8 +369,8 @@ func (r *PebbleDB) DeleteVector(id string) error {
 	var walUpdates []WALUpdate
 	ts := time.Now().UnixNano()
 	if r.opts.HNSWConfig.WALEnabled {
-		walKey := []byte(fmt.Sprintf("%s%d_%s_delete", hnswWALPrefix, ts, id))
-		if err := batch.Set(walKey, nil, nil); err != nil {
+		wk := walKeySuffix(ts, id, "delete")
+		if err := batch.Set(wk, nil, nil); err != nil {
 			return fmt.Errorf("failed to set WAL delete marker in batch: %w", err)
 		}
 	}
@@ -394,6 +419,7 @@ func (r *PebbleDB) hotAdd(id string, vector []float32) {
 	}
 	for len(r.hotQueue) > maxSize {
 		oldest := r.hotQueue[0]
+		r.hotQueue[0] = "" // clear reference for GC
 		r.hotQueue = r.hotQueue[1:]
 		delete(r.hotSet, oldest)
 		_ = r.hnswHot.Delete(oldest)
@@ -528,13 +554,7 @@ func encodeVectorWithMeta(vector []float32, metadata []byte, compress bool) ([]b
 	}
 	if !compress {
 		totalLen := 4 + vecLen*4 + len(metadata)
-		buf := encodeBufPool.Get().([]byte)
-		if cap(buf) < totalLen {
-			encodeBufPool.Put(buf)
-			buf = make([]byte, totalLen)
-		} else {
-			buf = buf[:totalLen]
-		}
+		buf := make([]byte, totalLen)
 		binary.LittleEndian.PutUint32(buf[:4], uint32(vecLen))
 		offset := 4
 		for _, v := range vector {
@@ -544,10 +564,7 @@ func encodeVectorWithMeta(vector []float32, metadata []byte, compress bool) ([]b
 		if len(metadata) > 0 {
 			copy(buf[offset:], metadata)
 		}
-		result := make([]byte, len(buf))
-		copy(result, buf)
-		encodeBufPool.Put(buf)
-		return result, nil
+		return buf, nil
 	}
 
 	if vecLen > int(^vectorCompressionFlag) {
@@ -567,13 +584,7 @@ func encodeVectorWithMeta(vector []float32, metadata []byte, compress bool) ([]b
 	invScale := 127.0 / float64(scale)
 
 	totalLen := 4 + 4 + vecLen + len(metadata)
-	buf := encodeBufPool.Get().([]byte)
-	if cap(buf) < totalLen {
-		encodeBufPool.Put(buf)
-		buf = make([]byte, totalLen)
-	} else {
-		buf = buf[:totalLen]
-	}
+	buf := make([]byte, totalLen)
 	binary.LittleEndian.PutUint32(buf[:4], uint32(vecLen)|vectorCompressionFlag)
 	binary.LittleEndian.PutUint32(buf[4:8], math.Float32bits(scale))
 	for i, v := range vector {
@@ -588,10 +599,7 @@ func encodeVectorWithMeta(vector []float32, metadata []byte, compress bool) ([]b
 	if len(metadata) > 0 {
 		copy(buf[8+vecLen:], metadata)
 	}
-	result := make([]byte, len(buf))
-	copy(result, buf)
-	encodeBufPool.Put(buf)
-	return result, nil
+	return buf, nil
 }
 
 func encodeWALBatchEncoded(ids []string, values [][]byte) []byte {

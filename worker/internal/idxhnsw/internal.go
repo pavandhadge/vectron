@@ -28,17 +28,17 @@ type Node struct {
 
 // distance calculates the distance between two vectors using the configured metric.
 func (h *HNSW) distance(a, b []float32) float32 {
-	if h.config.Distance == "cosine" {
+	if h.isCosine {
 		return CosineDistance(a, b)
 	}
 	return EuclideanDistance(a, b)
 }
 
 func (h *HNSW) distanceWithNode(a []float32, b []float32, normB float32) float32 {
-	if h.config.Distance == "cosine" && h.config.NormalizeVectors {
+	if h.isNormalized {
 		return 1 - dotProductSIMD(a, b)
 	}
-	if h.config.Distance != "cosine" || !h.config.EnableNorms {
+	if !h.isCosine || !h.useNorms {
 		return h.distance(a, b)
 	}
 	var dot, normA float32
@@ -76,7 +76,7 @@ func (h *HNSW) distanceExact(query []float32, node *Node) float32 {
 	if node.QVec != nil {
 		vec := dequantizeVector(node.QVec)
 		norm := float32(0)
-		if h.config.Distance == "cosine" && h.config.EnableNorms {
+		if h.isCosine && h.useNorms {
 			norm = VectorNorm(vec)
 		}
 		return h.distanceWithNode(query, vec, norm)
@@ -85,7 +85,7 @@ func (h *HNSW) distanceExact(query []float32, node *Node) float32 {
 }
 
 func (h *HNSW) maybeQuantizeQuery(vec []float32) []int8 {
-	if !h.config.QuantizeVectors {
+	if !h.useQuantize {
 		return nil
 	}
 	return quantizeVector(vec)
@@ -204,7 +204,7 @@ func dequantizeVector(q []int8) []float32 {
 }
 
 func (h *HNSW) normalizedQuery(vec []float32) ([]float32, func()) {
-	if h.config.Distance != "cosine" || !h.config.NormalizeVectors {
+	if !h.isCosine || !h.config.NormalizeVectors {
 		return vec, func() {}
 	}
 	pooled := getVectorFromPool()
@@ -222,7 +222,7 @@ func (h *HNSW) normalizedQuery(vec []float32) ([]float32, func()) {
 }
 
 func (h *HNSW) quantizedQuery(vec []float32) ([]int8, func()) {
-	if !h.config.QuantizeVectors {
+	if !h.useQuantize {
 		return nil, func() {}
 	}
 	pooled := getInt8FromPool()
@@ -357,46 +357,46 @@ func encodeNodeBinary(n *Node) []byte {
 	}
 
 	buf := make([]byte, 0, size)
-	tmp := make([]byte, 4)
+	var tmp [4]byte
 
-	binary.LittleEndian.PutUint32(tmp, n.ID)
-	buf = append(buf, tmp...)
+	binary.LittleEndian.PutUint32(tmp[:], n.ID)
+	buf = append(buf, tmp[:]...)
 
-	binary.LittleEndian.PutUint32(tmp, uint32(n.Layer))
-	buf = append(buf, tmp...)
+	binary.LittleEndian.PutUint32(tmp[:], uint32(n.Layer))
+	buf = append(buf, tmp[:]...)
 
 	buf = append(buf, vecType)
 
 	switch vecType {
 	case 1:
-		binary.LittleEndian.PutUint32(tmp, uint32(len(n.Vec)))
-		buf = append(buf, tmp...)
+		binary.LittleEndian.PutUint32(tmp[:], uint32(len(n.Vec)))
+		buf = append(buf, tmp[:]...)
 		for _, v := range n.Vec {
-			binary.LittleEndian.PutUint32(tmp, math.Float32bits(v))
-			buf = append(buf, tmp...)
+			binary.LittleEndian.PutUint32(tmp[:], math.Float32bits(v))
+			buf = append(buf, tmp[:]...)
 		}
 	case 2:
-		binary.LittleEndian.PutUint32(tmp, uint32(len(n.QVec)))
-		buf = append(buf, tmp...)
+		binary.LittleEndian.PutUint32(tmp[:], uint32(len(n.QVec)))
+		buf = append(buf, tmp[:]...)
 		for _, v := range n.QVec {
 			buf = append(buf, byte(v))
 		}
 	default:
-		binary.LittleEndian.PutUint32(tmp, 0)
-		buf = append(buf, tmp...)
+		binary.LittleEndian.PutUint32(tmp[:], 0)
+		buf = append(buf, tmp[:]...)
 	}
 
-	binary.LittleEndian.PutUint32(tmp, math.Float32bits(n.Norm))
-	buf = append(buf, tmp...)
+	binary.LittleEndian.PutUint32(tmp[:], math.Float32bits(n.Norm))
+	buf = append(buf, tmp[:]...)
 
-	binary.LittleEndian.PutUint32(tmp, uint32(len(n.Neighbors)))
-	buf = append(buf, tmp...)
+	binary.LittleEndian.PutUint32(tmp[:], uint32(len(n.Neighbors)))
+	buf = append(buf, tmp[:]...)
 	for _, layer := range n.Neighbors {
-		binary.LittleEndian.PutUint32(tmp, uint32(len(layer)))
-		buf = append(buf, tmp...)
+		binary.LittleEndian.PutUint32(tmp[:], uint32(len(layer)))
+		buf = append(buf, tmp[:]...)
 		for _, id := range layer {
-			binary.LittleEndian.PutUint32(tmp, id)
-			buf = append(buf, tmp...)
+			binary.LittleEndian.PutUint32(tmp[:], id)
+			buf = append(buf, tmp[:]...)
 		}
 	}
 
@@ -480,9 +480,9 @@ type CleanupConfig struct {
 
 // DefaultCleanupConfig provides sensible defaults for the cleanup process.
 var DefaultCleanupConfig = CleanupConfig{
-	Interval:   30 * time.Minute,
-	MaxDeleted: 10_000,
-	BatchSize:  5000,
+	Interval:   2 * time.Hour,
+	MaxDeleted: 50_000,
+	BatchSize:  10_000,
 	Enabled:    true,
 }
 
@@ -585,13 +585,14 @@ func (h *HNSW) performCleanup(batchSize int) {
 
 // filterDead creates a new slice containing only the live neighbors.
 func filterDead(neighbors []uint32, h *HNSW) []uint32 {
-	liveNeighbors := make([]uint32, 0, len(neighbors))
+	w := 0
 	for _, id := range neighbors {
 		if h.getNode(id) != nil { // getNode returns nil for dead nodes.
-			liveNeighbors = append(liveNeighbors, id)
+			neighbors[w] = id
+			w++
 		}
 	}
-	return liveNeighbors
+	return neighbors[:w]
 }
 
 // maybeUpdateEntryPoint checks if the current entry point was deleted and finds a new one if necessary.

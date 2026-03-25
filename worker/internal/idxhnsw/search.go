@@ -32,6 +32,10 @@ var visitedPool = sync.Pool{
 	},
 }
 
+// Max visit tracker marks size to prevent unbounded memory growth.
+// If a tracker's marks array exceeds this, it won't be returned to the pool.
+var maxVisitTrackerMarksSize = 1 << 20 // 1M entries = 4MB per tracker
+
 var candidateSlicePool = sync.Pool{
 	New: func() interface{} {
 		return make([]candidate, 0, 256)
@@ -90,6 +94,53 @@ var neighborIDSlicePool = sync.Pool{
 }
 
 const smallEfThreshold = 32
+const maxPoolSliceCap = 4096 // Cap pool slices to prevent unbounded memory growth
+
+// putCandidateSlice returns a candidate slice to the pool, nil-ing node pointers
+// to avoid preventing GC of deleted nodes. Oversized slices are discarded.
+func putCandidateSlice(pool *sync.Pool, s []candidate) {
+	// Nil out node pointers so GC can collect nodes
+	for i := range s {
+		s[i].node = nil
+	}
+	// Also nil out entries beyond len but within cap (from previous uses)
+	extra := cap(s) - len(s)
+	if extra > 0 {
+		full := s[:cap(s)]
+		for i := len(s); i < len(s)+extra && i < len(s)+64; i++ {
+			full[i].node = nil
+		}
+	}
+	if cap(s) > maxPoolSliceCap {
+		return // Discard oversized slices
+	}
+	pool.Put(s[:0])
+}
+
+// putVisitTracker returns a visit tracker to the pool, discarding oversized ones.
+func putVisitTracker(t *visitTracker) {
+	if cap(t.marks) > maxVisitTrackerMarksSize {
+		return // Discard oversized tracker, let GC collect it
+	}
+	visitedPool.Put(t)
+}
+func putUint32Slice(pool *sync.Pool, s []uint32) {
+	if cap(s) > maxPoolSliceCap {
+		return
+	}
+	pool.Put(s[:0])
+}
+
+// putNodeSlice returns a node slice to the pool, nil-ing pointers and capping.
+func putNodeSlice(pool *sync.Pool, s []*Node) {
+	for i := range s {
+		s[i] = nil
+	}
+	if cap(s) > maxPoolSliceCap {
+		return
+	}
+	pool.Put(s[:0])
+}
 
 // Manual heap operations for min-heap (candidate queue).
 // These avoid interface{} boxing from container/heap, giving ~2-3x speedup
@@ -489,7 +540,7 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 		}
 		tracker.epoch = 1
 	}
-	defer visitedPool.Put(tracker)
+	defer putVisitTracker(tracker)
 
 	// Candidate queue (min-heap) to explore promising nodes.
 	candidateSlice := candidateSlicePool.Get().([]candidate)
@@ -551,14 +602,13 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 			ids = append(ids, nid)
 		}
 		if len(nodes) == 0 {
-			neighborNodeSlicePool.Put(nodes[:0])
-			neighborIDSlicePool.Put(ids[:0])
+			putNodeSlice(&neighborNodeSlicePool, nodes)
+			putUint32Slice(&neighborIDSlicePool, ids)
 			continue
 		}
 
 		distances := getDistanceSlice(len(nodes))
 		h.computeDistancesInto(vec, qvec, nodes, distances)
-		defer putDistanceSlice(distances)
 		if len(results) >= ef && len(nodes) >= 256 {
 			worst := results[0].dist
 			parallelism := h.config.SearchParallelism
@@ -616,8 +666,9 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 					}
 					putTempCandidateSlice(local)
 				}
-				neighborNodeSlicePool.Put(nodes[:0])
-				neighborIDSlicePool.Put(ids[:0])
+				putNodeSlice(&neighborNodeSlicePool, nodes)
+				putUint32Slice(&neighborIDSlicePool, ids)
+				putDistanceSlice(distances)
 				continue
 			}
 		}
@@ -654,15 +705,16 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 				}
 			}
 		}
-		neighborNodeSlicePool.Put(nodes[:0])
-		neighborIDSlicePool.Put(ids[:0])
+		putDistanceSlice(distances)
+		putNodeSlice(&neighborNodeSlicePool, nodes)
+		putUint32Slice(&neighborIDSlicePool, ids)
 	}
 
 	// The result is a max-heap, so we need to convert it to a simple slice.
-	candidateSlicePool.Put(candidates[:0])
+	putCandidateSlice(&candidateSlicePool, candidates)
 	finalResults := results
 	release := func() {
-		resultSlicePool.Put(finalResults[:0])
+		putCandidateSlice(&resultSlicePool, finalResults)
 	}
 	return finalResults, release
 }
@@ -696,7 +748,7 @@ func (h *HNSW) searchLayerSmall(vec []float32, qvec []int8, start *Node, ef, lay
 		}
 		tracker.epoch = 1
 	}
-	defer visitedPool.Put(tracker)
+	defer putVisitTracker(tracker)
 
 	candidateSlice := candidateSlicePool.Get().([]candidate)
 	candidateSlice = candidateSlice[:0]
@@ -767,8 +819,8 @@ func (h *HNSW) searchLayerSmall(vec []float32, qvec []int8, start *Node, ef, lay
 			ids = append(ids, nid)
 		}
 		if len(nodes) == 0 {
-			neighborNodeSlicePool.Put(nodes[:0])
-			neighborIDSlicePool.Put(ids[:0])
+			putNodeSlice(&neighborNodeSlicePool, nodes)
+			putUint32Slice(&neighborIDSlicePool, ids)
 			continue
 		}
 
@@ -806,14 +858,14 @@ func (h *HNSW) searchLayerSmall(vec []float32, qvec []int8, start *Node, ef, lay
 			}
 		}
 		putDistanceSlice(distances)
-		neighborNodeSlicePool.Put(nodes[:0])
-		neighborIDSlicePool.Put(ids[:0])
+		putNodeSlice(&neighborNodeSlicePool, nodes)
+		putUint32Slice(&neighborIDSlicePool, ids)
 	}
 
-	candidateSlicePool.Put(candidateSlice[:0])
+	putCandidateSlice(&candidateSlicePool, candidateSlice)
 	finalResults := results
 	release := func() {
-		resultSlicePool.Put(finalResults[:0])
+		putCandidateSlice(&resultSlicePool, finalResults)
 	}
 	return finalResults, release
 }

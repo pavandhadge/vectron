@@ -1020,7 +1020,7 @@ func (r *PebbleDB) Restore(backupPath string) error {
 		return fmt.Errorf("failed to reopen db: %w", err)
 	}
 
-	r.writeOpts = pebble.Sync
+	r.writeOpts = pebble.NoSync
 	r.stop = make(chan struct{})
 
 	// Reload the HNSW index
