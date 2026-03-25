@@ -102,15 +102,15 @@ func (r *PebbleDB) Init(path string, opts *Options) error {
 	if opts.HNSWConfig.WALEnabled {
 		baseInterval := opts.HNSWConfig.SnapshotInterval
 		if baseInterval <= 0 {
-			baseInterval = 5 * time.Minute
+			baseInterval = 30 * time.Second // Reduced from 5min for faster WAL cleanup
 		}
 		maxInterval := opts.HNSWConfig.SnapshotMaxInterval
 		if maxInterval <= 0 {
-			maxInterval = 30 * time.Minute
+			maxInterval = 10 * time.Minute // Reduced from 30min
 		}
 		writeThreshold := opts.HNSWConfig.SnapshotWriteThreshold
 		if writeThreshold == 0 {
-			writeThreshold = 10000
+			writeThreshold = 1000 // Reduced from 10000 for more frequent WAL cleanup
 		}
 		r.hnswSnapshotBaseInterval = baseInterval
 		r.hnswSnapshotMaxInterval = maxInterval
@@ -194,6 +194,7 @@ func (r *PebbleDB) loadHNSW(opts *Options) error {
 		SearchParallelism: opts.HNSWConfig.SearchParallelism,
 		PruneEnabled:      opts.HNSWConfig.PruneEnabled,
 		PruneMaxNodes:     opts.HNSWConfig.PruneMaxNodes,
+		SkipPersistNode:   opts.HNSWConfig.WALEnabled,
 	})
 
 	if opts.HNSWConfig.HotIndexEnabled {
@@ -246,6 +247,7 @@ func (r *PebbleDB) loadHNSW(opts *Options) error {
 			SearchParallelism: opts.HNSWConfig.SearchParallelism,
 			PruneEnabled:      opts.HNSWConfig.PruneEnabled,
 			PruneMaxNodes:     opts.HNSWConfig.PruneMaxNodes,
+			SkipPersistNode:   opts.HNSWConfig.WALEnabled,
 		})
 		if opts.HNSWConfig.WALEnabled {
 			if err := r.replayWALFrom(0); err != nil {
@@ -424,6 +426,7 @@ func (r *PebbleDB) rebuildHNSWFromDB(opts *Options) error {
 		SearchParallelism: opts.HNSWConfig.SearchParallelism,
 		PruneEnabled:      opts.HNSWConfig.PruneEnabled,
 		PruneMaxNodes:     opts.HNSWConfig.PruneMaxNodes,
+		SkipPersistNode:   opts.HNSWConfig.WALEnabled,
 	})
 	if err := r.Iterate([]byte("v_"), func(key, value []byte) bool {
 		if len(key) < 3 || key[0] != 'v' || key[1] != '_' {
@@ -871,9 +874,9 @@ func (r *PebbleDB) persistenceLoop(interval time.Duration) {
 			} else if timeSinceSnapshot >= maxInterval {
 				shouldSave = true
 			} else if writes >= writeThreshold {
-				shouldSave = false
-			} else {
-				shouldSave = true
+				shouldSave = true // Enough writes accumulated → save and clean WAL
+			} else if !lastSnapshot.IsZero() && timeSinceSnapshot >= baseInterval {
+				shouldSave = true // Base interval elapsed → save
 			}
 
 			if shouldSave {

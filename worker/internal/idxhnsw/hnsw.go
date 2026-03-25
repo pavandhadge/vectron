@@ -79,6 +79,7 @@ type HNSWConfig struct {
 	HotIndex          bool   // If true, this index is a hot in-memory tier.
 	PruneEnabled      bool   // If true, periodically prune redundant edges.
 	PruneMaxNodes     int    // Max nodes to prune per maintenance tick.
+	SkipPersistNode   bool   // If true, skip per-node persistence (redundant when WAL handles recovery).
 }
 
 // HNSW represents the HNSW index.

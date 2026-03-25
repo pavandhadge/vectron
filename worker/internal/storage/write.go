@@ -301,6 +301,16 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 	}
 
 	r.recordHNSWWrite(uint64(len(added)))
+
+	// Trigger HNSW snapshot + PebbleDB flush after significant batch writes
+	// to clean up WAL entries and prevent unbounded WAL growth.
+	if len(added) >= 50 && r.opts != nil && r.opts.HNSWConfig.WALEnabled {
+		go func() {
+			_ = r.saveHNSW()
+			_ = r.Flush()
+		}()
+	}
+
 	return nil
 }
 

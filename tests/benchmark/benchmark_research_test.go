@@ -305,8 +305,13 @@ func buildBenchmarkEnv(t *testing.T) []string {
 	if err != nil {
 		return os.Environ()
 	}
-	envPath := filepath.Join(root, ".env")
-	extra := loadEnvFile(envPath)
+	// Load per-service env files (worker.env has storage tuning).
+	extra := make(map[string]string)
+	for _, name := range []string{".env", "env/worker.env", "env/apigateway.env"} {
+		for k, v := range loadEnvFile(filepath.Join(root, name)) {
+			extra[k] = v
+		}
+	}
 	if len(extra) == 0 {
 		return os.Environ()
 	}

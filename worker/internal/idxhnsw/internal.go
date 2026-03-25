@@ -405,7 +405,7 @@ func encodeNodeBinary(n *Node) []byte {
 
 // persistNode serializes a node and saves it to the underlying key-value store.
 func (h *HNSW) persistNode(n *Node) error {
-	if !h.config.PersistNodes {
+	if !h.config.PersistNodes || h.config.SkipPersistNode {
 		return nil
 	}
 	key := []byte("hnsw:" + strconv.FormatUint(uint64(n.ID), 10))

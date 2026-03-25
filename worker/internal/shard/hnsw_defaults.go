@@ -108,7 +108,7 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 		PruneEnabled:             false,
 		PruneMaxNodes:            2000,
 		MmapVectorsEnabled:       true, // Enable memory-mapped vectors for larger datasets
-		MmapInitialMB:            1024, // Start with 1GB
+		MmapInitialMB:            64,   // Start with 64MB, grows on demand (was 1024 = 1GB per shard)
 		WALBatchEnabled:          true,
 		AsyncIndexingEnabled:     true,
 		IndexingQueueSize:        indexQueueSize,
