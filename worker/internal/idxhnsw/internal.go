@@ -480,9 +480,9 @@ type CleanupConfig struct {
 
 // DefaultCleanupConfig provides sensible defaults for the cleanup process.
 var DefaultCleanupConfig = CleanupConfig{
-	Interval:   2 * time.Hour,
-	MaxDeleted: 50_000,
-	BatchSize:  10_000,
+	Interval:   30 * time.Minute, // Changed from 2h - more aggressive cleanup
+	MaxDeleted: 10_000,           // Changed from 50_000 - trigger earlier
+	BatchSize:  5_000,            // Changed from 10_000 - smaller batches
 	Enabled:    true,
 }
 

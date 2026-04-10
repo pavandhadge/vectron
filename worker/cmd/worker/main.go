@@ -255,6 +255,25 @@ func startSelfDumpProfiles(role string) {
 		runtime.SetBlockProfileRate(v)
 	}
 
+	// Heap profile for memory debugging
+	heapPath := os.Getenv("PPROF_HEAP_PATH")
+	if heapPath != "" {
+		_ = os.MkdirAll(filepath.Dir(heapPath), 0755)
+		go func() {
+			// Dump heap profile every 30 seconds
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				<-ticker.C
+				if f, err := os.Create(heapPath + "." + strconv.FormatInt(time.Now().Unix(), 10)); err == nil {
+					rpprof.Lookup("heap").WriteTo(f, 0)
+					_ = f.Close()
+					log.Printf("%s heap profile -> %s", role, f.Name())
+				}
+			}
+		}()
+	}
+
 	cpuPath := os.Getenv("PPROF_CPU_PATH")
 	if cpuPath != "" {
 		_ = os.MkdirAll(filepath.Dir(cpuPath), 0755)

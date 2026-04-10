@@ -5,6 +5,7 @@
 package storage
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"errors"
@@ -26,11 +27,27 @@ import (
 
 // Constants for internal keys used in PebbleDB.
 const (
-	hnswIndexKey          = "_hnsw_index"    // Key for the serialized HNSW index.
-	hnswIndexTimestampKey = "_hnsw_index_ts" // Key for the timestamp of the last HNSW save.
-	hnswWALPrefix         = "_hnsw_wal_"     // Prefix for HNSW write-ahead log entries.
-	hnswIngestDirtyKey    = "_hnsw_ingest_dirty"
+	hnswIndexKey           = "_hnsw_index"    // Key for the serialized HNSW index.
+	hnswIndexTimestampKey  = "_hnsw_index_ts" // Key for the timestamp of the last HNSW save.
+	hnswIndexFormatKey     = "_hnsw_index_fmt"
+	hnswIndexChunkCountKey = "_hnsw_index_chunks"
+	hnswIndexChunkPrefix   = "_hnsw_index_chunk_"
+	hnswWALPrefix          = "_hnsw_wal_" // Prefix for HNSW write-ahead log entries.
+	hnswIngestDirtyKey     = "_hnsw_ingest_dirty"
 )
+
+var (
+	sharedPebbleCacheMu   sync.Mutex
+	sharedPebbleCache     *pebble.Cache
+	sharedPebbleCacheSize int64
+	sharedDBMu            sync.Mutex
+	sharedDBs             = make(map[string]*sharedDBHandle)
+)
+
+type sharedDBHandle struct {
+	db   *pebble.DB
+	refs int
+}
 
 // Init initializes the PebbleDB instance and the HNSW index.
 // It configures the database, opens it, and loads or creates the HNSW index.
@@ -45,9 +62,18 @@ func (r *PebbleDB) Init(path string, opts *Options) error {
 
 	var err error
 	r.path = path
-	r.db, err = pebble.Open(path, dbOpts)
-	if err != nil {
-		return fmt.Errorf("failed to open pebble db at %s: %w", path, err)
+	if envBool("VECTRON_SHARED_PEBBLE", true) && len(r.namespace) > 0 {
+		r.sharedDB = true
+		r.sharedDBPath = path
+		r.db, err = openSharedDB(path, dbOpts)
+		if err != nil {
+			return fmt.Errorf("failed to open shared pebble db at %s: %w", path, err)
+		}
+	} else {
+		r.db, err = pebble.Open(path, dbOpts)
+		if err != nil {
+			return fmt.Errorf("failed to open pebble db at %s: %w", path, err)
+		}
 	}
 
 	// Use async writes for high throughput with periodic background sync.
@@ -176,6 +202,9 @@ func (r *PebbleDB) Close() error {
 		r.hnsw.Close()
 	}
 
+	if r.sharedDB {
+		return closeSharedDB(r.sharedDBPath)
+	}
 	return r.db.Close()
 }
 
@@ -215,7 +244,7 @@ func (r *PebbleDB) loadHNSW(opts *Options) error {
 		r.hotSet = make(map[string]struct{})
 	}
 
-	data, closer, err := r.db.Get([]byte(hnswIndexKey))
+	reader, cleanup, err := r.hnswSnapshotReader()
 	if err != nil {
 		if errors.Is(err, pebble.ErrNotFound) {
 			log.Println("No existing HNSW index found.")
@@ -229,9 +258,9 @@ func (r *PebbleDB) loadHNSW(opts *Options) error {
 		}
 		return err
 	}
-	defer closer.Close()
+	defer cleanup()
 
-	if err := r.hnsw.Load(bytes.NewReader(data)); err != nil {
+	if err := r.hnsw.Load(reader); err != nil {
 		log.Printf("Failed to load HNSW index from snapshot, creating a new one: %v", err)
 		// Reset to a new index if loading fails.
 		r.hnsw = idxhnsw.NewHNSW(r, opts.HNSWConfig.Dim, idxhnsw.HNSWConfig{
@@ -263,7 +292,7 @@ func (r *PebbleDB) loadHNSW(opts *Options) error {
 	r.applyRuntimeHNSWTuning(opts)
 
 	r.hnswSnapshotLoaded = true
-	if tsData, closer, err := r.db.Get([]byte(hnswIndexTimestampKey)); err == nil {
+	if tsData, closer, err := r.db.Get(r.nsKey([]byte(hnswIndexTimestampKey))); err == nil {
 		if ts, err := strconv.ParseInt(string(tsData), 10, 64); err == nil {
 			r.hnswSnapshotMu.Lock()
 			r.hnswLastSnapshot = time.Unix(0, ts)
@@ -293,6 +322,9 @@ func (r *PebbleDB) applyRuntimeHNSWTuning(opts *Options) {
 	if opts.HNSWConfig.MmapVectorsEnabled {
 		initial := int64(opts.HNSWConfig.MmapInitialMB) * 1024 * 1024
 		mmapPath := filepath.Join(r.path, "hnsw_vectors.mmap")
+		if r.sharedDB {
+			mmapPath = filepath.Join(r.path, fmt.Sprintf("hnsw_vectors_%x.mmap", r.namespace))
+		}
 		if err := r.hnsw.EnableMmapVectors(mmapPath, initial); err != nil {
 			log.Printf("Warning: failed to enable mmap vectors: %v", err)
 		}
@@ -302,29 +334,36 @@ func (r *PebbleDB) applyRuntimeHNSWTuning(opts *Options) {
 // saveHNSW serializes the current HNSW index and writes it to the database.
 // It also cleans up old WAL entries that are now covered by the new snapshot.
 func (r *PebbleDB) saveHNSW() error {
-	var buf bytes.Buffer
-	if err := r.hnsw.Save(&buf); err != nil {
-		return fmt.Errorf("failed to serialize HNSW index: %w", err)
-	}
-
 	batch := r.db.NewBatch()
 	defer batch.Close()
 
 	ts := time.Now().UnixNano()
 	tsStr := strconv.FormatInt(ts, 10)
 
-	// Write the new index snapshot and its timestamp.
-	if err := batch.Set([]byte(hnswIndexKey), buf.Bytes(), r.writeOpts); err != nil {
+	if err := r.deleteHNSWSnapshotKeys(batch); err != nil {
 		return err
 	}
-	if err := batch.Set([]byte(hnswIndexTimestampKey), []byte(tsStr), r.writeOpts); err != nil {
+	chunkWriter := newHNSWChunkWriter(batch, r)
+	if err := r.hnsw.Save(chunkWriter); err != nil {
+		return fmt.Errorf("failed to serialize HNSW index: %w", err)
+	}
+	if err := chunkWriter.Close(); err != nil {
+		return err
+	}
+	if err := batch.Set(r.nsKey([]byte(hnswIndexFormatKey)), []byte("chunked"), nil); err != nil {
+		return err
+	}
+	if err := batch.Set(r.nsKey([]byte(hnswIndexChunkCountKey)), []byte(strconv.Itoa(chunkWriter.count)), nil); err != nil {
+		return err
+	}
+	if err := batch.Set(r.nsKey([]byte(hnswIndexTimestampKey)), []byte(tsStr), r.writeOpts); err != nil {
 		return err
 	}
 
 	// Delete all WAL entries created before this snapshot.
 	iter := r.db.NewIter(&pebble.IterOptions{
-		LowerBound: []byte(hnswWALPrefix),
-		UpperBound: []byte(fmt.Sprintf("%s%s", hnswWALPrefix, tsStr)),
+		LowerBound: r.nsKey([]byte(hnswWALPrefix)),
+		UpperBound: r.nsKey([]byte(fmt.Sprintf("%s%s", hnswWALPrefix, tsStr))),
 	})
 	defer iter.Close()
 
@@ -377,7 +416,7 @@ func (r *PebbleDB) hasIngestDirtyMarker() (bool, error) {
 	if r.db == nil {
 		return false, errors.New("db not initialized")
 	}
-	_, closer, err := r.db.Get([]byte(hnswIngestDirtyKey))
+	_, closer, err := r.db.Get(r.nsKey([]byte(hnswIngestDirtyKey)))
 	if err != nil {
 		if errors.Is(err, pebble.ErrNotFound) {
 			return false, nil
@@ -392,14 +431,14 @@ func (r *PebbleDB) clearIngestDirtyMarker() error {
 	if r.db == nil {
 		return errors.New("db not initialized")
 	}
-	return r.db.Delete([]byte(hnswIngestDirtyKey), r.writeOpts)
+	return r.db.Delete(r.nsKey([]byte(hnswIngestDirtyKey)), r.writeOpts)
 }
 
 func (r *PebbleDB) markIngestDirtyBatch(batch *pebble.Batch) error {
 	if batch == nil {
 		return errors.New("nil batch")
 	}
-	return batch.Set([]byte(hnswIngestDirtyKey), []byte("1"), nil)
+	return batch.Set(r.nsKey([]byte(hnswIngestDirtyKey)), []byte("1"), nil)
 }
 
 func (r *PebbleDB) rebuildHNSWFromDB(opts *Options) error {
@@ -594,7 +633,7 @@ func (r *PebbleDB) maybeRebuildHNSW() {
 
 // replayWAL replays write-ahead log entries that occurred after the last HNSW snapshot.
 func (r *PebbleDB) replayWAL() error {
-	tsData, closer, err := r.db.Get([]byte(hnswIndexTimestampKey))
+	tsData, closer, err := r.db.Get(r.nsKey([]byte(hnswIndexTimestampKey)))
 	if err != nil {
 		if errors.Is(err, pebble.ErrNotFound) {
 			return nil // No timestamp, so no WAL to replay.
@@ -614,7 +653,7 @@ func (r *PebbleDB) replayWAL() error {
 func (r *PebbleDB) replayWALFrom(ts int64) error {
 	// Iterate over WAL entries created after the provided timestamp.
 	iter := r.db.NewIter(&pebble.IterOptions{
-		LowerBound: []byte(fmt.Sprintf("%s%d", hnswWALPrefix, ts)),
+		LowerBound: r.nsKey([]byte(fmt.Sprintf("%s%d", hnswWALPrefix, ts))),
 	})
 	defer iter.Close()
 
@@ -626,7 +665,7 @@ func (r *PebbleDB) replayWALFrom(ts int64) error {
 	latest := make(map[string]walEntry)
 
 	for iter.First(); iter.Valid(); iter.Next() {
-		key := string(iter.Key())
+		key := string(r.stripNamespace(iter.Key()))
 		rest := strings.TrimPrefix(key, hnswWALPrefix)
 		if strings.HasPrefix(rest, "batch_") {
 			tsVal, err := strconv.ParseInt(strings.TrimPrefix(rest, "batch_"), 10, 64)
@@ -742,23 +781,138 @@ func (r *PebbleDB) GetHNSWSnapshot() ([]byte, int64, error) {
 	if r.db == nil {
 		return nil, 0, errors.New("db not initialized")
 	}
-	val, closer, err := r.db.Get([]byte(hnswIndexKey))
+	reader, cleanup, err := r.hnswSnapshotReader()
 	if err != nil {
 		if errors.Is(err, pebble.ErrNotFound) {
 			return nil, 0, nil
 		}
 		return nil, 0, err
 	}
-	defer closer.Close()
-	data := append([]byte(nil), val...)
+	defer cleanup()
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, 0, err
+	}
 
 	var ts int64
-	tsData, tsCloser, err := r.db.Get([]byte(hnswIndexTimestampKey))
+	tsData, tsCloser, err := r.db.Get(r.nsKey([]byte(hnswIndexTimestampKey)))
 	if err == nil {
 		ts, _ = strconv.ParseInt(string(tsData), 10, 64)
 		tsCloser.Close()
 	}
 	return data, ts, nil
+}
+
+type hnswChunkWriter struct {
+	batch   *pebble.Batch
+	store   *PebbleDB
+	buf     []byte
+	count   int
+	maxSize int
+}
+
+func newHNSWChunkWriter(batch *pebble.Batch, store *PebbleDB) *hnswChunkWriter {
+	return &hnswChunkWriter{
+		batch:   batch,
+		store:   store,
+		buf:     make([]byte, 0, 1<<20),
+		maxSize: 1 << 20,
+	}
+}
+
+func (w *hnswChunkWriter) Write(p []byte) (int, error) {
+	written := 0
+	for len(p) > 0 {
+		space := w.maxSize - len(w.buf)
+		if space <= 0 {
+			if err := w.flushChunk(); err != nil {
+				return written, err
+			}
+			space = w.maxSize
+		}
+		if space > len(p) {
+			space = len(p)
+		}
+		w.buf = append(w.buf, p[:space]...)
+		p = p[space:]
+		written += space
+	}
+	return written, nil
+}
+
+func (w *hnswChunkWriter) Close() error {
+	return w.flushChunk()
+}
+
+func (w *hnswChunkWriter) flushChunk() error {
+	if len(w.buf) == 0 {
+		return nil
+	}
+	key := w.store.nsKey([]byte(fmt.Sprintf("%s%06d", hnswIndexChunkPrefix, w.count)))
+	if err := w.batch.Set(key, append([]byte(nil), w.buf...), nil); err != nil {
+		return err
+	}
+	w.count++
+	w.buf = w.buf[:0]
+	return nil
+}
+
+func (r *PebbleDB) hnswSnapshotReader() (io.Reader, func(), error) {
+	if format, closer, err := r.db.Get(r.nsKey([]byte(hnswIndexFormatKey))); err == nil {
+		defer closer.Close()
+		if string(format) == "chunked" {
+			cntVal, closer2, err := r.db.Get(r.nsKey([]byte(hnswIndexChunkCountKey)))
+			if err != nil {
+				return nil, func() {}, err
+			}
+			defer closer2.Close()
+			count, err := strconv.Atoi(string(cntVal))
+			if err != nil {
+				return nil, func() {}, err
+			}
+			readers := make([]io.Reader, 0, count)
+			cleanupClosers := make([]io.Closer, 0, count)
+			for i := 0; i < count; i++ {
+				val, closer, err := r.db.Get(r.nsKey([]byte(fmt.Sprintf("%s%06d", hnswIndexChunkPrefix, i))))
+				if err != nil {
+					for _, c := range cleanupClosers {
+						c.Close()
+					}
+					return nil, func() {}, err
+				}
+				cleanupClosers = append(cleanupClosers, closer)
+				readers = append(readers, bytes.NewReader(append([]byte(nil), val...)))
+			}
+			return io.MultiReader(readers...), func() {
+				for _, c := range cleanupClosers {
+					c.Close()
+				}
+			}, nil
+		}
+	}
+	val, closer, err := r.db.Get(r.nsKey([]byte(hnswIndexKey)))
+	if err != nil {
+		return nil, func() {}, err
+	}
+	data := append([]byte(nil), val...)
+	return bytes.NewReader(data), func() { closer.Close() }, nil
+}
+
+func (r *PebbleDB) deleteHNSWSnapshotKeys(batch *pebble.Batch) error {
+	_ = batch.Delete(r.nsKey([]byte(hnswIndexKey)), nil)
+	_ = batch.Delete(r.nsKey([]byte(hnswIndexFormatKey)), nil)
+	_ = batch.Delete(r.nsKey([]byte(hnswIndexChunkCountKey)), nil)
+	iter := r.db.NewIter(&pebble.IterOptions{
+		LowerBound: r.nsKey([]byte(hnswIndexChunkPrefix)),
+		UpperBound: r.nsKey([]byte(hnswIndexChunkPrefix + "~")),
+	})
+	defer iter.Close()
+	for iter.First(); iter.Valid(); iter.Next() {
+		if err := batch.Delete(iter.Key(), nil); err != nil {
+			return err
+		}
+	}
+	return iter.Error()
 }
 
 // IterateWALFrom streams WAL entries after the provided timestamp.
@@ -767,12 +921,12 @@ func (r *PebbleDB) IterateWALFrom(ts int64, fn func(WALUpdate) bool) error {
 		return errors.New("db not initialized")
 	}
 	iter := r.db.NewIter(&pebble.IterOptions{
-		LowerBound: []byte(fmt.Sprintf("%s%d", hnswWALPrefix, ts)),
+		LowerBound: r.nsKey([]byte(fmt.Sprintf("%s%d", hnswWALPrefix, ts))),
 	})
 	defer iter.Close()
 
 	for iter.First(); iter.Valid(); iter.Next() {
-		key := string(iter.Key())
+		key := string(r.stripNamespace(iter.Key()))
 		rest := strings.TrimPrefix(key, hnswWALPrefix)
 		if strings.HasPrefix(rest, "batch_") {
 			tsVal, err := strconv.ParseInt(strings.TrimPrefix(rest, "batch_"), 10, 64)
@@ -967,6 +1121,10 @@ func (r *PebbleDB) Compact() error {
 	if r.db == nil {
 		return errors.New("db not initialized")
 	}
+	if len(r.namespace) > 0 {
+		lower, upper := r.nsBounds(nil)
+		return r.db.Compact(lower, upper)
+	}
 	return r.db.Compact(nil, nil)
 }
 
@@ -983,6 +1141,9 @@ func (r *PebbleDB) Backup(path string) error {
 	if r.db == nil {
 		return errors.New("db not initialized")
 	}
+	if r.sharedDB {
+		return r.exportNamespace(path)
+	}
 	return r.db.Checkpoint(path)
 }
 
@@ -990,6 +1151,14 @@ func (r *PebbleDB) Backup(path string) error {
 func (r *PebbleDB) Restore(backupPath string) error {
 	if r.db == nil {
 		return errors.New("db not initialized")
+	}
+	if r.sharedDB {
+		if err := r.importNamespace(backupPath); err != nil {
+			return err
+		}
+		r.hnsw = nil
+		r.hnswHot = nil
+		return r.loadHNSW(r.opts)
 	}
 	if r.path == "" {
 		return errors.New("db path not set")
@@ -1048,7 +1217,7 @@ func applyPebbleTuning(dbOpts *pebble.Options, opts *Options) {
 			dbOpts.MemTableSize = opts.WriteBufferSize
 		}
 		if opts.CacheSize > 0 {
-			dbOpts.Cache = pebble.NewCache(opts.CacheSize)
+			dbOpts.Cache = sharedCache(opts.CacheSize)
 		}
 	}
 
@@ -1078,7 +1247,7 @@ func applyPebbleTuning(dbOpts *pebble.Options, opts *Options) {
 	if dbOpts.Cache == nil {
 		cacheMB := envInt("PEBBLE_CACHE_MB", 512)
 		if cacheMB > 0 {
-			dbOpts.Cache = pebble.NewCache(int64(cacheMB) * 1024 * 1024)
+			dbOpts.Cache = sharedCache(int64(cacheMB) * 1024 * 1024)
 		}
 	}
 
@@ -1108,6 +1277,171 @@ func applyPebbleTuning(dbOpts *pebble.Options, opts *Options) {
 	}
 
 	// Bloom filter tuning omitted in vendored build (no pebble/bloom package).
+}
+
+func openSharedDB(path string, dbOpts *pebble.Options) (*pebble.DB, error) {
+	sharedDBMu.Lock()
+	defer sharedDBMu.Unlock()
+	if h := sharedDBs[path]; h != nil {
+		h.refs++
+		return h.db, nil
+	}
+	db, err := pebble.Open(path, dbOpts)
+	if err != nil {
+		return nil, err
+	}
+	sharedDBs[path] = &sharedDBHandle{db: db, refs: 1}
+	return db, nil
+}
+
+func closeSharedDB(path string) error {
+	sharedDBMu.Lock()
+	defer sharedDBMu.Unlock()
+	h := sharedDBs[path]
+	if h == nil {
+		return nil
+	}
+	h.refs--
+	if h.refs > 0 {
+		return nil
+	}
+	delete(sharedDBs, path)
+	return h.db.Close()
+}
+
+func (r *PebbleDB) nsKey(key []byte) []byte {
+	if len(r.namespace) == 0 {
+		return key
+	}
+	buf := make([]byte, len(r.namespace)+len(key))
+	copy(buf, r.namespace)
+	copy(buf[len(r.namespace):], key)
+	return buf
+}
+
+func (r *PebbleDB) stripNamespace(key []byte) []byte {
+	if len(r.namespace) == 0 || len(key) < len(r.namespace) {
+		return key
+	}
+	return key[len(r.namespace):]
+}
+
+func (r *PebbleDB) nsBounds(prefix []byte) ([]byte, []byte) {
+	if len(r.namespace) == 0 && len(prefix) == 0 {
+		return nil, nil
+	}
+	lower := r.nsKey(prefix)
+	upper := pebble.DefaultComparer.Successor(nil, lower)
+	return lower, upper
+}
+
+const sharedNamespaceExportFile = "shared_namespace_export.bin"
+
+func (r *PebbleDB) exportNamespace(path string) error {
+	if err := os.MkdirAll(path, 0750); err != nil {
+		return err
+	}
+	f, err := os.Create(filepath.Join(path, sharedNamespaceExportFile))
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	bw := bufio.NewWriter(f)
+	iter, err := r.NewIterator(nil)
+	if err != nil {
+		return err
+	}
+	defer iter.Close()
+	for iter.Next() {
+		key := iter.Key()
+		val := iter.Value()
+		if err := binary.Write(bw, binary.LittleEndian, uint32(len(key))); err != nil {
+			return err
+		}
+		if err := binary.Write(bw, binary.LittleEndian, uint32(len(val))); err != nil {
+			return err
+		}
+		if _, err := bw.Write(key); err != nil {
+			return err
+		}
+		if _, err := bw.Write(val); err != nil {
+			return err
+		}
+	}
+	return bw.Flush()
+}
+
+func (r *PebbleDB) importNamespace(path string) error {
+	f, err := os.Open(filepath.Join(path, sharedNamespaceExportFile))
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	br := bufio.NewReader(f)
+	clearBatch := r.db.NewBatch()
+	defer clearBatch.Close()
+	iter, err := r.NewIterator(nil)
+	if err != nil {
+		return err
+	}
+	defer iter.Close()
+	for iter.Next() {
+		if err := clearBatch.Delete(r.nsKey(iter.Key()), nil); err != nil {
+			return err
+		}
+	}
+	if err := clearBatch.Commit(r.writeOpts); err != nil {
+		return err
+	}
+	batch := r.db.NewBatch()
+	defer batch.Close()
+	for {
+		var klen uint32
+		if err := binary.Read(br, binary.LittleEndian, &klen); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return err
+		}
+		var vlen uint32
+		if err := binary.Read(br, binary.LittleEndian, &vlen); err != nil {
+			return err
+		}
+		key := make([]byte, klen)
+		val := make([]byte, vlen)
+		if _, err := io.ReadFull(br, key); err != nil {
+			return err
+		}
+		if _, err := io.ReadFull(br, val); err != nil {
+			return err
+		}
+		if err := batch.Set(r.nsKey(key), val, nil); err != nil {
+			return err
+		}
+	}
+	return batch.Commit(r.writeOpts)
+}
+
+func sharedCache(size int64) *pebble.Cache {
+	if size <= 0 {
+		return nil
+	}
+
+	sharedPebbleCacheMu.Lock()
+	defer sharedPebbleCacheMu.Unlock()
+
+	if sharedPebbleCache == nil {
+		sharedPebbleCache = pebble.NewCache(size)
+		sharedPebbleCacheSize = size
+		return sharedPebbleCache
+	}
+
+	if sharedPebbleCacheSize != size {
+		log.Printf("PEBBLE_CACHE_MB is worker-wide shared cache; reusing existing cache size=%dMB and ignoring requested size=%dMB",
+			sharedPebbleCacheSize/1024/1024, size/1024/1024)
+	}
+
+	return sharedPebbleCache
 }
 
 func envInt(key string, def int) int {

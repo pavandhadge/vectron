@@ -139,6 +139,23 @@ func makeVectorCopy(src []float32, h *HNSW) []float32 {
 	return pooled
 }
 
+func makeQuantizedCopy(src []int8, h *HNSW) []int8 {
+	if h != nil && h.mmapStore != nil {
+		if dst, err := h.mmapStore.allocInt8(len(src)); err == nil && dst != nil {
+			copy(dst, src)
+			return dst
+		}
+	}
+	pooled := getInt8FromPool()
+	if cap(pooled) < len(src) {
+		putInt8ToPool(pooled)
+		return append([]int8(nil), src...)
+	}
+	pooled = pooled[:len(src)]
+	copy(pooled, src)
+	return pooled
+}
+
 func (h *HNSW) addNoLock(id string, vec []float32) error {
 	internalID := h.nextID
 	h.idToUint32[id] = internalID
@@ -167,7 +184,7 @@ func (h *HNSW) addNoLock(id string, vec []float32) error {
 		normalized := NormalizeVector(vec)
 		searchVec = normalized
 		if h.config.QuantizeVectors {
-			node.QVec = quantizeVector(normalized)
+			node.QVec = makeQuantizedCopy(quantizeVector(normalized), h)
 			if h.config.KeepFloatVectors {
 				nodeVec = makeVectorCopy(normalized, h)
 				node.Vec = nodeVec

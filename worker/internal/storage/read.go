@@ -89,7 +89,7 @@ func (r *PebbleDB) Get(key []byte) ([]byte, error) {
 	if r.db == nil {
 		return nil, errors.New("db not initialized")
 	}
-	value, closer, err := r.db.Get(key)
+	value, closer, err := r.db.Get(r.nsKey(key))
 	if err != nil {
 		if errors.Is(err, pebble.ErrNotFound) {
 			return nil, nil // Treat not found as nil, not an error.
@@ -108,7 +108,7 @@ func (r *PebbleDB) Exists(key []byte) (bool, error) {
 	if r.db == nil {
 		return false, errors.New("db not initialized")
 	}
-	_, closer, err := r.db.Get(key)
+	_, closer, err := r.db.Get(r.nsKey(key))
 	if err != nil {
 		if errors.Is(err, pebble.ErrNotFound) {
 			return false, nil // Not found is not an error here.
@@ -135,7 +135,7 @@ func (r *PebbleDB) ExistsBatch(keys [][]byte) (map[string]bool, error) {
 	defer snap.Close()
 
 	for _, key := range keys {
-		_, closer, err := snap.Get(key)
+		_, closer, err := snap.Get(r.nsKey(key))
 		if err != nil {
 			if errors.Is(err, pebble.ErrNotFound) {
 				results[string(key)] = false
@@ -158,14 +158,14 @@ func (r *PebbleDB) NewIterator(prefix []byte) (Iterator, error) {
 		return nil, errors.New("db not initialized")
 	}
 
-	iterOpts := &pebble.IterOptions{}
-	if len(prefix) > 0 {
-		iterOpts.LowerBound = prefix
-		iterOpts.UpperBound = pebble.DefaultComparer.Successor(nil, prefix)
+	lower, upper := r.nsBounds(prefix)
+	iterOpts := &pebble.IterOptions{
+		LowerBound: lower,
+		UpperBound: upper,
 	}
 
 	iter := r.db.NewIter(iterOpts)
-	return &pebbleIterator{iter: iter}, nil
+	return &pebbleIterator{iter: iter, namespace: r.namespace}, nil
 }
 
 // Scan retrieves up to `limit` key-value pairs for a given prefix.
@@ -316,7 +316,8 @@ func DecodeVectorWithMeta(data []byte) ([]float32, []byte, error) {
 
 // pebbleIterator implements the Iterator interface for PebbleDB.
 type pebbleIterator struct {
-	iter *pebble.Iterator
+	iter      *pebble.Iterator
+	namespace []byte
 }
 
 // Valid returns true if the iterator is positioned at a valid key-value pair.
@@ -330,6 +331,13 @@ func (pi *pebbleIterator) Valid() bool {
 // Seek positions the iterator at the first key greater than or equal to the given key.
 func (pi *pebbleIterator) Seek(key []byte) {
 	if pi.iter != nil {
+		if len(pi.namespace) > 0 {
+			buf := make([]byte, len(pi.namespace)+len(key))
+			copy(buf, pi.namespace)
+			copy(buf[len(pi.namespace):], key)
+			pi.iter.SeekGE(buf)
+			return
+		}
 		pi.iter.SeekGE(key)
 	}
 }
@@ -347,8 +355,12 @@ func (pi *pebbleIterator) Key() []byte {
 	if pi.iter == nil {
 		return nil
 	}
+	key := pi.iter.Key()
+	if len(pi.namespace) > 0 && len(key) >= len(pi.namespace) {
+		key = key[len(pi.namespace):]
+	}
 	// A copy is returned to ensure the slice is safe after the iterator is advanced.
-	return append([]byte(nil), pi.iter.Key()...)
+	return append([]byte(nil), key...)
 }
 
 // Value returns a copy of the current value.

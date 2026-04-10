@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -75,7 +76,7 @@ func (r *PebbleDB) Put(key []byte, value []byte) error {
 	if r.db == nil {
 		return errors.New("db not initialized")
 	}
-	if err := r.db.Set(key, value, r.writeOpts); err != nil {
+	if err := r.db.Set(r.nsKey(key), value, r.writeOpts); err != nil {
 		return err
 	}
 	r.markDirty()
@@ -94,7 +95,7 @@ func (r *PebbleDB) Delete(key []byte) error {
 	if r.db == nil {
 		return errors.New("db not initialized")
 	}
-	if err := r.db.Delete(key, r.writeOpts); err != nil {
+	if err := r.db.Delete(r.nsKey(key), r.writeOpts); err != nil {
 		return err
 	}
 	r.markDirty()
@@ -110,12 +111,12 @@ func (r *PebbleDB) BatchWrite(ops BatchOperations) error {
 	defer batch.Close()
 
 	for k, v := range ops.Puts {
-		if err := batch.Set([]byte(k), v, nil); err != nil {
+		if err := batch.Set(r.nsKey([]byte(k)), v, nil); err != nil {
 			return err
 		}
 	}
 	for _, k := range ops.Deletes {
-		if err := batch.Delete([]byte(k), nil); err != nil {
+		if err := batch.Delete(r.nsKey([]byte(k)), nil); err != nil {
 			return err
 		}
 	}
@@ -147,6 +148,9 @@ func (r *PebbleDB) StoreVector(id string, vector []float32, metadata []byte) err
 	}
 
 	asyncIndex := r.opts != nil && r.opts.HNSWConfig.AsyncIndexingEnabled && r.indexerCh != nil && !r.ingestMode
+	if asyncIndex && r.shouldThrottleIndexing() {
+		asyncIndex = false
+	}
 
 	// 2. If HNSW add is successful, commit the vector and WAL entry to PebbleDB.
 	val, err := encodeVectorWithMeta(vector, metadata, r.shouldCompressVectors())
@@ -158,7 +162,7 @@ func (r *PebbleDB) StoreVector(id string, vector []float32, metadata []byte) err
 	defer batch.Close()
 
 	// Add the vector data to the batch.
-	if err := batch.Set(vectorKey(id), val, nil); err != nil {
+	if err := batch.Set(r.nsKey(vectorKey(id)), val, nil); err != nil {
 		return fmt.Errorf("failed to set vector in batch: %w", err)
 	}
 
@@ -167,7 +171,7 @@ func (r *PebbleDB) StoreVector(id string, vector []float32, metadata []byte) err
 	// If the WAL is enabled, also add a WAL entry to the batch.
 	if r.opts.HNSWConfig.WALEnabled {
 		wk := walKey(ts, id)
-		if err := batch.Set(wk, val, nil); err != nil {
+		if err := batch.Set(r.nsKey(wk), val, nil); err != nil {
 			return fmt.Errorf("failed to set WAL in batch: %w", err)
 		}
 	}
@@ -232,6 +236,9 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 	batch := r.db.NewBatch()
 	defer batch.Close()
 	asyncIndex := r.opts != nil && r.opts.HNSWConfig.AsyncIndexingEnabled && r.indexerCh != nil && !r.ingestMode
+	if asyncIndex && r.shouldThrottleIndexing() {
+		asyncIndex = false
+	}
 	walBatchEnabled := r.opts != nil && r.opts.HNSWConfig.WALEnabled && r.opts.HNSWConfig.WALBatchEnabled && len(vectors) > 1
 	var walBatchIDs []string
 	var walBatchVals [][]byte
@@ -257,14 +264,14 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 			return fmt.Errorf("failed to encode vector with meta: %w", err)
 		}
 
-		if err := batch.Set(vectorKey(v.ID), val, nil); err != nil {
+		if err := batch.Set(r.nsKey(vectorKey(v.ID)), val, nil); err != nil {
 			return fmt.Errorf("failed to set vector in batch: %w", err)
 		}
 
 		ts := baseTS + int64(i)
 		if r.opts.HNSWConfig.WALEnabled && !walBatchEnabled {
 			wk := walKey(ts, v.ID)
-			if err := batch.Set(wk, val, nil); err != nil {
+			if err := batch.Set(r.nsKey(wk), val, nil); err != nil {
 				return fmt.Errorf("failed to set WAL in batch: %w", err)
 			}
 		}
@@ -282,7 +289,7 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 			return fmt.Errorf("failed to encode WAL batch")
 		}
 		wk := walKeyBatch(baseTS)
-		if err := batch.Set(wk, walBatchBuf, nil); err != nil {
+		if err := batch.Set(r.nsKey(wk), walBatchBuf, nil); err != nil {
 			return fmt.Errorf("failed to set WAL batch: %w", err)
 		}
 		// Updates already recorded above when walHub is enabled.
@@ -327,11 +334,10 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 
 	r.recordHNSWWrite(uint64(len(added)))
 
-	// Trigger HNSW snapshot + PebbleDB flush after significant batch writes
-	// to clean up WAL entries and prevent unbounded WAL growth.
-	if len(added) >= 50 && r.opts != nil && r.opts.HNSWConfig.WALEnabled {
+	// Trigger an early flush after meaningful batch writes so per-shard memtables
+	// and Pebble WAL do not accumulate across many active shards during ingest.
+	if len(added) >= 20 {
 		go func() {
-			_ = r.saveHNSW()
 			_ = r.Flush()
 		}()
 	}
@@ -359,7 +365,7 @@ func (r *PebbleDB) DeleteVector(id string) error {
 	defer batch.Close()
 
 	// We use a tombstone (empty value) to mark deletion in the WAL.
-	if err := batch.Delete(vectorKey(id), nil); err != nil {
+	if err := batch.Delete(r.nsKey(vectorKey(id)), nil); err != nil {
 		// Attempt to rollback HNSW delete. This might not be perfect,
 		// as the original vector data is not available here.
 		// A more robust implementation would fetch the vector before deleting.
@@ -370,7 +376,7 @@ func (r *PebbleDB) DeleteVector(id string) error {
 	ts := time.Now().UnixNano()
 	if r.opts.HNSWConfig.WALEnabled {
 		wk := walKeySuffix(ts, id, "delete")
-		if err := batch.Set(wk, nil, nil); err != nil {
+		if err := batch.Set(r.nsKey(wk), nil, nil); err != nil {
 			return fmt.Errorf("failed to set WAL delete marker in batch: %w", err)
 		}
 	}
@@ -424,6 +430,23 @@ func (r *PebbleDB) hotAdd(id string, vector []float32) {
 		delete(r.hotSet, oldest)
 		_ = r.hnswHot.Delete(oldest)
 	}
+}
+
+func (r *PebbleDB) shouldThrottleIndexing() bool {
+	pending := atomic.LoadUint64(&r.indexPending)
+	softLimit := envInt("VECTRON_INDEX_PENDING_SOFT_LIMIT", 4096)
+	if softLimit > 0 && pending >= uint64(softLimit) {
+		return true
+	}
+	heapSoftMB := envInt("VECTRON_INDEX_HEAP_SOFT_MB", 768)
+	if heapSoftMB > 0 {
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		if m.HeapAlloc >= uint64(heapSoftMB)*1024*1024 {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *PebbleDB) hotDelete(id string) {
@@ -488,7 +511,7 @@ func (r *PebbleDB) bulkLoadVectors(vectors []VectorEntry) error {
 			return fmt.Errorf("failed to encode vector with meta: %w", err)
 		}
 
-		if err := batch.Set(vectorKey(v.ID), val, nil); err != nil {
+		if err := batch.Set(r.nsKey(vectorKey(v.ID)), val, nil); err != nil {
 			for _, id := range added {
 				_ = r.hnsw.Delete(id)
 			}
@@ -506,13 +529,13 @@ func (r *PebbleDB) bulkLoadVectors(vectors []VectorEntry) error {
 
 	ts := time.Now().UnixNano()
 	tsStr := strconv.FormatInt(ts, 10)
-	if err := batch.Set([]byte(hnswIndexKey), buf.Bytes(), r.writeOpts); err != nil {
+	if err := batch.Set(r.nsKey([]byte(hnswIndexKey)), buf.Bytes(), r.writeOpts); err != nil {
 		for _, id := range added {
 			_ = r.hnsw.Delete(id)
 		}
 		return err
 	}
-	if err := batch.Set([]byte(hnswIndexTimestampKey), []byte(tsStr), r.writeOpts); err != nil {
+	if err := batch.Set(r.nsKey([]byte(hnswIndexTimestampKey)), []byte(tsStr), r.writeOpts); err != nil {
 		for _, id := range added {
 			_ = r.hnsw.Delete(id)
 		}

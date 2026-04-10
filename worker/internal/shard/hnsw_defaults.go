@@ -13,7 +13,24 @@ import (
 // DefaultHNSWConfig returns the default HNSW configuration used by workers.
 func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, writeSpeedMode bool) storage.HNSWConfig {
 	quantizeEnabled := distance == "cosine"
-	keepFloatVectors := quantizeEnabled
+	// IMPORTANT: Don't keep both float and int8 - doubles memory!
+	// Only store int8 quantized in memory for search, not float vectors
+	keepFloatVectors := false // Changed from quantizeEnabled - saves ~40% memory!
+	mmapEnabled := true
+	mmapInitialMB := 4
+	if quantizeEnabled && !keepFloatVectors {
+		// The current mmap implementation only backs float32 vectors.
+		// For int8-only cosine indexes it is unused and just preallocates disk.
+		mmapEnabled = false
+	}
+	if v := os.Getenv("VECTRON_MMAP_VECTORS_ENABLED"); v != "" {
+		mmapEnabled = v == "1"
+	}
+	if v := os.Getenv("VECTRON_MMAP_INITIAL_MB"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			mmapInitialMB = n
+		}
+	}
 
 	// Vector compression is optional - consumes computation
 	compressionEnabled := os.Getenv("VECTRON_VECTOR_COMPRESSION") == "1"
@@ -32,7 +49,7 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 		indexFlushInterval = 500 * time.Millisecond
 	}
 	indexBatchSize := 4096
-	indexQueueSize := 200000
+	indexQueueSize := 100000 // Reduced from 200000 to prevent excessive memory usage
 	autoTune := os.Getenv("VECTRON_INDEX_AUTO_TUNE") == "1"
 	if v := os.Getenv("VECTRON_INDEX_BATCH_SIZE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -60,14 +77,16 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 	}
 	if writeSpeedMode {
 		indexBatchSize = 8192
-		indexQueueSize = 500000
+		indexQueueSize = 200000 // Capped to prevent excessive memory
 		if durabilityProfile != "relaxed" {
 			indexFlushInterval = 500 * time.Millisecond
 		}
 	}
 
-	hotEnabled := true  // Enable hot indexing by default for faster searches
-	hotMaxSize := 50000 // Increased from 30000
+	// Hot index is DISABLED by default to save memory (creates duplicate HNSW index)
+	// Enable via VECTRON_HOT_INDEX_ENABLED=1 if you need faster searches on recent data
+	hotEnabled := false
+	hotMaxSize := 30000
 	if v := os.Getenv("VECTRON_HOT_INDEX_ENABLED"); v != "" {
 		hotEnabled = v == "1"
 	}
@@ -85,9 +104,9 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 
 	return storage.HNSWConfig{
 		Dim:                      dim,
-		M:                        32, // Increased from 16 for better connectivity
-		EfConstruction:           200,
-		EfSearch:                 50, // Reduced from 100 for faster searches
+		M:                        16,  // Reduced from 32 to save memory - still good connectivity
+		EfConstruction:           128, // Reduced from 200 - faster build, less memory during build
+		EfSearch:                 50,  // Reduced from 100 for faster searches
 		DistanceMetric:           distance,
 		NormalizeVectors:         distance == "cosine",
 		QuantizeVectors:          quantizeEnabled,
@@ -107,8 +126,8 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 		MaintenanceInterval:      30 * time.Minute,
 		PruneEnabled:             false,
 		PruneMaxNodes:            2000,
-		MmapVectorsEnabled:       true, // Enable memory-mapped vectors for larger datasets
-		MmapInitialMB:            64,   // Start with 64MB, grows on demand (was 1024 = 1GB per shard)
+		MmapVectorsEnabled:       mmapEnabled,
+		MmapInitialMB:            mmapInitialMB,
 		WALBatchEnabled:          true,
 		AsyncIndexingEnabled:     true,
 		IndexingQueueSize:        indexQueueSize,
@@ -131,14 +150,14 @@ func autoTuneIndexSizing() (int, int) {
 		tunedBatch = 2048
 	}
 	if tunedBatch > 8192 {
-		tunedBatch = 8192
+		tunedBatch = 8192 // Cap at 8k to prevent excessive memory
 	}
 	tunedQueue := 25000 * procs
 	if tunedQueue < 50000 {
 		tunedQueue = 50000
 	}
-	if tunedQueue > 400000 {
-		tunedQueue = 400000
+	if tunedQueue > 200000 {
+		tunedQueue = 200000 // Cap at 200k to prevent excessive memory in queue
 	}
 	return tunedBatch, tunedQueue
 }
