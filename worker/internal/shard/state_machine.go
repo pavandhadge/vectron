@@ -311,19 +311,36 @@ func envBool(key string, fallback bool) bool {
 // NewStateMachine creates a new shard StateMachine.
 func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dimension int32, distance string, walHub *storage.WALHub) (*StateMachine, error) {
 	dbPath := filepath.Join(workerDataDir, fmt.Sprintf("shard-%d", clusterID))
+	namespace := []byte(fmt.Sprintf("s%020d:", clusterID))
+	if envBool("VECTRON_SHARED_PEBBLE", true) {
+		dbPath = filepath.Join(workerDataDir, "shared-pebble")
+	}
 
 	dim := int(dimension)
 	durabilityProfile := ParseDurabilityProfile()
 	writeSpeedMode := os.Getenv("VECTRON_WRITE_SPEED_MODE") == "1"
 	disablePrealloc := envBool("VECTRON_DISABLE_DISK_PREALLOC", false)
-	syncInterval := 500 * time.Millisecond
-	syncMaxInterval := 2 * time.Second
+	syncInterval := 250 * time.Millisecond
+	syncMaxInterval := 1 * time.Second
 	if durabilityProfile == "relaxed" {
-		syncInterval = 1 * time.Second
-		syncMaxInterval = 5 * time.Second
+		syncInterval = 200 * time.Millisecond
+		syncMaxInterval = 500 * time.Millisecond
+	}
+	if v := os.Getenv("VECTRON_BACKGROUND_SYNC_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			syncInterval = time.Duration(n) * time.Millisecond
+		}
+	}
+	if v := os.Getenv("VECTRON_BACKGROUND_SYNC_MAX_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			syncMaxInterval = time.Duration(n) * time.Millisecond
+		}
+	}
+	if syncMaxInterval < syncInterval {
+		syncMaxInterval = syncInterval
 	}
 	// Keep the default small to avoid large WAL preallocation on small datasets.
-	writeBufferSize := 32 * 1024 * 1024
+	writeBufferSize := 8 * 1024 * 1024
 	if v := os.Getenv("VECTRON_WRITE_BUFFER_MB"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			writeBufferSize = n * 1024 * 1024
@@ -355,6 +372,7 @@ func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dime
 	}
 
 	db := storage.NewPebbleDB()
+	db.SetNamespace(namespace)
 	if err := db.Init(dbPath, opts); err != nil {
 		return nil, fmt.Errorf("failed to initialize storage for shard %d: %w", clusterID, err)
 	}

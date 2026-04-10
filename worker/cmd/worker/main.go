@@ -64,7 +64,7 @@ func Start(nodeID uint64, raftAddr, grpcAddr string, pdAddrs []string, workerDat
 		NodeHostDir:       nhDataDir,
 		RaftAddress:       raftAddr,
 		ListenAddress:     raftAddr,
-		RTTMillisecond:    200,
+		RTTMillisecond:    50,
 		RaftEventListener: listener,
 	}
 	applyLogDBProfile(&nhc)
@@ -123,7 +123,7 @@ func Start(nodeID uint64, raftAddr, grpcAddr string, pdAddrs []string, workerDat
 	}
 	maxRecv := envIntDefault("GRPC_MAX_RECV_MB", 256) * 1024 * 1024
 	maxSend := envIntDefault("GRPC_MAX_SEND_MB", 256) * 1024 * 1024
-	maxStreams := envIntDefault("GRPC_MAX_STREAMS", 1024)
+	maxStreams := envIntDefault("GRPC_MAX_STREAMS", 20448) // Increased from 1024
 	s := grpc.NewServer(
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			Time:    30 * time.Second,
@@ -133,8 +133,8 @@ func Start(nodeID uint64, raftAddr, grpcAddr string, pdAddrs []string, workerDat
 			MinTime:             10 * time.Second,
 			PermitWithoutStream: true,
 		}),
-		grpc.ReadBufferSize(64*1024),
-		grpc.WriteBufferSize(64*1024),
+		grpc.ReadBufferSize(256*1024),  // Increased from 64KB to 256KB
+		grpc.WriteBufferSize(256*1024), // Increased from 64KB to 256KB
 		grpc.MaxConcurrentStreams(uint32(maxStreams)),
 		grpc.MaxRecvMsgSize(maxRecv),
 		grpc.MaxSendMsgSize(maxSend),
@@ -253,6 +253,25 @@ func startSelfDumpProfiles(role string) {
 	}
 	if v := envInt("PPROF_BLOCK_RATE"); v > 0 {
 		runtime.SetBlockProfileRate(v)
+	}
+
+	// Heap profile for memory debugging
+	heapPath := os.Getenv("PPROF_HEAP_PATH")
+	if heapPath != "" {
+		_ = os.MkdirAll(filepath.Dir(heapPath), 0755)
+		go func() {
+			// Dump heap profile every 30 seconds
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				<-ticker.C
+				if f, err := os.Create(heapPath + "." + strconv.FormatInt(time.Now().Unix(), 10)); err == nil {
+					rpprof.Lookup("heap").WriteTo(f, 0)
+					_ = f.Close()
+					log.Printf("%s heap profile -> %s", role, f.Name())
+				}
+			}
+		}()
 	}
 
 	cpuPath := os.Getenv("PPROF_CPU_PATH")

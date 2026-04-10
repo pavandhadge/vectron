@@ -106,6 +106,23 @@ func (m *vectorMmap) allocFloat32(n int) ([]float32, error) {
 	return unsafe.Slice((*float32)(ptr), n), nil
 }
 
+func (m *vectorMmap) allocInt8(n int) ([]int8, error) {
+	if n <= 0 {
+		return nil, nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	bytes := int64(n)
+	if err := m.ensureCapacity(bytes); err != nil {
+		return nil, err
+	}
+	offset := m.used
+	m.used += bytes
+	buf := m.data[offset : offset+bytes]
+	ptr := unsafe.Pointer(&buf[0])
+	return unsafe.Slice((*int8)(ptr), n), nil
+}
+
 func (h *HNSW) enableMmapVectors(path string, initialSize int64) error {
 	if h.mmapStore != nil {
 		return nil
@@ -115,16 +132,27 @@ func (h *HNSW) enableMmapVectors(path string, initialSize int64) error {
 		return err
 	}
 	for _, node := range h.nodes {
-		if node == nil || node.Vec == nil {
+		if node == nil {
 			continue
 		}
-		dst, err := store.allocFloat32(len(node.Vec))
-		if err != nil {
-			_ = store.Close()
-			return err
+		if node.Vec != nil {
+			dst, err := store.allocFloat32(len(node.Vec))
+			if err != nil {
+				_ = store.Close()
+				return err
+			}
+			copy(dst, node.Vec)
+			node.Vec = dst
 		}
-		copy(dst, node.Vec)
-		node.Vec = dst
+		if node.QVec != nil {
+			dst, err := store.allocInt8(len(node.QVec))
+			if err != nil {
+				_ = store.Close()
+				return err
+			}
+			copy(dst, node.QVec)
+			node.QVec = dst
+		}
 	}
 	h.mmapStore = store
 	return nil
