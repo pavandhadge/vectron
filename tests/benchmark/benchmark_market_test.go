@@ -113,6 +113,7 @@ func TestMarketTrafficBenchmark(t *testing.T) {
 			batchSize = datasetSize
 		}
 		startLoad := time.Now()
+		preloadBatches := make([][]*apigatewaypb.Point, 0, (datasetSize+batchSize-1)/batchSize)
 		for i := 0; i < datasetSize; i += batchSize {
 			end := i + batchSize
 			if end > datasetSize {
@@ -125,10 +126,10 @@ func TestMarketTrafficBenchmark(t *testing.T) {
 				vectors = append(vectors, vec)
 				points = append(points, &apigatewaypb.Point{Id: id, Vector: vec})
 			}
-			_, err := upsertWithRetry(ctx, client, &apigatewaypb.UpsertRequest{Collection: collection, Points: points}, 3)
-			if err != nil {
-				t.Fatalf("failed to preload vectors: %v", err)
-			}
+			preloadBatches = append(preloadBatches, points)
+		}
+		if _, _, err := upsertBatchesConcurrently(ctx, client, collection, preloadBatches, 3); err != nil {
+			t.Fatalf("failed to preload vectors: %v", err)
 		}
 		log.Printf("Preload: %d vectors in %s", datasetSize, time.Since(startLoad))
 

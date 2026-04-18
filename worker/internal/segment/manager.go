@@ -13,8 +13,6 @@ import (
 	"github.com/cockroachdb/pebble"
 )
 
-var segmentDocMarker = []byte{1}
-
 type segmentIndexOpType int
 
 const (
@@ -24,11 +22,13 @@ const (
 )
 
 type segmentIndexOp struct {
-	opType segmentIndexOpType
-	id     string
-	vector []float32
-	segID  SegmentID
-	done   chan struct{}
+	opType  segmentIndexOpType
+	id      string
+	vector  []float32
+	ids     []string
+	vectors [][]float32
+	segID   SegmentID
+	done    chan struct{}
 }
 
 type ShardIndexManager struct {
@@ -73,6 +73,23 @@ func NewShardIndexManager(shardID uint64, db *pebble.DB, opts Config) (*ShardInd
 		mgr.manifest = mgr.createDefaultManifest()
 	}
 
+	mgr.sealer = NewSealer(db, shardID, opts)
+	if tombstones, err := mgr.sealTombstones(); err == nil {
+		mgr.tombstones = tombstones
+	}
+	mgr.immutables = NewImmutableSegmentStore(opts)
+	immutableIDs := make(map[string]struct{})
+	for _, segID := range mgr.manifest.ImmutableSegments {
+		seg, err := LoadImmutableSegment(shardID, segID, opts, false)
+		if err != nil {
+			log.Printf("Failed to load immutable segment %s: %v", segID, err)
+			continue
+		}
+		mgr.immutables.Add(seg)
+		for _, id := range seg.AllIDs() {
+			immutableIDs[id] = struct{}{}
+		}
+	}
 	if mgr.manifest.MutableSegmentID == "" {
 		mutable, err := NewMutableSegment(shardID, opts)
 		if err != nil {
@@ -85,29 +102,14 @@ func NewShardIndexManager(shardID uint64, db *pebble.DB, opts Config) (*ShardInd
 			return nil, err
 		}
 	} else {
-		mutable, err := LoadMutableSegment(shardID, mgr.manifest.MutableSegmentID, opts, manifestStore)
+		mutable, err := LoadMutableSegment(shardID, mgr.manifest.MutableSegmentID, opts, db, immutableIDs, mgr.tombstones)
 		if err != nil {
 			return nil, err
 		}
 		mgr.mutable = mutable
 	}
 
-	mgr.immutables = NewImmutableSegmentStore(opts)
-
-	for _, segID := range mgr.manifest.ImmutableSegments {
-		seg, err := LoadImmutableSegment(shardID, segID, opts, false)
-		if err != nil {
-			log.Printf("Failed to load immutable segment %s: %v", segID, err)
-			continue
-		}
-		mgr.immutables.Add(seg)
-	}
-
 	mgr.searcher = NewSearcher(mgr.mutable, mgr.immutables)
-	mgr.sealer = NewSealer(db, shardID, opts)
-	if tombstones, err := mgr.sealTombstones(); err == nil {
-		mgr.tombstones = tombstones
-	}
 
 	mgr.wg.Add(1)
 	go mgr.compactionLoop()
@@ -149,9 +151,6 @@ func (m *ShardIndexManager) Add(id string, vec []float32) error {
 		return fmt.Errorf("no mutable segment available")
 	}
 	segID := mutable.ID()
-	if err := m.db.Set(SegmentDocKey(m.config.Namespace, m.shardID, segID, id), segmentDocMarker, nil); err != nil {
-		return err
-	}
 	if m.asyncIndex {
 		if err := mutable.ReserveAdd(vec); err != nil {
 			return err
@@ -180,34 +179,39 @@ func (m *ShardIndexManager) AddBatch(ids []string, vectors [][]float32) error {
 		return fmt.Errorf("no mutable segment available")
 	}
 	segID := mutable.ID()
-	batch := m.db.NewBatch()
-	defer batch.Close()
-	for _, id := range ids {
-		if err := batch.Set(SegmentDocKey(m.config.Namespace, m.shardID, segID, id), segmentDocMarker, nil); err != nil {
+	if m.asyncIndex {
+		if err := mutable.ReserveAddBatch(vectors); err != nil {
 			return err
 		}
-	}
-	if err := batch.Commit(nil); err != nil {
-		return err
-	}
-	if m.asyncIndex {
-		for i := range ids {
-			if err := mutable.ReserveAdd(vectors[i]); err != nil {
-				return err
-			}
-			m.enqueueIndexOp(segmentIndexOp{opType: segmentIndexOpAdd, id: ids[i], vector: vectors[i], segID: segID})
-		}
+		m.enqueueIndexBatch(segID, ids, vectors)
 	} else {
-		for i := range ids {
-			if err := mutable.Add(ids[i], vectors[i]); err != nil {
-				return err
-			}
+		if err := mutable.ApplyAddBatch(ids, vectors); err != nil {
+			return err
 		}
 	}
 	if mutable.ShouldSeal() {
 		m.triggerSeal()
 	}
 	return nil
+}
+
+func (m *ShardIndexManager) enqueueIndexBatch(segID SegmentID, ids []string, vectors [][]float32) {
+	if m.indexerCh == nil {
+		return
+	}
+	op := segmentIndexOp{
+		opType:  segmentIndexOpAdd,
+		segID:   segID,
+		ids:     ids,
+		vectors: vectors,
+	}
+	atomic.AddUint64(&m.indexPending, uint64(len(ids)))
+	select {
+	case m.indexerCh <- op:
+	default:
+		atomic.AddUint64(&m.indexPending, ^uint64(len(ids)-1))
+		m.applyIndexOp(op)
+	}
 }
 
 func (m *ShardIndexManager) Delete(id string) error {
@@ -222,9 +226,6 @@ func (m *ShardIndexManager) Delete(id string) error {
 			}
 		} else {
 			m.enqueueIndexOp(segmentIndexOp{opType: segmentIndexOpDelete, id: id, segID: mutable.ID()})
-		}
-		if err := m.db.Delete(SegmentDocKey(m.config.Namespace, m.shardID, mutable.ID(), id), nil); err != nil && err != pebble.ErrNotFound {
-			return err
 		}
 	}
 
@@ -414,6 +415,10 @@ func (m *ShardIndexManager) applyIndexOp(op segmentIndexOp) {
 	}
 	switch op.opType {
 	case segmentIndexOpAdd:
+		if len(op.ids) > 0 {
+			_ = mutable.ApplyAddBatch(op.ids, op.vectors)
+			return
+		}
 		_ = mutable.ApplyAdd(op.id, op.vector)
 	case segmentIndexOpDelete:
 		_ = mutable.ApplyDelete(op.id)
@@ -437,10 +442,18 @@ func (m *ShardIndexManager) indexerLoop() {
 		if len(ops) == 0 {
 			return
 		}
+		var applied uint64
 		for _, op := range ops {
 			m.applyIndexOp(op)
+			if len(op.ids) > 0 {
+				applied += uint64(len(op.ids))
+			} else {
+				applied++
+			}
 		}
-		atomic.AddUint64(&m.indexPending, ^uint64(len(ops)-1))
+		if applied > 0 {
+			atomic.AddUint64(&m.indexPending, ^uint64(applied-1))
+		}
 		ops = ops[:0]
 	}
 	for {

@@ -62,7 +62,7 @@ func (s *Sealer) Seal(mutable *MutableSegment, manifest *ShardManifest) error {
 	vectorsPath := filepath.Join(segPath, "vectors.bin")
 	offsetsPath := filepath.Join(segPath, "offsets.bin")
 	idsPath := filepath.Join(segPath, "ids.json")
-	if err := s.persistVectors(mutable.ID(), vectorsPath, offsetsPath, idsPath); err != nil {
+	if err := s.persistVectors(mutable, vectorsPath, offsetsPath, idsPath); err != nil {
 		return fmt.Errorf("failed to persist vectors: %w", err)
 	}
 
@@ -84,7 +84,7 @@ func (s *Sealer) Seal(mutable *MutableSegment, manifest *ShardManifest) error {
 	return nil
 }
 
-func (s *Sealer) persistVectors(segID SegmentID, vectorsPath, offsetsPath, idsPath string) error {
+func (s *Sealer) persistVectors(mutable *MutableSegment, vectorsPath, offsetsPath, idsPath string) error {
 	vectorsFile, err := os.Create(vectorsPath)
 	if err != nil {
 		return err
@@ -96,22 +96,12 @@ func (s *Sealer) persistVectors(segID SegmentID, vectorsPath, offsetsPath, idsPa
 		return err
 	}
 	defer offsetsFile.Close()
-	prefix := SegmentDocPrefix(s.config.Namespace, s.shardID, segID)
-	iter := s.db.NewIter(&pebble.IterOptions{
-		LowerBound: prefix,
-		UpperBound: prefixPrefixSuccessor(prefix),
-	})
-	defer iter.Close()
 	var (
 		offsets []uint64
 		ids     []string
 		offset  uint64
 	)
-	for iter.First(); iter.Valid(); iter.Next() {
-		_, docID, ok := ParseSegmentDocKey(s.config.Namespace, iter.Key())
-		if !ok {
-			continue
-		}
+	for _, docID := range mutable.ActiveIDs() {
 		val, closer, err := s.db.Get(primaryVectorKey(s.config.Namespace, docID))
 		if err != nil {
 			continue
@@ -128,9 +118,6 @@ func (s *Sealer) persistVectors(segID SegmentID, vectorsPath, offsetsPath, idsPa
 			return err
 		}
 		offset += uint64(n)
-	}
-	if err := iter.Error(); err != nil {
-		return err
 	}
 	buf := make([]byte, 8)
 	for _, off := range offsets {
@@ -209,29 +196,6 @@ func (s *Sealer) compactSegments(segIDs []SegmentID, newSegID SegmentID, manifes
 		SkipPersistNode:   true,
 	}
 	hnsw := idxhnsw.NewHNSW(newMemStore(), s.config.Dimension, hnswCfg)
-	entries := make(map[string][]float32)
-	for i := len(segIDs) - 1; i >= 0; i-- {
-		seg, err := LoadImmutableSegment(s.shardID, segIDs[i], s.config, false)
-		if err != nil {
-			return err
-		}
-		defer seg.Close()
-		for _, id := range seg.AllIDs() {
-			if _, dead := tombstones[id]; dead {
-				continue
-			}
-			if _, seen := entries[id]; seen {
-				continue
-			}
-			vec, ok := seg.VectorByID(id)
-			if !ok {
-				continue
-			}
-			entries[id] = vec
-		}
-	}
-	ids := make([]string, 0, len(entries))
-	offsets := make([]uint64, 0, len(entries))
 	vectorsPath := filepath.Join(segPath, segmentVectorsFile)
 	offsetsPath := filepath.Join(segPath, segmentOffsetsFile)
 	idsPath := filepath.Join(segPath, segmentIDsFile)
@@ -245,20 +209,43 @@ func (s *Sealer) compactSegments(segIDs []SegmentID, newSegID SegmentID, manifes
 		return err
 	}
 	defer of.Close()
+	seen := make(map[string]struct{})
+	ids := make([]string, 0, 1024)
+	offsets := make([]uint64, 0, 1024)
 	var totalBytes int64
 	var off uint64
-	for id, vec := range entries {
-		if err := hnsw.Add(id, vec); err != nil {
-			return err
-		}
-		ids = append(ids, id)
-		offsets = append(offsets, off)
-		n, err := writeVectorPayload(vf, vec)
+	for i := len(segIDs) - 1; i >= 0; i-- {
+		seg, err := LoadImmutableSegment(s.shardID, segIDs[i], s.config, false)
 		if err != nil {
 			return err
 		}
-		off += uint64(n)
-		totalBytes += estimateVectorBytes(vec)
+		for _, id := range seg.AllIDs() {
+			if _, dead := tombstones[id]; dead {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			vec, ok := seg.VectorByID(id)
+			if !ok {
+				continue
+			}
+			if err := hnsw.Add(id, vec); err != nil {
+				seg.Close()
+				return err
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+			offsets = append(offsets, off)
+			n, err := writeVectorPayload(vf, vec)
+			if err != nil {
+				seg.Close()
+				return err
+			}
+			off += uint64(n)
+			totalBytes += estimateVectorBytes(vec)
+		}
+		seg.Close()
 	}
 	buf := make([]byte, 8)
 	for _, v := range offsets {

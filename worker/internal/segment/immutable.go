@@ -99,9 +99,6 @@ func (s *ImmutableSegment) Search(vec []float32, k, ef int) ([]string, []float32
 	if candidateK < ef {
 		candidateK = ef
 	}
-	if candidateK < k*4 {
-		candidateK = k * 4
-	}
 	if candidateK <= 0 {
 		candidateK = k
 	}
@@ -115,7 +112,15 @@ func (s *ImmutableSegment) Search(vec []float32, k, ef int) ([]string, []float32
 	} else {
 		ids, scores = s.hnsw.SearchWithEf(vec, candidateK, ef)
 	}
-	return s.rerankLocked(vec, ids, scores, k)
+
+	// Worker-side rerank intentionally disabled.
+	// External ranker handles exact rerank, so worker returns ANN results directly.
+	// To re-enable local rerank later, uncomment line below and remove direct return.
+	// return s.rerankLocked(vec, ids, scores, k)
+	if k > 0 && len(ids) > k {
+		return ids[:k], scores[:k]
+	}
+	return ids, scores
 }
 
 func (s *ImmutableSegment) Size() int64 {
@@ -213,6 +218,45 @@ func (s *ImmutableSegment) vectorAtLocked(idx int) ([]float32, error) {
 	return vec, nil
 }
 
+func (s *ImmutableSegment) distanceAtLocked(query []float32, idx int) (float32, error) {
+	if idx < 0 || idx >= len(s.offsets) || len(s.vectorsMM) == 0 {
+		return 0, fmt.Errorf("vector index out of range")
+	}
+	off := s.offsets[idx]
+	if off > uint64(len(s.vectorsMM)) || off+4 > uint64(len(s.vectorsMM)) {
+		return 0, fmt.Errorf("invalid vector offset")
+	}
+	buf := s.vectorsMM[off:]
+	n := int(binary.LittleEndian.Uint32(buf[:4]))
+	if n != len(query) || 4+n*4 > len(buf) {
+		return 0, fmt.Errorf("invalid vector payload size")
+	}
+	pos := 4
+	if s.config.HNSWConfig.Distance == "cosine" {
+		var dot, normQ, normV float32
+		for i := 0; i < n; i++ {
+			v := mathFloat32frombits(binary.LittleEndian.Uint32(buf[pos : pos+4]))
+			pos += 4
+			q := query[i]
+			dot += q * v
+			normQ += q * q
+			normV += v * v
+		}
+		if normQ == 0 || normV == 0 {
+			return 2, nil
+		}
+		return 1 - dot/(float32(math.Sqrt(float64(normQ)))*float32(math.Sqrt(float64(normV)))), nil
+	}
+	var sum float32
+	for i := 0; i < n; i++ {
+		v := mathFloat32frombits(binary.LittleEndian.Uint32(buf[pos : pos+4]))
+		pos += 4
+		d := query[i] - v
+		sum += d * d
+	}
+	return sum, nil
+}
+
 func (s *ImmutableSegment) rerankLocked(query []float32, ids []string, scores []float32, k int) ([]string, []float32) {
 	if len(ids) == 0 || len(s.offsets) == 0 {
 		if k > 0 && len(ids) > k {
@@ -230,13 +274,9 @@ func (s *ImmutableSegment) rerankLocked(query []float32, ids []string, scores []
 		if !ok {
 			continue
 		}
-		vec, err := s.vectorAtLocked(idx)
+		score, err := s.distanceAtLocked(query, idx)
 		if err != nil {
 			continue
-		}
-		score := idxhnsw.EuclideanDistance(query, vec)
-		if s.config.HNSWConfig.Distance == "cosine" {
-			score = idxhnsw.CosineDistance(query, vec)
 		}
 		ranked = append(ranked, cand{id: id, score: score})
 	}

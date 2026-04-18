@@ -21,6 +21,7 @@ type MutableSegment struct {
 	hnswHot *idxhnsw.HNSW
 	mu      sync.RWMutex
 	config  Config
+	docSet  map[string]struct{}
 }
 
 var segmentIDCounter uint64
@@ -29,27 +30,29 @@ func NewMutableSegment(shardID uint64, cfg Config) (*MutableSegment, error) {
 	return newMutableSegmentWithID(shardID, GenerateSegmentID(), cfg)
 }
 
-func LoadMutableSegment(shardID uint64, segmentID SegmentID, cfg Config, db *ManifestStore) (*MutableSegment, error) {
+func LoadMutableSegment(shardID uint64, segmentID SegmentID, cfg Config, db *pebble.DB, immutableIDs map[string]struct{}, tombstones map[string]int64) (*MutableSegment, error) {
 	ms, err := newMutableSegmentWithID(shardID, segmentID, cfg)
 	if err != nil {
 		return nil, err
 	}
-	iter := db.db.NewIter(&pebble.IterOptions{
-		LowerBound: SegmentDocPrefix(cfg.Namespace, shardID, segmentID),
-		UpperBound: prefixPrefixSuccessor(SegmentDocPrefix(cfg.Namespace, shardID, segmentID)),
+	prefix := append(append([]byte(nil), cfg.Namespace...), 'v', '_')
+	iter := db.NewIter(&pebble.IterOptions{
+		LowerBound: prefix,
+		UpperBound: prefixPrefixSuccessor(prefix),
 	})
 	defer iter.Close()
 	for iter.First(); iter.Valid(); iter.Next() {
-		_, docID, ok := ParseSegmentDocKey(cfg.Namespace, iter.Key())
+		docID, ok := parsePrimaryVectorDocID(cfg.Namespace, iter.Key())
 		if !ok {
 			continue
 		}
-		val, closer, err := db.db.Get(primaryVectorKey(cfg.Namespace, docID))
-		if err != nil {
+		if _, dead := tombstones[docID]; dead {
 			continue
 		}
-		vec, err := decodePrimaryVector(val)
-		closer.Close()
+		if _, sealed := immutableIDs[docID]; sealed {
+			continue
+		}
+		vec, err := decodePrimaryVector(iter.Value())
 		if err != nil {
 			continue
 		}
@@ -90,6 +93,7 @@ func newMutableSegmentWithID(shardID uint64, segmentID SegmentID, cfg Config) (*
 		},
 		hnsw:   hnsw,
 		config: cfg,
+		docSet: make(map[string]struct{}),
 	}
 
 	return ms, nil
@@ -110,13 +114,15 @@ func (m *MutableSegment) Add(id string, vec []float32) error {
 	if err := m.hnsw.Add(id, vec); err != nil {
 		return err
 	}
+	if _, exists := m.docSet[id]; !exists {
+		m.docSet[id] = struct{}{}
+		m.meta.VectorCount++
+		m.meta.BytesEstimate += estimateVectorBytes(vec)
+	}
 
 	if m.hnswHot != nil {
 		_ = m.hnswHot.Add(id, vec)
 	}
-
-	m.meta.VectorCount++
-	m.meta.BytesEstimate += estimateVectorBytes(vec)
 
 	return nil
 }
@@ -128,8 +134,16 @@ func (m *MutableSegment) ReserveAdd(vec []float32) error {
 	if m.meta.State != SegmentStateMutable {
 		return fmt.Errorf("segment %s is not mutable", m.meta.ID)
 	}
-	m.meta.VectorCount++
-	m.meta.BytesEstimate += estimateVectorBytes(vec)
+	return nil
+}
+
+func (m *MutableSegment) ReserveAddBatch(vectors [][]float32) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.meta.State != SegmentStateMutable {
+		return fmt.Errorf("segment %s is not mutable", m.meta.ID)
+	}
 	return nil
 }
 
@@ -143,8 +157,36 @@ func (m *MutableSegment) ApplyAdd(id string, vec []float32) error {
 	if err := m.hnsw.Add(id, vec); err != nil {
 		return err
 	}
+	if _, exists := m.docSet[id]; !exists {
+		m.docSet[id] = struct{}{}
+		m.meta.VectorCount++
+		m.meta.BytesEstimate += estimateVectorBytes(vec)
+	}
 	if m.hnswHot != nil {
 		_ = m.hnswHot.Add(id, vec)
+	}
+	return nil
+}
+
+func (m *MutableSegment) ApplyAddBatch(ids []string, vectors [][]float32) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.meta.State != SegmentStateMutable {
+		return fmt.Errorf("segment %s is not mutable", m.meta.ID)
+	}
+	for i := range ids {
+		if err := m.hnsw.Add(ids[i], vectors[i]); err != nil {
+			return err
+		}
+		if _, exists := m.docSet[ids[i]]; !exists {
+			m.docSet[ids[i]] = struct{}{}
+			m.meta.VectorCount++
+			m.meta.BytesEstimate += estimateVectorBytes(vectors[i])
+		}
+		if m.hnswHot != nil {
+			_ = m.hnswHot.Add(ids[i], vectors[i])
+		}
 	}
 	return nil
 }
@@ -158,6 +200,7 @@ func (m *MutableSegment) Delete(id string) error {
 	}
 
 	_ = m.hnsw.Delete(id)
+	delete(m.docSet, id)
 	if m.hnswHot != nil {
 		_ = m.hnswHot.Delete(id)
 	}
@@ -170,10 +213,22 @@ func (m *MutableSegment) ApplyDelete(id string) error {
 	defer m.mu.Unlock()
 
 	_ = m.hnsw.Delete(id)
+	delete(m.docSet, id)
 	if m.hnswHot != nil {
 		_ = m.hnswHot.Delete(id)
 	}
 	return nil
+}
+
+func (m *MutableSegment) ActiveIDs() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	ids := make([]string, 0, len(m.docSet))
+	for id := range m.docSet {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func (m *MutableSegment) Search(vec []float32, k, ef int) ([]string, []float32) {
@@ -301,6 +356,19 @@ func primaryVectorKey(namespace []byte, id string) []byte {
 	buf = append(buf, 'v', '_')
 	buf = append(buf, id...)
 	return buf
+}
+
+func parsePrimaryVectorDocID(namespace, key []byte) (string, bool) {
+	if len(namespace) > 0 {
+		if len(key) < len(namespace)+2 {
+			return "", false
+		}
+		key = key[len(namespace):]
+	}
+	if len(key) < 2 || key[0] != 'v' || key[1] != '_' {
+		return "", false
+	}
+	return string(key[2:]), true
 }
 
 func decodeSegmentVector(data []byte) ([]float32, error) {

@@ -44,6 +44,10 @@ func (s *GrpcServer) Rerank(ctx context.Context, req *pb.RerankRequest) (*pb.Rer
 	}
 
 	// Convert proto request to internal format
+	needsVectors := true
+	if vs, ok := s.strategy.(VectorStrategy); ok {
+		needsVectors = vs.NeedsCandidateVectors()
+	}
 	input := &RerankInput{
 		Query:      req.GetQuery(),
 		Candidates: make([]Candidate, len(req.GetCandidates())),
@@ -54,12 +58,15 @@ func (s *GrpcServer) Rerank(ctx context.Context, req *pb.RerankRequest) (*pb.Rer
 	// Extract candidate IDs for cache key generation
 	candidateIDs := make([]string, len(req.GetCandidates()))
 	for i, c := range req.GetCandidates() {
-		input.Candidates[i] = Candidate{
+		candidate := Candidate{
 			ID:       c.GetId(),
 			Score:    c.GetScore(),
-			Vector:   c.GetVector(),
 			Metadata: c.GetMetadata(),
 		}
+		if needsVectors {
+			candidate.Vector = c.GetVector()
+		}
+		input.Candidates[i] = candidate
 		candidateIDs[i] = c.GetId()
 	}
 

@@ -414,11 +414,15 @@ func (s *GrpcServer) SearchShard(ctx context.Context, shardID uint64, query shar
 	if !linearizable && envBool("VECTRON_WORKER_FAST_STALE_READ", false) {
 		if provider, ok := s.shardManager.(stateMachineProvider); ok {
 			if sm := provider.GetStateMachine(shardID); sm != nil {
-				ids, scores, err := sm.Search(query.Vector, query.K)
+				res, err := sm.Lookup(query)
 				if err != nil {
 					return nil, err
 				}
-				return &shard.SearchResult{IDs: ids, Scores: scores}, nil
+				searchResult, ok := res.(*shard.SearchResult)
+				if !ok {
+					return nil, status.Errorf(codes.Internal, "unexpected fast search result type: %T", res)
+				}
+				return searchResult, nil
 			}
 		}
 	}

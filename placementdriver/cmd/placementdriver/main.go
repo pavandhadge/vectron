@@ -87,10 +87,9 @@ func Start(nodeID, clusterID uint64, raftAddr, grpcAddr, dataDir string, initial
 		log.Fatalf("failed to listen on %s: %v", grpcAddr, err)
 	}
 
-	// Create gRPC server with timeout interceptor
+	// Placement traffic is mostly short control-plane RPCs. Favor transport throughput
+	// over blanket interceptor deadlines; callers should own request timeouts.
 	s := grpc.NewServer(
-		grpc.UnaryInterceptor(graceful.TimeoutInterceptor(30*time.Second)),
-		grpc.StreamInterceptor(graceful.TimeoutInterceptorStream(30*time.Second)),
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			Time:    30 * time.Second,
 			Timeout: 10 * time.Second,
@@ -99,9 +98,9 @@ func Start(nodeID, clusterID uint64, raftAddr, grpcAddr, dataDir string, initial
 			MinTime:             10 * time.Second,
 			PermitWithoutStream: true,
 		}),
-		grpc.ReadBufferSize(64*1024),
-		grpc.WriteBufferSize(64*1024),
-		grpc.MaxConcurrentStreams(1024),
+		grpc.ReadBufferSize(256*1024),
+		grpc.WriteBufferSize(256*1024),
+		grpc.MaxConcurrentStreams(4096),
 	)
 	pb.RegisterPlacementServiceServer(s, grpcServer)
 

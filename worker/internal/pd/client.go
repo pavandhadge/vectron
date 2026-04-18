@@ -44,21 +44,21 @@ type LeaderInfo struct {
 
 // Client is a gRPC client for the Placement Driver service.
 type Client struct {
-	pdAddrs      []string
-	leader       *LeaderInfo
-	leaderMu     sync.RWMutex
-	workerID     uint64 // The ID assigned by the PD after registration.
-	grpcAddr     string // The gRPC address of this worker.
-	raftAddr     string // The Raft address of this worker.
-	shardManager ShardManager
+	pdAddrs              []string
+	leader               *LeaderInfo
+	leaderMu             sync.RWMutex
+	workerID             uint64 // The ID assigned by the PD after registration.
+	grpcAddr             string // The gRPC address of this worker.
+	raftAddr             string // The Raft address of this worker.
+	shardManager         ShardManager
 	lastAssignmentsEpoch uint64
-	workerAddrMu sync.RWMutex
-	workerAddrCache map[uint64]addrCacheEntry
+	workerAddrMu         sync.RWMutex
+	workerAddrCache      map[uint64]addrCacheEntry
 }
 
 type addrCacheEntry struct {
-	addr     string
-	expires  time.Time
+	addr    string
+	expires time.Time
 }
 
 // WorkerID returns the assigned worker ID from the placement driver.
@@ -88,11 +88,10 @@ func (c *Client) updateLeader(ctx context.Context) error {
 				Timeout:             5 * time.Second,
 				PermitWithoutStream: true,
 			}),
-			grpc.WithInitialWindowSize(1<<20),
-			grpc.WithInitialConnWindowSize(1<<20),
-			grpc.WithReadBufferSize(64*1024),
-			grpc.WithWriteBufferSize(64*1024),
-			grpc.WithBlock(),
+			grpc.WithInitialWindowSize(4<<20),
+			grpc.WithInitialConnWindowSize(4<<20),
+			grpc.WithReadBufferSize(256*1024),
+			grpc.WithWriteBufferSize(256*1024),
 		)
 		if err != nil {
 			log.Printf("Failed to connect to PD node at %s: %v", addr, err)
@@ -128,11 +127,11 @@ func (c *Client) updateLeader(ctx context.Context) error {
 // NewClient creates a new client for the Placement Driver.
 func NewClient(pdAddrs []string, grpcAddr, raftAddr string, workerID uint64, shardManager ShardManager) (*Client, error) {
 	c := &Client{
-		pdAddrs:      pdAddrs,
-		grpcAddr:     grpcAddr,
-		raftAddr:     raftAddr,
-		workerID:     workerID,
-		shardManager: shardManager,
+		pdAddrs:         pdAddrs,
+		grpcAddr:        grpcAddr,
+		raftAddr:        raftAddr,
+		workerID:        workerID,
+		shardManager:    shardManager,
 		workerAddrCache: make(map[uint64]addrCacheEntry),
 	}
 
@@ -216,15 +215,15 @@ func (c *Client) Register(ctx context.Context) error {
 	rack, zone, region := collectFailureDomain()
 
 	req := &pd.RegisterWorkerRequest{
-		GrpcAddress: c.grpcAddr,
-		RaftAddress: c.raftAddr,
+		GrpcAddress:  c.grpcAddr,
+		RaftAddress:  c.raftAddr,
 		Capabilities: c.workerCapabilities(),
-		CpuCores:    cpuCores,
-		MemoryBytes: memoryBytes,
-		DiskBytes:   diskBytes,
-		Rack:        rack,
-		Zone:        zone,
-		Region:      region,
+		CpuCores:     cpuCores,
+		MemoryBytes:  memoryBytes,
+		DiskBytes:    diskBytes,
+		Rack:         rack,
+		Zone:         zone,
+		Region:       region,
 	}
 
 	leader, err := c.getLeader()

@@ -340,9 +340,9 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 		r.recordHNSWWrite(uint64(len(added)))
 	}
 
-	// Trigger an early flush after meaningful batch writes so per-shard memtables
-	// and Pebble WAL do not accumulate across many active shards during ingest.
-	if len(added) >= 20 {
+	// Trigger early flush only for very large bursts. Small batches should stay in RAM.
+	flushThreshold := envInt("VECTRON_EARLY_FLUSH_BATCH", 128)
+	if flushThreshold > 0 && len(added) >= flushThreshold {
 		r.requestEarlyFlush()
 	}
 
