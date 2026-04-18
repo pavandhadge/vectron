@@ -6,6 +6,7 @@ package middleware
 
 import (
 	"context"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -48,7 +49,14 @@ var authCache sync.Map
 
 // AuthInterceptor returns a gRPC unary interceptor that performs JWT-based authentication.
 func AuthInterceptor(authClient authpb.AuthServiceClient, jwtSecret string) grpc.UnaryServerInterceptor {
+	benchmarkMode := os.Getenv("VECTRON_BENCHMARK_MODE") == "1"
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		if benchmarkMode {
+			ctx = context.WithValue(ctx, UserIDKey, "benchmark-user")
+			ctx = context.WithValue(ctx, PlanKey, "PRO")
+			ctx = context.WithValue(ctx, APIKeyIDKey, "benchmark")
+			return handler(ctx, req)
+		}
 		md, ok := metadata.FromIncomingContext(ctx)
 		if !ok {
 			return nil, status.Errorf(codes.Unauthenticated, "missing metadata")

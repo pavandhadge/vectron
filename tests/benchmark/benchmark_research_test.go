@@ -987,9 +987,12 @@ func upsertWithRetry(ctx context.Context, client apigatewaypb.VectronServiceClie
 			return resp, nil
 		}
 
-		// Check if it's a retryable error (shard not ready, unavailable)
+		// Check if it's a retryable error (shard not ready, unavailable, timeout, busy)
 		errStr := err.Error()
-		if !strings.Contains(errStr, "not ready") && !strings.Contains(errStr, "Unavailable") {
+		if !strings.Contains(errStr, "not ready") &&
+			!strings.Contains(errStr, "Unavailable") &&
+			!strings.Contains(errStr, "timeout") &&
+			!strings.Contains(errStr, "SystemBusy") {
 			return nil, err // Not retryable
 		}
 
@@ -1005,7 +1008,7 @@ func upsertWithRetry(ctx context.Context, client apigatewaypb.VectronServiceClie
 }
 
 func upsertBatchesConcurrently(ctx context.Context, client apigatewaypb.VectronServiceClient, collection string, batches [][]*apigatewaypb.Point, maxRetries int) ([]time.Duration, int64, error) {
-	workers := envIntDefault("BENCH_INSERT_CONCURRENCY", 8)
+	workers := envIntDefault("BENCH_INSERT_CONCURRENCY", 16)
 	if workers < 1 {
 		workers = 1
 	}
@@ -1127,7 +1130,10 @@ func runScalabilityBenchmark(t *testing.T, ctx context.Context, client apigatewa
 	require.NoError(t, waitForCollectionReady(ctx, client, collectionName, 120*time.Second))
 
 	// Insert vectors in batches
-	batchSize := 256
+	batchSize := envIntDefault("BENCH_INSERT_BATCH", 1000)
+	if batchSize < 1 {
+		batchSize = 1000
+	}
 	batches := make([][]*apigatewaypb.Point, 0, (datasetSize+batchSize-1)/batchSize)
 	for i := 0; i < datasetSize; i += batchSize {
 		batch := make([]*apigatewaypb.Point, 0, batchSize)

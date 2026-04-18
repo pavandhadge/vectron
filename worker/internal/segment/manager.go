@@ -22,13 +22,11 @@ const (
 )
 
 type segmentIndexOp struct {
-	opType  segmentIndexOpType
-	id      string
-	vector  []float32
-	ids     []string
-	vectors [][]float32
-	segID   SegmentID
-	done    chan struct{}
+	opType segmentIndexOpType
+	id     string
+	ids    []string
+	segID  SegmentID
+	done   chan struct{}
 }
 
 type ShardIndexManager struct {
@@ -155,7 +153,7 @@ func (m *ShardIndexManager) Add(id string, vec []float32) error {
 		if err := mutable.ReserveAdd(vec); err != nil {
 			return err
 		}
-		m.enqueueIndexOp(segmentIndexOp{opType: segmentIndexOpAdd, id: id, vector: vec, segID: segID})
+		m.enqueueIndexOp(segmentIndexOp{opType: segmentIndexOpAdd, id: id, segID: segID})
 	} else {
 		if err := mutable.Add(id, vec); err != nil {
 			return err
@@ -200,10 +198,9 @@ func (m *ShardIndexManager) enqueueIndexBatch(segID SegmentID, ids []string, vec
 		return
 	}
 	op := segmentIndexOp{
-		opType:  segmentIndexOpAdd,
-		segID:   segID,
-		ids:     ids,
-		vectors: vectors,
+		opType: segmentIndexOpAdd,
+		segID:  segID,
+		ids:    ids,
 	}
 	atomic.AddUint64(&m.indexPending, uint64(len(ids)))
 	select {
@@ -416,13 +413,46 @@ func (m *ShardIndexManager) applyIndexOp(op segmentIndexOp) {
 	switch op.opType {
 	case segmentIndexOpAdd:
 		if len(op.ids) > 0 {
-			_ = mutable.ApplyAddBatch(op.ids, op.vectors)
+			ids, vectors, err := m.loadVectors(op.ids)
+			if err == nil && len(ids) > 0 {
+				_ = mutable.ApplyAddBatch(ids, vectors)
+			}
 			return
 		}
-		_ = mutable.ApplyAdd(op.id, op.vector)
+		vec, ok := m.loadVector(op.id)
+		if ok {
+			_ = mutable.ApplyAdd(op.id, vec)
+		}
 	case segmentIndexOpDelete:
 		_ = mutable.ApplyDelete(op.id)
 	}
+}
+
+func (m *ShardIndexManager) loadVector(id string) ([]float32, bool) {
+	val, closer, err := m.db.Get(primaryVectorKey(m.config.Namespace, id))
+	if err != nil {
+		return nil, false
+	}
+	defer closer.Close()
+	vec, err := decodePrimaryVector(val)
+	if err != nil {
+		return nil, false
+	}
+	return vec, true
+}
+
+func (m *ShardIndexManager) loadVectors(ids []string) ([]string, [][]float32, error) {
+	outIDs := make([]string, 0, len(ids))
+	outVecs := make([][]float32, 0, len(ids))
+	for _, id := range ids {
+		vec, ok := m.loadVector(id)
+		if !ok {
+			continue
+		}
+		outIDs = append(outIDs, id)
+		outVecs = append(outVecs, vec)
+	}
+	return outIDs, outVecs, nil
 }
 
 func (m *ShardIndexManager) indexerLoop() {
