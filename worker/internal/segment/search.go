@@ -19,6 +19,11 @@ func NewSearcher(mutable *MutableSegment, immutables *ImmutableSegmentStore) *Se
 }
 
 func (s *Searcher) Search(query []float32, k int, opts SearchOptions) ([]string, []float32, error) {
+	s.mu.RLock()
+	mutable := s.mutable
+	immutables := s.immutables
+	s.mu.RUnlock()
+
 	ef := opts.EfSearch
 	if ef <= 0 {
 		ef = 100
@@ -26,16 +31,23 @@ func (s *Searcher) Search(query []float32, k int, opts SearchOptions) ([]string,
 	if ef < k {
 		ef = k
 	}
+	perSegK := k
+	if opts.CandidatesPerSeg > 0 && (perSegK <= 0 || opts.CandidatesPerSeg < perSegK) {
+		perSegK = opts.CandidatesPerSeg
+	}
+	if perSegK <= 0 {
+		perSegK = k
+	}
 
 	var allCandidates []candidate
 
-	if s.mutable != nil {
-		cands := s.searchMutable(query, k, ef)
+	if mutable != nil {
+		cands := s.searchMutable(mutable, query, perSegK, ef)
 		allCandidates = append(allCandidates, cands...)
 	}
 
-	for _, seg := range s.immutables.List() {
-		cands := s.searchImmutable(seg, query, k, ef)
+	for _, seg := range immutables.List() {
+		cands := s.searchImmutable(seg, query, perSegK, ef)
 		allCandidates = append(allCandidates, cands...)
 	}
 
@@ -87,8 +99,14 @@ func (s *Searcher) Search(query []float32, k int, opts SearchOptions) ([]string,
 	return resultIDs, resultScores, nil
 }
 
-func (s *Searcher) searchMutable(query []float32, k, ef int) []candidate {
-	ids, scores := s.mutable.Search(query, k, ef)
+func (s *Searcher) SetMutable(mutable *MutableSegment) {
+	s.mu.Lock()
+	s.mutable = mutable
+	s.mu.Unlock()
+}
+
+func (s *Searcher) searchMutable(mutable *MutableSegment, query []float32, k, ef int) []candidate {
+	ids, scores := mutable.Search(query, k, ef)
 	cands := make([]candidate, len(ids))
 	for i, id := range ids {
 		cands[i] = candidate{id: id, score: scores[i], segmentType: "mutable"}

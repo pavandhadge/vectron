@@ -151,6 +151,7 @@ func (r *PebbleDB) StoreVector(id string, vector []float32, metadata []byte) err
 	if asyncIndex && r.shouldThrottleIndexing() {
 		asyncIndex = false
 	}
+	indexEnabled := r.hnsw != nil && (r.opts == nil || !r.opts.HNSWConfig.ExternalIndexEnabled)
 
 	// 2. If HNSW add is successful, commit the vector and WAL entry to PebbleDB.
 	val, err := encodeVectorWithMeta(vector, metadata, r.shouldCompressVectors())
@@ -195,7 +196,7 @@ func (r *PebbleDB) StoreVector(id string, vector []float32, metadata []byte) err
 		return nil
 	}
 
-	if asyncIndex {
+	if indexEnabled && asyncIndex {
 		atomic.AddUint64(&r.indexPending, 1)
 		select {
 		case r.indexerCh <- indexOp{opType: indexOpAdd, id: id, vector: vector}:
@@ -207,7 +208,7 @@ func (r *PebbleDB) StoreVector(id string, vector []float32, metadata []byte) err
 			}
 			r.hotAdd(id, vector)
 		}
-	} else {
+	} else if indexEnabled {
 		// Synchronous index update.
 		if err := r.hnsw.Add(id, vector); err != nil {
 			return fmt.Errorf("failed to add vector to HNSW index: %w", err)
@@ -215,7 +216,9 @@ func (r *PebbleDB) StoreVector(id string, vector []float32, metadata []byte) err
 		r.hotAdd(id, vector)
 	}
 
-	r.recordHNSWWrite(1)
+	if indexEnabled {
+		r.recordHNSWWrite(1)
+	}
 	return nil
 }
 
@@ -228,7 +231,8 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 	if len(vectors) == 0 {
 		return nil
 	}
-	if !r.ingestMode && r.shouldBulkLoad(len(vectors)) {
+	indexEnabled := r.hnsw != nil && (r.opts == nil || !r.opts.HNSWConfig.ExternalIndexEnabled)
+	if indexEnabled && !r.ingestMode && r.shouldBulkLoad(len(vectors)) {
 		return r.bulkLoadVectors(vectors)
 	}
 
@@ -310,7 +314,7 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 		return nil
 	}
 
-	if asyncIndex {
+	if indexEnabled && asyncIndex {
 		for _, v := range vectors {
 			atomic.AddUint64(&r.indexPending, 1)
 			select {
@@ -323,7 +327,7 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 				r.hotAdd(v.ID, v.Vector)
 			}
 		}
-	} else {
+	} else if indexEnabled {
 		for _, v := range vectors {
 			if err := r.hnsw.Add(v.ID, v.Vector); err != nil {
 				return fmt.Errorf("failed to add vector to HNSW index: %w", err)
@@ -332,14 +336,14 @@ func (r *PebbleDB) StoreVectorBatch(vectors []VectorEntry) error {
 		}
 	}
 
-	r.recordHNSWWrite(uint64(len(added)))
+	if indexEnabled {
+		r.recordHNSWWrite(uint64(len(added)))
+	}
 
 	// Trigger an early flush after meaningful batch writes so per-shard memtables
 	// and Pebble WAL do not accumulate across many active shards during ingest.
 	if len(added) >= 20 {
-		go func() {
-			_ = r.Flush()
-		}()
+		r.requestEarlyFlush()
 	}
 
 	return nil
@@ -353,7 +357,7 @@ func (r *PebbleDB) DeleteVector(id string) error {
 	}
 
 	// 1. Soft-delete from the HNSW index first.
-	if !r.ingestMode {
+	if !r.ingestMode && r.hnsw != nil && (r.opts == nil || !r.opts.HNSWConfig.ExternalIndexEnabled) {
 		if err := r.hnsw.Delete(id); err != nil {
 			return fmt.Errorf("failed to delete vector from HNSW index: %w", err)
 		}
@@ -398,7 +402,9 @@ func (r *PebbleDB) DeleteVector(id string) error {
 	if r.ingestMode {
 		return nil
 	}
-	r.recordHNSWWrite(1)
+	if r.hnsw != nil && (r.opts == nil || !r.opts.HNSWConfig.ExternalIndexEnabled) {
+		r.recordHNSWWrite(1)
+	}
 	return nil
 }
 
@@ -434,19 +440,34 @@ func (r *PebbleDB) hotAdd(id string, vector []float32) {
 
 func (r *PebbleDB) shouldThrottleIndexing() bool {
 	pending := atomic.LoadUint64(&r.indexPending)
-	softLimit := envInt("VECTRON_INDEX_PENDING_SOFT_LIMIT", 4096)
-	if softLimit > 0 && pending >= uint64(softLimit) {
+	if r.indexPendingSoftLimit > 0 && pending >= r.indexPendingSoftLimit {
 		return true
 	}
-	heapSoftMB := envInt("VECTRON_INDEX_HEAP_SOFT_MB", 768)
-	if heapSoftMB > 0 {
-		var m runtime.MemStats
-		runtime.ReadMemStats(&m)
-		if m.HeapAlloc >= uint64(heapSoftMB)*1024*1024 {
+	if r.indexHeapSoftBytes > 0 {
+		now := time.Now().UnixNano()
+		last := r.indexHeapSampleUnixNano.Load()
+		if last == 0 || now-last >= int64(50*time.Millisecond) {
+			if r.indexHeapSampleUnixNano.CompareAndSwap(last, now) {
+				var m runtime.MemStats
+				runtime.ReadMemStats(&m)
+				r.indexHeapSampleBytes.Store(m.HeapAlloc)
+			}
+		}
+		if r.indexHeapSampleBytes.Load() >= r.indexHeapSoftBytes {
 			return true
 		}
 	}
 	return false
+}
+
+func (r *PebbleDB) requestEarlyFlush() {
+	if !r.earlyFlushScheduled.CompareAndSwap(0, 1) {
+		return
+	}
+	go func() {
+		defer r.earlyFlushScheduled.Store(0)
+		_ = r.Flush()
+	}()
 }
 
 func (r *PebbleDB) hotDelete(id string) {
@@ -464,6 +485,9 @@ func (r *PebbleDB) hotDelete(id string) {
 
 func (r *PebbleDB) shouldBulkLoad(batchSize int) bool {
 	if r.opts == nil || !r.opts.HNSWConfig.BulkLoadEnabled {
+		return false
+	}
+	if r.opts.HNSWConfig.ExternalIndexEnabled || r.hnsw == nil {
 		return false
 	}
 	threshold := r.opts.HNSWConfig.BulkLoadThreshold

@@ -3,7 +3,6 @@ package segment
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"strconv"
 
 	"github.com/cockroachdb/pebble"
@@ -41,17 +40,21 @@ func ParseSegmentMetaKey(key []byte) (SegmentID, bool) {
 }
 
 type ManifestStore struct {
-	db      *pebble.DB
-	shardID uint64
+	db        *pebble.DB
+	shardID   uint64
+	namespace []byte
 }
 
-func NewManifestStore(db *pebble.DB, shardID uint64) *ManifestStore {
-	return &ManifestStore{db: db, shardID: shardID}
+func NewManifestStore(db *pebble.DB, shardID uint64, namespace []byte) *ManifestStore {
+	return &ManifestStore{db: db, shardID: shardID, namespace: append([]byte(nil), namespace...)}
 }
 
 func (s *ManifestStore) key(base []byte) []byte {
-	prefix := []byte(fmt.Sprintf("seg_s%d_", s.shardID))
-	return append(prefix, base...)
+	prefix := make([]byte, 0, len(base)+24)
+	prefix = append(prefix, 's', 'e', 'g', '_', 's')
+	prefix = strconv.AppendUint(prefix, s.shardID, 10)
+	prefix = append(prefix, '_')
+	return applyNamespace(s.namespace, append(prefix, base...))
 }
 
 func (s *ManifestStore) Load() (*ShardManifest, error) {
@@ -127,15 +130,29 @@ func (s *ManifestStore) ListSegmentMetas() ([]SegmentMeta, error) {
 	return metas, iter.Error()
 }
 
-func SegmentDocKey(shardID uint64, segID SegmentID, docID string) []byte {
-	return []byte(fmt.Sprintf("%s%d_%s_%s", segDocPrefix, shardID, segID, docID))
+func SegmentDocKey(namespace []byte, shardID uint64, segID SegmentID, docID string) []byte {
+	buf := make([]byte, 0, len(segDocPrefix)+24+1+len(segID)+1+len(docID))
+	buf = append(buf, segDocPrefix...)
+	buf = strconv.AppendUint(buf, shardID, 10)
+	buf = append(buf, '_')
+	buf = append(buf, segID...)
+	buf = append(buf, '_')
+	buf = append(buf, docID...)
+	return applyNamespace(namespace, buf)
 }
 
-func SegmentDocPrefix(shardID uint64, segID SegmentID) []byte {
-	return []byte(fmt.Sprintf("%s%d_%s_", segDocPrefix, shardID, segID))
+func SegmentDocPrefix(namespace []byte, shardID uint64, segID SegmentID) []byte {
+	buf := make([]byte, 0, len(segDocPrefix)+24+1+len(segID)+1)
+	buf = append(buf, segDocPrefix...)
+	buf = strconv.AppendUint(buf, shardID, 10)
+	buf = append(buf, '_')
+	buf = append(buf, segID...)
+	buf = append(buf, '_')
+	return applyNamespace(namespace, buf)
 }
 
-func ParseSegmentDocKey(key []byte) (SegmentID, string, bool) {
+func ParseSegmentDocKey(namespace, key []byte) (SegmentID, string, bool) {
+	key = stripNamespace(namespace, key)
 	if !bytes.HasPrefix(key, []byte(segDocPrefix)) {
 		return "", "", false
 	}
@@ -149,15 +166,27 @@ func ParseSegmentDocKey(key []byte) (SegmentID, string, bool) {
 	return SegmentID(rest[first+1 : second]), rest[second+1:], true
 }
 
-func SegmentTombstoneKey(shardID uint64, docID string, epoch int64) []byte {
-	return []byte(fmt.Sprintf("%s%d_%s_%d", segTombstonePrefix, shardID, docID, epoch))
+func SegmentTombstoneKey(namespace []byte, shardID uint64, docID string, epoch int64) []byte {
+	buf := make([]byte, 0, len(segTombstonePrefix)+24+1+len(docID)+1+20)
+	buf = append(buf, segTombstonePrefix...)
+	buf = strconv.AppendUint(buf, shardID, 10)
+	buf = append(buf, '_')
+	buf = append(buf, docID...)
+	buf = append(buf, '_')
+	buf = strconv.AppendInt(buf, epoch, 10)
+	return applyNamespace(namespace, buf)
 }
 
-func SegmentTombstonePrefix(shardID uint64) []byte {
-	return []byte(fmt.Sprintf("%s%d_", segTombstonePrefix, shardID))
+func SegmentTombstonePrefix(namespace []byte, shardID uint64) []byte {
+	buf := make([]byte, 0, len(segTombstonePrefix)+24+1)
+	buf = append(buf, segTombstonePrefix...)
+	buf = strconv.AppendUint(buf, shardID, 10)
+	buf = append(buf, '_')
+	return applyNamespace(namespace, buf)
 }
 
-func ParseSegmentTombstoneKey(key []byte) (uint64, string, int64, bool) {
+func ParseSegmentTombstoneKey(namespace, key []byte) (uint64, string, int64, bool) {
+	key = stripNamespace(namespace, key)
 	if !bytes.HasPrefix(key, []byte(segTombstonePrefix)) {
 		return 0, "", 0, false
 	}
@@ -206,4 +235,21 @@ func prefixPrefixSuccessor(prefix []byte) []byte {
 		}
 	}
 	return nil
+}
+
+func applyNamespace(namespace, key []byte) []byte {
+	if len(namespace) == 0 {
+		return key
+	}
+	buf := make([]byte, 0, len(namespace)+len(key))
+	buf = append(buf, namespace...)
+	buf = append(buf, key...)
+	return buf
+}
+
+func stripNamespace(namespace, key []byte) []byte {
+	if len(namespace) == 0 || len(key) < len(namespace) {
+		return key
+	}
+	return key[len(namespace):]
 }

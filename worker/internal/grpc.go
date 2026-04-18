@@ -1369,6 +1369,14 @@ func (s *GrpcServer) DebugMemoryStats() string {
 		var totalNodes, deletedNodes int64
 		var totalVecBytes int64
 		var totalGraphOverhead int64
+		var totalSegmentMutableCount int64
+		var totalSegmentImmutableCount int64
+		var totalSegmentCount int64
+		var totalSegmentTombstones int64
+		var totalSegmentPending int64
+		var totalSegmentMutableBytes int64
+		var totalSegmentImmutableBytes int64
+		var totalSegmentPayloadBytes int64
 		var totalMemtableBytes uint64
 		var totalMemtableZombie uint64
 		var totalTableZombie uint64
@@ -1380,6 +1388,16 @@ func (s *GrpcServer) DebugMemoryStats() string {
 		for _, shardID := range shards {
 			if sm := provider.GetStateMachine(shardID); sm != nil && sm.PebbleDB != nil {
 				stats := sm.PebbleDB.RuntimeStats()
+				if segStats, ok := sm.SegmentStats(); ok {
+					totalSegmentMutableCount += segStats.MutableCount
+					totalSegmentImmutableCount += segStats.ImmutableCount
+					totalSegmentCount += segStats.TotalSegments
+					totalSegmentTombstones += segStats.TombstoneCount
+					totalSegmentPending += segStats.PendingIndexOps
+					totalSegmentMutableBytes += segStats.MutableBytesEstimate
+					totalSegmentImmutableBytes += segStats.ImmutableBytesEstimate
+					totalSegmentPayloadBytes += segStats.ImmutablePayloadBytes
+				}
 				totalNodes += stats.TotalNodes
 				deletedNodes += stats.DeletedNodes
 				storageKey := stats.StoragePath
@@ -1429,6 +1447,18 @@ func (s *GrpcServer) DebugMemoryStats() string {
 			float64(totalWALBytes)/1024/1024,
 			float64(totalTableCacheBytes)/1024/1024,
 			float64(maxBlockCacheBytes)/1024/1024))
+		if totalSegmentCount > 0 {
+			lines = append(lines, fmt.Sprintf("  Segments: total=%d mutable=%d immutable=%d tombstones=%d pending=%d",
+				totalSegmentCount,
+				totalSegmentMutableCount,
+				totalSegmentImmutableCount,
+				totalSegmentTombstones,
+				totalSegmentPending))
+			lines = append(lines, fmt.Sprintf("  SegmentBytes: mutable=%.1fMB immutable=%.1fMB payload=%.1fMB",
+				float64(totalSegmentMutableBytes)/1024/1024,
+				float64(totalSegmentImmutableBytes)/1024/1024,
+				float64(totalSegmentPayloadBytes)/1024/1024))
+		}
 	}
 
 	return strings.Join(lines, "\n")
