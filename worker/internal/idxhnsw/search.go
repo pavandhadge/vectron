@@ -274,6 +274,18 @@ func selectTopKByDist(cands []candidate, k int) []candidate {
 	if len(cands) <= k || k <= 0 {
 		return cands
 	}
+	if k == 1 {
+		minIdx := 0
+		minDist := cands[0].dist
+		for i := 1; i < len(cands); i++ {
+			if cands[i].dist < minDist {
+				minDist = cands[i].dist
+				minIdx = i
+			}
+		}
+		cands[0], cands[minIdx] = cands[minIdx], cands[0]
+		return cands[:1]
+	}
 	lo, hi := 0, len(cands)-1
 	for lo <= hi {
 		// Median-of-three pivot selection to avoid O(n^2) on sorted/reverse-sorted data.
@@ -533,11 +545,13 @@ func (h *HNSW) searchLayer(vec []float32, qvec []int8, start *Node, ef, layer in
 		newSize++
 		tracker.marks = make([]uint32, newSize)
 	}
-	tracker.epoch++
 	if tracker.epoch == 0 {
 		for i := range tracker.marks {
 			tracker.marks[i] = 0
 		}
+	}
+	tracker.epoch++
+	if tracker.epoch == 0 {
 		tracker.epoch = 1
 	}
 	defer putVisitTracker(tracker)
@@ -741,11 +755,13 @@ func (h *HNSW) searchLayerSmall(vec []float32, qvec []int8, start *Node, ef, lay
 		newSize++
 		tracker.marks = make([]uint32, newSize)
 	}
-	tracker.epoch++
 	if tracker.epoch == 0 {
 		for i := range tracker.marks {
 			tracker.marks[i] = 0
 		}
+	}
+	tracker.epoch++
+	if tracker.epoch == 0 {
 		tracker.epoch = 1
 	}
 	defer putVisitTracker(tracker)
@@ -979,12 +995,7 @@ func (h *HNSW) computeDistancesInto(vec []float32, qvec []int8, nodes []*Node, d
 			parallelism = 1
 		}
 	}
-	// OPTIMIZATION: Avoid goroutine overhead for small batches.
-	minParallelSize := 32
-	if parallelism*4 > minParallelSize {
-		minParallelSize = parallelism * 4
-	}
-	if parallelism <= 1 || len(nodes) < minParallelSize {
+	if len(nodes) <= 16 {
 		for i, n := range nodes {
 			distances[i] = h.distanceToNode(vec, qvec, n)
 		}

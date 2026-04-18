@@ -2,22 +2,37 @@ package segment
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
+	"syscall"
 
 	"github.com/pavandhadge/vectron/worker/internal/idxhnsw"
 )
 
+const (
+	segmentVectorsFile = "vectors.bin"
+	segmentOffsetsFile = "offsets.bin"
+	segmentIDsFile     = "ids.json"
+)
+
 type ImmutableSegment struct {
-	meta    SegmentMeta
-	hnsw    *idxhnsw.HNSW
-	hnswHot *idxhnsw.HNSW
-	mu      sync.RWMutex
-	config  Config
-	mmap    bool
+	meta      SegmentMeta
+	hnsw      *idxhnsw.HNSW
+	hnswHot   *idxhnsw.HNSW
+	mu        sync.RWMutex
+	config    Config
+	mmap      bool
+	vectorsFD *os.File
+	vectorsMM []byte
+	offsets   []uint64
+	ids       []string
+	idIndex   map[string]int
 }
 
 func LoadImmutableSegment(shardID uint64, id SegmentID, cfg Config, mmap bool) (*ImmutableSegment, error) {
@@ -54,11 +69,25 @@ func LoadImmutableSegment(shardID uint64, id SegmentID, cfg Config, mmap bool) (
 		_ = json.Unmarshal(data, &meta)
 	}
 
+	offsets, ids, vectorsFD, vectorsMM, err := loadImmutablePayload(segPath)
+	if err != nil {
+		return nil, err
+	}
+	idIndex := make(map[string]int, len(ids))
+	for i, id := range ids {
+		idIndex[id] = i
+	}
+
 	return &ImmutableSegment{
-		meta:   meta,
-		hnsw:   hnsw,
-		config: cfg,
-		mmap:   mmap,
+		meta:      meta,
+		hnsw:      hnsw,
+		config:    cfg,
+		mmap:      mmap,
+		vectorsFD: vectorsFD,
+		vectorsMM: vectorsMM,
+		offsets:   offsets,
+		ids:       ids,
+		idIndex:   idIndex,
 	}, nil
 }
 
@@ -66,13 +95,32 @@ func (s *ImmutableSegment) Search(vec []float32, k, ef int) ([]string, []float32
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if s.hnswHot != nil {
-		hotIDs, hotScores := s.hnswHot.SearchWithEf(vec, k, ef)
-		coldIDs, coldScores := s.hnsw.SearchWithEf(vec, k, ef/2)
-		return mergeSearchResults(hotIDs, hotScores, coldIDs, coldScores, k)
+	candidateK := k
+	if candidateK < ef {
+		candidateK = ef
+	}
+	if candidateK <= 0 {
+		candidateK = k
 	}
 
-	return s.hnsw.SearchWithEf(vec, k, ef)
+	var ids []string
+	var scores []float32
+	if s.hnswHot != nil {
+		hotIDs, hotScores := s.hnswHot.SearchWithEf(vec, candidateK, ef)
+		coldIDs, coldScores := s.hnsw.SearchWithEf(vec, candidateK, ef/2)
+		ids, scores = mergeSearchResults(hotIDs, hotScores, coldIDs, coldScores, candidateK)
+	} else {
+		ids, scores = s.hnsw.SearchWithEf(vec, candidateK, ef)
+	}
+
+	// Worker-side rerank intentionally disabled.
+	// External ranker handles exact rerank, so worker returns ANN results directly.
+	// To re-enable local rerank later, uncomment line below and remove direct return.
+	// return s.rerankLocked(vec, ids, scores, k)
+	if k > 0 && len(ids) > k {
+		return ids[:k], scores[:k]
+	}
+	return ids, scores
 }
 
 func (s *ImmutableSegment) Size() int64 {
@@ -103,8 +151,194 @@ func (s *ImmutableSegment) Close() error {
 	if s.hnswHot != nil {
 		s.hnswHot.Close()
 	}
+	if len(s.vectorsMM) > 0 {
+		_ = syscall.Munmap(s.vectorsMM)
+		s.vectorsMM = nil
+	}
+	if s.vectorsFD != nil {
+		_ = s.vectorsFD.Close()
+		s.vectorsFD = nil
+	}
 	return nil
 }
+
+func (s *ImmutableSegment) BytesEstimate() int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.meta.BytesEstimate
+}
+
+func (s *ImmutableSegment) PayloadBytes() int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return int64(len(s.vectorsMM)) + int64(len(s.offsets))*8
+}
+
+func (s *ImmutableSegment) AllIDs() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]string, len(s.ids))
+	copy(out, s.ids)
+	return out
+}
+
+func (s *ImmutableSegment) VectorByID(id string) ([]float32, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	idx, ok := s.idIndex[id]
+	if !ok {
+		return nil, false
+	}
+	vec, err := s.vectorAtLocked(idx)
+	if err != nil {
+		return nil, false
+	}
+	return vec, true
+}
+
+func (s *ImmutableSegment) vectorAtLocked(idx int) ([]float32, error) {
+	if idx < 0 || idx >= len(s.offsets) || len(s.vectorsMM) == 0 {
+		return nil, fmt.Errorf("vector index out of range")
+	}
+	off := s.offsets[idx]
+	if off > uint64(len(s.vectorsMM)) || off+4 > uint64(len(s.vectorsMM)) {
+		return nil, fmt.Errorf("invalid vector offset")
+	}
+	buf := s.vectorsMM[off:]
+	n := int(binary.LittleEndian.Uint32(buf[:4]))
+	if 4+n*4 > len(buf) {
+		return nil, fmt.Errorf("invalid vector payload size")
+	}
+	vec := make([]float32, n)
+	pos := 4
+	for i := 0; i < n; i++ {
+		vec[i] = mathFloat32frombits(binary.LittleEndian.Uint32(buf[pos : pos+4]))
+		pos += 4
+	}
+	return vec, nil
+}
+
+func (s *ImmutableSegment) distanceAtLocked(query []float32, idx int) (float32, error) {
+	if idx < 0 || idx >= len(s.offsets) || len(s.vectorsMM) == 0 {
+		return 0, fmt.Errorf("vector index out of range")
+	}
+	off := s.offsets[idx]
+	if off > uint64(len(s.vectorsMM)) || off+4 > uint64(len(s.vectorsMM)) {
+		return 0, fmt.Errorf("invalid vector offset")
+	}
+	buf := s.vectorsMM[off:]
+	n := int(binary.LittleEndian.Uint32(buf[:4]))
+	if n != len(query) || 4+n*4 > len(buf) {
+		return 0, fmt.Errorf("invalid vector payload size")
+	}
+	pos := 4
+	if s.config.HNSWConfig.Distance == "cosine" {
+		var dot, normQ, normV float32
+		for i := 0; i < n; i++ {
+			v := mathFloat32frombits(binary.LittleEndian.Uint32(buf[pos : pos+4]))
+			pos += 4
+			q := query[i]
+			dot += q * v
+			normQ += q * q
+			normV += v * v
+		}
+		if normQ == 0 || normV == 0 {
+			return 2, nil
+		}
+		return 1 - dot/(float32(math.Sqrt(float64(normQ)))*float32(math.Sqrt(float64(normV)))), nil
+	}
+	var sum float32
+	for i := 0; i < n; i++ {
+		v := mathFloat32frombits(binary.LittleEndian.Uint32(buf[pos : pos+4]))
+		pos += 4
+		d := query[i] - v
+		sum += d * d
+	}
+	return sum, nil
+}
+
+func (s *ImmutableSegment) rerankLocked(query []float32, ids []string, scores []float32, k int) ([]string, []float32) {
+	if len(ids) == 0 || len(s.offsets) == 0 {
+		if k > 0 && len(ids) > k {
+			return ids[:k], scores[:k]
+		}
+		return ids, scores
+	}
+	type cand struct {
+		id    string
+		score float32
+	}
+	ranked := make([]cand, 0, len(ids))
+	for _, id := range ids {
+		idx, ok := s.idIndex[id]
+		if !ok {
+			continue
+		}
+		score, err := s.distanceAtLocked(query, idx)
+		if err != nil {
+			continue
+		}
+		ranked = append(ranked, cand{id: id, score: score})
+	}
+	sort.Slice(ranked, func(i, j int) bool { return ranked[i].score < ranked[j].score })
+	if k > 0 && len(ranked) > k {
+		ranked = ranked[:k]
+	}
+	outIDs := make([]string, len(ranked))
+	outScores := make([]float32, len(ranked))
+	for i := range ranked {
+		outIDs[i] = ranked[i].id
+		outScores[i] = ranked[i].score
+	}
+	return outIDs, outScores
+}
+
+func loadImmutablePayload(segPath string) ([]uint64, []string, *os.File, []byte, error) {
+	offsetBytes, err := os.ReadFile(filepath.Join(segPath, segmentOffsetsFile))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, nil, nil, nil, err
+	}
+	var offsets []uint64
+	if len(offsetBytes) > 0 {
+		offsets = make([]uint64, len(offsetBytes)/8)
+		for i := range offsets {
+			offsets[i] = binary.LittleEndian.Uint64(offsetBytes[i*8 : i*8+8])
+		}
+	}
+	idBytes, err := os.ReadFile(filepath.Join(segPath, segmentIDsFile))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, nil, nil, nil, err
+	}
+	var ids []string
+	if len(idBytes) > 0 {
+		if err := json.Unmarshal(idBytes, &ids); err != nil {
+			return nil, nil, nil, nil, err
+		}
+	}
+	f, err := os.Open(filepath.Join(segPath, segmentVectorsFile))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return offsets, ids, nil, nil, nil
+		}
+		return nil, nil, nil, nil, err
+	}
+	stat, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, nil, nil, nil, err
+	}
+	if stat.Size() == 0 {
+		return offsets, ids, f, nil, nil
+	}
+	mm, err := syscall.Mmap(int(f.Fd()), 0, int(stat.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
+	if err != nil {
+		f.Close()
+		return nil, nil, nil, nil, err
+	}
+	return offsets, ids, f, mm, nil
+}
+
+func mathFloat32frombits(v uint32) float32 { return math.Float32frombits(v) }
 
 type mmapStore struct {
 	path string

@@ -10,6 +10,13 @@ import (
 	"strings"
 )
 
+const (
+	fastRoutingCacheTTLms    = 60000
+	fastWorkerListCacheTTLms = 60000
+	fastResolveCacheTTLms    = 60000
+	fastWorkerRoleCacheTTLms = 30000
+)
+
 // Config holds all the configuration settings for the API Gateway.
 type Config struct {
 	GRPCAddr                      string          // Address for the gRPC server to listen on.
@@ -70,6 +77,7 @@ type Config struct {
 
 // LoadConfig loads the configuration from environment variables with default fallbacks.
 func LoadConfig() Config {
+	rawSpeedMode := getEnvAsBool("RAW_SPEED_MODE", false)
 	cfg := Config{
 		GRPCAddr:                      getEnv("GRPC_ADDR", ":8081"),
 		GRPCTLSEnabled:                getEnvAsBool("GRPC_TLS_ENABLED", false),
@@ -95,7 +103,7 @@ func LoadConfig() Config {
 		RerankCollections:             parseBoolSet(getEnv("RERANK_COLLECTIONS", "")),
 		RerankTopNOverrides:           parseKVIntMap(getEnv("RERANK_TOP_N_OVERRIDES", "")),
 		RerankTimeoutOverrides:        parseKVIntMap(getEnv("RERANK_TIMEOUT_OVERRIDES", "")),
-		GRPCEnableCompression:         getEnvAsBool("GRPC_ENABLE_COMPRESSION", false),
+		GRPCEnableCompression:         false,
 		GRPCMaxRecvMB:                 getEnvAsInt("GRPC_MAX_RECV_MB", 256),
 		GRPCMaxSendMB:                 getEnvAsInt("GRPC_MAX_SEND_MB", 256),
 		RerankWarmupEnabled:           getEnvAsBool("RERANK_WARMUP_ENABLED", false),
@@ -105,8 +113,8 @@ func LoadConfig() Config {
 		SearchConsistencyOverrides:    parseConsistencyOverrides(getEnv("SEARCH_CONSISTENCY_OVERRIDES", "")),
 		SearchCacheTTLms:              getEnvAsInt("SEARCH_CACHE_TTL_MS", 0),
 		SearchCacheMaxSize:            getEnvAsInt("SEARCH_CACHE_MAX_SIZE", 0),
-		SearchCacheEnabled:            getEnvAsBool("SEARCH_CACHE_ENABLED", true),
-		SearchFanoutEnabled:           getEnvAsBool("SEARCH_FANOUT_ENABLED", true),
+		SearchCacheEnabled:            false,
+		SearchFanoutEnabled:           false,
 		DistributedCacheAddr:          getEnv("DISTRIBUTED_CACHE_ADDR", ""),
 		DistributedCachePassword:      getEnv("DISTRIBUTED_CACHE_PASSWORD", ""),
 		DistributedCacheDB:            getEnvAsInt("DISTRIBUTED_CACHE_DB", 0),
@@ -115,29 +123,31 @@ func LoadConfig() Config {
 		DistributedCacheSearchEnabled: getEnvAsBool("DISTRIBUTED_CACHE_SEARCH_ENABLED", true),
 		DistributedCachePoolSize:      getEnvAsInt("DISTRIBUTED_CACHE_POOL_SIZE", 0),
 		DistributedCacheMinIdleConns:  getEnvAsInt("DISTRIBUTED_CACHE_MIN_IDLE_CONNS", 0),
-		RoutingCacheTTLms:             getEnvAsInt("ROUTING_CACHE_TTL_MS", 30000),
-		WorkerListCacheTTLms:          getEnvAsInt("WORKER_LIST_CACHE_TTL_MS", 30000),
-		ResolveCacheTTLms:             getEnvAsInt("RESOLVE_CACHE_TTL_MS", 30000),
-		PreferSearchOnlyWorkers:       getEnvAsBool("PREFER_SEARCH_ONLY_WORKERS", true),
-		WorkerRoleCacheTTLms:          getEnvAsInt("WORKER_ROLE_CACHE_TTL_MS", 5000),
+		RoutingCacheTTLms:             fastRoutingCacheTTLms,
+		WorkerListCacheTTLms:          fastWorkerListCacheTTLms,
+		ResolveCacheTTLms:             fastResolveCacheTTLms,
+		PreferSearchOnlyWorkers:       false,
+		WorkerRoleCacheTTLms:          fastWorkerRoleCacheTTLms,
 		RerankerDiscoveryEnabled:      getEnvAsBool("RERANKER_DISCOVERY_ENABLED", false),
 		RerankerDiscoveryTTLms:        getEnvAsInt("RERANKER_DISCOVERY_TTL_MS", 5000),
 		GatewayDebugLogs:              getEnvAsBool("GATEWAY_DEBUG_LOGS", false),
 		GatewayLogSampleEvery:         getEnvAsInt("GATEWAY_LOG_SAMPLE_EVERY", 100),
-		RawSpeedMode:                  getEnvAsBool("RAW_SPEED_MODE", false),
+		RawSpeedMode:                  rawSpeedMode,
 	}
 
 	if cfg.RawSpeedMode {
-		cfg.GRPCEnableCompression = false
 		cfg.SearchLinearizable = false
-		cfg.SearchFanoutEnabled = false
-		cfg.RerankEnabled = false
-		cfg.RerankWarmupEnabled = false
-		cfg.SearchCacheEnabled = false
 		cfg.SearchCacheTTLms = 0
 		cfg.SearchCacheMaxSize = 0
 		cfg.DistributedCacheSearchEnabled = false
-		cfg.PreferSearchOnlyWorkers = false
+		cfg.RateLimitRPS = 0
+	}
+	if getEnvAsBool("VECTRON_BENCHMARK_MODE", false) {
+		cfg.RateLimitRPS = 0
+	}
+	if !cfg.RerankEnabled {
+		cfg.RerankWarmupEnabled = false
+		cfg.RerankerDiscoveryEnabled = false
 	}
 
 	return cfg

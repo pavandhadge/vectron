@@ -101,6 +101,11 @@ type PebbleDB struct {
 	indexerCh                  chan indexOp
 	indexerStop                chan struct{}
 	indexerWg                  sync.WaitGroup
+	indexPendingSoftLimit      uint64
+	indexHeapSoftBytes         uint64
+	indexHeapSampleBytes       atomic.Uint64
+	indexHeapSampleUnixNano    atomic.Int64
+	earlyFlushScheduled        atomic.Uint32
 	namespace                  []byte
 	sharedDB                   bool
 	sharedDBPath               string
@@ -150,6 +155,17 @@ func (r *PebbleDB) SetNamespace(ns []byte) {
 		return
 	}
 	r.namespace = append([]byte(nil), ns...)
+}
+
+func (r *PebbleDB) Namespace() []byte {
+	if len(r.namespace) == 0 {
+		return nil
+	}
+	return append([]byte(nil), r.namespace...)
+}
+
+func (r *PebbleDB) RawDB() *pebble.DB {
+	return r.db
 }
 
 // Dimension returns the expected vector dimension for this shard.

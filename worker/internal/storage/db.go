@@ -98,6 +98,10 @@ func (r *PebbleDB) Init(path string, opts *Options) error {
 	r.wg.Add(1)
 	go r.backgroundSyncLoop(minSyncInterval, maxSyncInterval)
 
+	if opts != nil && opts.HNSWConfig.ExternalIndexEnabled {
+		return nil
+	}
+
 	// If ingest mode previously skipped HNSW updates, rebuild before serving.
 	if !r.ingestMode {
 		if dirty, err := r.hasIngestDirtyMarker(); err == nil && dirty {
@@ -148,6 +152,11 @@ func (r *PebbleDB) Init(path string, opts *Options) error {
 
 	if opts.HNSWConfig.AsyncIndexingEnabled {
 		if !r.ingestMode {
+			r.indexPendingSoftLimit = uint64(envInt("VECTRON_INDEX_PENDING_SOFT_LIMIT", 4096))
+			heapSoftMB := envInt("VECTRON_INDEX_HEAP_SOFT_MB", 768)
+			if heapSoftMB > 0 {
+				r.indexHeapSoftBytes = uint64(heapSoftMB) * 1024 * 1024
+			}
 			queueSize := opts.HNSWConfig.IndexingQueueSize
 			if queueSize <= 0 {
 				queueSize = 10000
@@ -194,8 +203,10 @@ func (r *PebbleDB) Close() error {
 	}
 
 	// Perform a final save of the HNSW index.
-	if err := r.saveHNSW(); err != nil {
-		log.Printf("Warning: failed to save HNSW index on close: %v", err)
+	if r.hnsw != nil {
+		if err := r.saveHNSW(); err != nil {
+			log.Printf("Warning: failed to save HNSW index on close: %v", err)
+		}
 	}
 
 	if r.hnsw != nil {
@@ -334,6 +345,9 @@ func (r *PebbleDB) applyRuntimeHNSWTuning(opts *Options) {
 // saveHNSW serializes the current HNSW index and writes it to the database.
 // It also cleans up old WAL entries that are now covered by the new snapshot.
 func (r *PebbleDB) saveHNSW() error {
+	if r == nil || r.db == nil || r.hnsw == nil {
+		return nil
+	}
 	batch := r.db.NewBatch()
 	defer batch.Close()
 
@@ -781,6 +795,9 @@ func (r *PebbleDB) GetHNSWSnapshot() ([]byte, int64, error) {
 	if r.db == nil {
 		return nil, 0, errors.New("db not initialized")
 	}
+	if r.hnsw == nil {
+		return nil, 0, nil
+	}
 	reader, cleanup, err := r.hnswSnapshotReader()
 	if err != nil {
 		if errors.Is(err, pebble.ErrNotFound) {
@@ -1158,6 +1175,9 @@ func (r *PebbleDB) Restore(backupPath string) error {
 		}
 		r.hnsw = nil
 		r.hnswHot = nil
+		if r.opts != nil && r.opts.HNSWConfig.ExternalIndexEnabled {
+			return nil
+		}
 		return r.loadHNSW(r.opts)
 	}
 	if r.path == "" {
@@ -1193,12 +1213,14 @@ func (r *PebbleDB) Restore(backupPath string) error {
 	r.stop = make(chan struct{})
 
 	// Reload the HNSW index
-	if err := r.loadHNSW(r.opts); err != nil {
-		return fmt.Errorf("failed to load HNSW index: %w", err)
+	if r.opts != nil && !r.opts.HNSWConfig.ExternalIndexEnabled {
+		if err := r.loadHNSW(r.opts); err != nil {
+			return fmt.Errorf("failed to load HNSW index: %w", err)
+		}
 	}
 
 	// Restart persistence loop if WAL is enabled
-	if r.opts != nil && r.opts.HNSWConfig.WALEnabled {
+	if r.opts != nil && r.opts.HNSWConfig.WALEnabled && !r.opts.HNSWConfig.ExternalIndexEnabled {
 		r.wg.Add(1)
 		go r.persistenceLoop(5 * time.Minute)
 	}

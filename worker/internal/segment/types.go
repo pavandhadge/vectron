@@ -78,6 +78,7 @@ type Config struct {
 	Thresholds Thresholds
 	ShardPath  string
 	Dimension  int
+	Namespace  []byte
 	HNSWConfig HNSWConfig
 }
 

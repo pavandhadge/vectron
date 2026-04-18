@@ -8,9 +8,9 @@ import (
 )
 
 var (
-	storageDebugLogs         = os.Getenv("STORAGE_DEBUG_LOGS") == "1"
-	storageLogSampleEvery    uint64 = 100
-	storageLogSampleCounter  uint64
+	storageDebugLogs               = os.Getenv("STORAGE_DEBUG_LOGS") == "1"
+	storageLogSampleEvery   uint64 = 100
+	storageLogSampleCounter uint64
 )
 
 func init() {

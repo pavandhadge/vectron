@@ -221,7 +221,7 @@ func (r *PebbleDB) GetVector(id string) ([]float32, []byte, error) {
 		return nil, nil, nil // Not found.
 	}
 
-	return decodeVectorWithMeta(val)
+	return decodeVectorWithMetaPooled(val)
 }
 
 // IsDeleted checks if a vector is considered deleted (either soft or hard deleted).
@@ -234,8 +234,12 @@ func (r *PebbleDB) IsDeleted(id string) (bool, error) {
 		return true, nil // Hard deleted (key does not exist).
 	}
 
-	vec, _, _ := decodeVectorWithMeta(val)
-	return vec == nil, nil // Soft deleted if vector part is nil.
+	if len(val) < 4 {
+		return false, nil
+	}
+	vecLen32 := binary.LittleEndian.Uint32(val[:4])
+	vecLen := int(vecLen32 & ^vectorCompressionFlag)
+	return vecLen == 0, nil
 }
 
 // Size is not yet implemented for PebbleDB.

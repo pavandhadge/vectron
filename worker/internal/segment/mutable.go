@@ -1,13 +1,14 @@
 package segment
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/pebble"
@@ -20,28 +21,38 @@ type MutableSegment struct {
 	hnswHot *idxhnsw.HNSW
 	mu      sync.RWMutex
 	config  Config
+	docSet  map[string]struct{}
 }
+
+var segmentIDCounter uint64
 
 func NewMutableSegment(shardID uint64, cfg Config) (*MutableSegment, error) {
 	return newMutableSegmentWithID(shardID, GenerateSegmentID(), cfg)
 }
 
-func LoadMutableSegment(shardID uint64, segmentID SegmentID, cfg Config, db *ManifestStore) (*MutableSegment, error) {
+func LoadMutableSegment(shardID uint64, segmentID SegmentID, cfg Config, db *pebble.DB, immutableIDs map[string]struct{}, tombstones map[string]int64) (*MutableSegment, error) {
 	ms, err := newMutableSegmentWithID(shardID, segmentID, cfg)
 	if err != nil {
 		return nil, err
 	}
-	iter := db.db.NewIter(&pebble.IterOptions{
-		LowerBound: SegmentDocPrefix(shardID, segmentID),
-		UpperBound: prefixPrefixSuccessor(SegmentDocPrefix(shardID, segmentID)),
+	prefix := append(append([]byte(nil), cfg.Namespace...), 'v', '_')
+	iter := db.NewIter(&pebble.IterOptions{
+		LowerBound: prefix,
+		UpperBound: prefixPrefixSuccessor(prefix),
 	})
 	defer iter.Close()
 	for iter.First(); iter.Valid(); iter.Next() {
-		_, docID, ok := ParseSegmentDocKey(iter.Key())
+		docID, ok := parsePrimaryVectorDocID(cfg.Namespace, iter.Key())
 		if !ok {
 			continue
 		}
-		vec, err := decodeSegmentVector(iter.Value())
+		if _, dead := tombstones[docID]; dead {
+			continue
+		}
+		if _, sealed := immutableIDs[docID]; sealed {
+			continue
+		}
+		vec, err := decodePrimaryVector(iter.Value())
 		if err != nil {
 			continue
 		}
@@ -82,6 +93,7 @@ func newMutableSegmentWithID(shardID uint64, segmentID SegmentID, cfg Config) (*
 		},
 		hnsw:   hnsw,
 		config: cfg,
+		docSet: make(map[string]struct{}),
 	}
 
 	return ms, nil
@@ -102,16 +114,80 @@ func (m *MutableSegment) Add(id string, vec []float32) error {
 	if err := m.hnsw.Add(id, vec); err != nil {
 		return err
 	}
+	if _, exists := m.docSet[id]; !exists {
+		m.docSet[id] = struct{}{}
+		m.meta.VectorCount++
+		m.meta.BytesEstimate += estimateVectorBytes(vec)
+	}
 
 	if m.hnswHot != nil {
 		_ = m.hnswHot.Add(id, vec)
 	}
 
-	m.meta.VectorCount++
-	m.meta.BytesEstimate += estimateVectorBytes(vec)
+	return nil
+}
 
-	m.checkSealThreshold()
+func (m *MutableSegment) ReserveAdd(vec []float32) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
+	if m.meta.State != SegmentStateMutable {
+		return fmt.Errorf("segment %s is not mutable", m.meta.ID)
+	}
+	return nil
+}
+
+func (m *MutableSegment) ReserveAddBatch(vectors [][]float32) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.meta.State != SegmentStateMutable {
+		return fmt.Errorf("segment %s is not mutable", m.meta.ID)
+	}
+	return nil
+}
+
+func (m *MutableSegment) ApplyAdd(id string, vec []float32) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.meta.State != SegmentStateMutable {
+		return fmt.Errorf("segment %s is not mutable", m.meta.ID)
+	}
+	if err := m.hnsw.Add(id, vec); err != nil {
+		return err
+	}
+	if _, exists := m.docSet[id]; !exists {
+		m.docSet[id] = struct{}{}
+		m.meta.VectorCount++
+		m.meta.BytesEstimate += estimateVectorBytes(vec)
+	}
+	if m.hnswHot != nil {
+		_ = m.hnswHot.Add(id, vec)
+	}
+	return nil
+}
+
+func (m *MutableSegment) ApplyAddBatch(ids []string, vectors [][]float32) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.meta.State != SegmentStateMutable {
+		return fmt.Errorf("segment %s is not mutable", m.meta.ID)
+	}
+	for i := range ids {
+		if err := m.hnsw.Add(ids[i], vectors[i]); err != nil {
+			return err
+		}
+		if _, exists := m.docSet[ids[i]]; !exists {
+			m.docSet[ids[i]] = struct{}{}
+			m.meta.VectorCount++
+			m.meta.BytesEstimate += estimateVectorBytes(vectors[i])
+		}
+		if m.hnswHot != nil {
+			_ = m.hnswHot.Add(ids[i], vectors[i])
+		}
+	}
 	return nil
 }
 
@@ -124,11 +200,35 @@ func (m *MutableSegment) Delete(id string) error {
 	}
 
 	_ = m.hnsw.Delete(id)
+	delete(m.docSet, id)
 	if m.hnswHot != nil {
 		_ = m.hnswHot.Delete(id)
 	}
 
 	return nil
+}
+
+func (m *MutableSegment) ApplyDelete(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	_ = m.hnsw.Delete(id)
+	delete(m.docSet, id)
+	if m.hnswHot != nil {
+		_ = m.hnswHot.Delete(id)
+	}
+	return nil
+}
+
+func (m *MutableSegment) ActiveIDs() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	ids := make([]string, 0, len(m.docSet))
+	for id := range m.docSet {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func (m *MutableSegment) Search(vec []float32, k, ef int) ([]string, []float32) {
@@ -212,23 +312,63 @@ func (m *MutableSegment) Close() error {
 	return nil
 }
 
-func (m *MutableSegment) checkSealThreshold() {
-	if !m.ShouldSeal() {
-		return
-	}
-}
-
 func estimateVectorBytes(vec []float32) int64 {
 	return int64(4 * len(vec))
 }
 
-func encodeSegmentVector(vec []float32) []byte {
-	buf := bytes.NewBuffer(make([]byte, 0, 4+len(vec)*4))
-	_ = binary.Write(buf, binary.LittleEndian, uint32(len(vec)))
-	for _, v := range vec {
-		_ = binary.Write(buf, binary.LittleEndian, v)
+func decodePrimaryVector(data []byte) ([]float32, error) {
+	if len(data) < 4 {
+		return nil, fmt.Errorf("invalid vector payload")
 	}
-	return buf.Bytes()
+	vecLen32 := binary.LittleEndian.Uint32(data[:4])
+	compressed := (vecLen32 & (1 << 31)) != 0
+	vecLen := int(vecLen32 & ^uint32(1<<31))
+	if !compressed {
+		if len(data) < 4+vecLen*4 {
+			return nil, fmt.Errorf("short vector payload")
+		}
+		out := make([]float32, vecLen)
+		off := 4
+		for i := 0; i < vecLen; i++ {
+			out[i] = math.Float32frombits(binary.LittleEndian.Uint32(data[off : off+4]))
+			off += 4
+		}
+		return out, nil
+	}
+	if len(data) < 8+vecLen {
+		return nil, fmt.Errorf("short compressed vector payload")
+	}
+	scale := math.Float32frombits(binary.LittleEndian.Uint32(data[4:8]))
+	if scale == 0 {
+		scale = 1
+	}
+	mult := scale / 127.0
+	out := make([]float32, vecLen)
+	for i := 0; i < vecLen; i++ {
+		out[i] = float32(int8(data[8+i])) * mult
+	}
+	return out, nil
+}
+
+func primaryVectorKey(namespace []byte, id string) []byte {
+	buf := make([]byte, 0, len(namespace)+2+len(id))
+	buf = append(buf, namespace...)
+	buf = append(buf, 'v', '_')
+	buf = append(buf, id...)
+	return buf
+}
+
+func parsePrimaryVectorDocID(namespace, key []byte) (string, bool) {
+	if len(namespace) > 0 {
+		if len(key) < len(namespace)+2 {
+			return "", false
+		}
+		key = key[len(namespace):]
+	}
+	if len(key) < 2 || key[0] != 'v' || key[1] != '_' {
+		return "", false
+	}
+	return string(key[2:]), true
 }
 
 func decodeSegmentVector(data []byte) ([]float32, error) {
@@ -274,14 +414,7 @@ func mergeSearchResults(idsA []string, scoresA []float32, idsB []string, scoresB
 	for id, score := range merged {
 		out = append(out, pair{id: id, score: score})
 	}
-
-	for i := 0; i < len(out); i++ {
-		for j := i + 1; j < len(out); j++ {
-			if out[j].score < out[i].score {
-				out[i], out[j] = out[j], out[i]
-			}
-		}
-	}
+	sort.Slice(out, func(i, j int) bool { return out[i].score < out[j].score })
 
 	if k > 0 && len(out) > k {
 		out = out[:k]
@@ -298,7 +431,9 @@ func mergeSearchResults(idsA []string, scoresA []float32, idsB []string, scoresB
 }
 
 func GenerateSegmentID() SegmentID {
-	return SegmentID(fmt.Sprintf("seg-%d-%d", time.Now().UnixNano(), time.Now().UnixNano()))
+	now := time.Now().UnixNano()
+	seq := atomic.AddUint64(&segmentIDCounter, 1)
+	return SegmentID(fmt.Sprintf("seg-%d-%d", now, seq))
 }
 
 type memStore struct {
