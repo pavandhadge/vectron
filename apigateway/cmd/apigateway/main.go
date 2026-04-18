@@ -197,7 +197,7 @@ const (
 	grpcReadBufferSize    = 256 * 1024
 	grpcWriteBufferSize   = 256 * 1024
 	grpcWindowSize        = 4 << 20
-	streamUpsertThreshold = 2000
+	streamUpsertThreshold = 500
 	streamUpsertChunkSize = 512
 	routingLeaseTTL       = 20 * time.Second
 )
