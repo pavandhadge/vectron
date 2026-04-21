@@ -606,10 +606,11 @@ func (c *Client) SearchWithOptions(collection string, vector []float32, topK uin
 	}
 
 	req := &apigateway.SearchRequest{
-		Collection: collection,
-		Vector:     vector,
-		TopK:       topK,
+		Collection:     collection,
+		Vector:        vector,
+		TopK:           topK,
 		IncludeVectors: includeVectors,
+		IncludeMetadata: true,
 	}
 
 	resRaw, err := c.doRPCWithResponse(false, func(ctx context.Context) (interface{}, error) {

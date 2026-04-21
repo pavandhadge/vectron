@@ -222,6 +222,10 @@ func (r *Replica) Search(query shard.SearchQuery) (*shard.SearchResult, error) {
 	return r.searcher.Search(query)
 }
 
+func (r *Replica) GetVector(id string) ([]byte, error) {
+	return r.searcher.GetVector(id)
+}
+
 func (r *Replica) run() {
 	backoff := 250 * time.Millisecond
 	for {

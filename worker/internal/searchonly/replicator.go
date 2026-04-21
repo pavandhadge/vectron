@@ -33,6 +33,15 @@ func newLocalSearcher(info *pd.ShardInfo) *localSearcher {
 	}
 }
 
+func (s *localSearcher) GetVector(id string) ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.index == nil {
+		return nil, shard.ErrShardNotReady
+	}
+	return s.index.GetVector(id)
+}
+
 func (s *localSearcher) loadSnapshot(data []byte) error {
 	store := idxhnsw.NewMemStore()
 	h := idxhnsw.NewHNSW(store, s.dim, toIndexConfig(s.cfg))
@@ -123,6 +132,8 @@ func (s *localSearcher) Search(query shard.SearchQuery) (*shard.SearchResult, er
 	if ef < k {
 		ef = k
 	}
+	var ids []string
+	var scores []float32
 	if cfg.MultiStageEnabled && (!cfg.QuantizeVectors || cfg.QuantizeKeepFloatVectors) {
 		stage1Ef := cfg.Stage1Ef
 		if stage1Ef <= 0 {
@@ -131,12 +142,23 @@ func (s *localSearcher) Search(query shard.SearchQuery) (*shard.SearchResult, er
 		candidateFactor := cfg.Stage1CandidateFactor
 		if candidateFactor <= 0 {
 			candidateFactor = 4
-		}
-		ids, scores := h.SearchTwoStage(query.Vector, k, stage1Ef, candidateFactor)
-		return &shard.SearchResult{IDs: ids, Scores: scores}, nil
+}
+		ids, scores = h.SearchTwoStage(query.Vector, k, stage1Ef, candidateFactor)
+	} else {
+		ids, scores = h.SearchWithEf(query.Vector, k, ef)
 	}
-	ids, scores := h.SearchWithEf(query.Vector, k, ef)
-	return &shard.SearchResult{IDs: ids, Scores: scores}, nil
+
+	metadata := make([][]byte, len(ids))
+	for i, id := range ids {
+		meta, err := s.GetVector(id)
+		if err != nil {
+			continue
+		}
+		if len(meta) > 0 {
+			metadata[i] = append([]byte(nil), meta...)
+		}
+	}
+	return &shard.SearchResult{IDs: ids, Scores: scores, Metadata: metadata}, nil
 }
 
 func toIndexConfig(cfg storage.HNSWConfig) idxhnsw.HNSWConfig {

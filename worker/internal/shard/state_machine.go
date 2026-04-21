@@ -597,7 +597,7 @@ func (s *StateMachine) Lookup(query interface{}) (interface{}, error) {
 			ids, scores, err = s.segmentMgr.Search(q.Vector, q.K)
 		} else {
 			ids, scores, err = s.Search(q.Vector, q.K)
-		}
+}
 		if err != nil {
 			return nil, err
 		}

@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"encoding/binary"
 	"encoding/gob"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -776,6 +777,28 @@ func readBool(r io.Reader) (bool, error) {
 		return false, err
 	}
 	return buf[0] != 0, nil
+}
+
+// GetVector retrieves the full vector data (including metadata) from the store by external ID.
+func (h *HNSW) GetVector(id string) ([]byte, error) {
+	if id == "" {
+		return nil, nil
+	}
+	h.mu.RLock()
+	uintID, ok := h.idToUint32[id]
+	h.mu.RUnlock()
+	if !ok {
+		return nil, errors.New("node not found")
+	}
+	nodeKey := nodeKey(uintID)
+	return h.store.Get(nodeKey)
+}
+
+// nodeKey generates the storage key for a node.
+func nodeKey(id uint32) []byte {
+	key := make([]byte, 4)
+	binary.LittleEndian.PutUint32(key, id)
+	return key
 }
 
 func readString(r io.Reader) (string, error) {
