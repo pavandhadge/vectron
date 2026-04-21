@@ -1,4 +1,4 @@
-//go:build amd64 && cgo && avx512
+//go:build amd64 && cgo
 
 package idxhnsw
 

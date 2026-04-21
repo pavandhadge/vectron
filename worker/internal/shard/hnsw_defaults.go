@@ -13,14 +13,16 @@ import (
 // DefaultHNSWConfig returns the default HNSW configuration used by workers.
 func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, writeSpeedMode bool) storage.HNSWConfig {
 	quantizeEnabled := distance == "cosine"
-	// IMPORTANT: Don't keep both float and int8 - doubles memory!
-	// Only store int8 quantized in memory for search, not float vectors
-	keepFloatVectors := false // Changed from quantizeEnabled - saves ~40% memory!
+
+	// Default cosine path: keep int8 only in memory.
+	// Enable float retention only if exact local rerank is explicitly desired.
+	keepFloatVectors := os.Getenv("VECTRON_KEEP_FLOAT_VECTORS") == "1"
+
 	mmapEnabled := true
 	mmapInitialMB := 4
 	if quantizeEnabled && !keepFloatVectors {
-		// The current mmap implementation only backs float32 vectors.
-		// For int8-only cosine indexes it is unused and just preallocates disk.
+		// Current mmap path mainly backs float payloads.
+		// Int8-only path should not preallocate useless mmap files unless forced.
 		mmapEnabled = false
 	}
 	if v := os.Getenv("VECTRON_MMAP_VECTORS_ENABLED"); v != "" {
@@ -32,7 +34,6 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 		}
 	}
 
-	// Vector compression is optional - consumes computation
 	compressionEnabled := os.Getenv("VECTRON_VECTOR_COMPRESSION") == "1"
 
 	adaptiveScale := 1.0
@@ -49,7 +50,7 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 		indexFlushInterval = 500 * time.Millisecond
 	}
 	indexBatchSize := 4096
-	indexQueueSize := 100000 // Reduced from 200000 to prevent excessive memory usage
+	indexQueueSize := 200000
 	autoTune := os.Getenv("VECTRON_INDEX_AUTO_TUNE") == "1"
 	if v := os.Getenv("VECTRON_INDEX_BATCH_SIZE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -77,19 +78,14 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 	}
 	if writeSpeedMode {
 		indexBatchSize = 8192
-		indexQueueSize = 200000 // Capped to prevent excessive memory
+		indexQueueSize = 500000
 		if durabilityProfile != "relaxed" {
 			indexFlushInterval = 500 * time.Millisecond
 		}
 	}
 
-	// Hot index is DISABLED by default to save memory (creates duplicate HNSW index)
-	// Enable via VECTRON_HOT_INDEX_ENABLED=1 if you need faster searches on recent data
-	hotEnabled := false
+	hotEnabled := os.Getenv("VECTRON_HOT_INDEX_ENABLED") == "1"
 	hotMaxSize := 30000
-	if v := os.Getenv("VECTRON_HOT_INDEX_ENABLED"); v != "" {
-		hotEnabled = v == "1"
-	}
 	if v := os.Getenv("VECTRON_HOT_INDEX_MAX"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			hotMaxSize = n
@@ -104,14 +100,14 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 
 	return storage.HNSWConfig{
 		Dim:                      dim,
-		M:                        16,  // Reduced from 32 to save memory - still good connectivity
-		EfConstruction:           128, // Reduced from 200 - faster build, less memory during build
-		EfSearch:                 50,  // Reduced from 100 for faster searches
+		M:                        16,
+		EfConstruction:           200,
+		EfSearch:                 100,
 		DistanceMetric:           distance,
 		NormalizeVectors:         distance == "cosine",
 		QuantizeVectors:          quantizeEnabled,
 		QuantizeKeepFloatVectors: keepFloatVectors,
-		VectorCompressionEnabled: compressionEnabled, // Optional - set VECTRON_VECTOR_COMPRESSION=1
+		VectorCompressionEnabled: compressionEnabled,
 		MultiStageEnabled:        quantizeEnabled,
 		EnableNorms:              quantizeEnabled,
 		HotIndexEnabled:          hotEnabled,
@@ -133,13 +129,9 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 		IndexingQueueSize:        indexQueueSize,
 		IndexingBatchSize:        indexBatchSize,
 		IndexingFlushInterval:    indexFlushInterval,
-		WarmupEnabled:            true,
-		WarmupMaxVectors:         50000,
-		WarmupDelay:              2 * time.Second,
-		SearchParallelism:        runtime.GOMAXPROCS(0),
-		AdaptiveQualityEnabled:   true,
-		LowNormThreshold:         0.5,
-		LowQualityEfScale:        1.5,
+		WarmupEnabled:            false,
+		WarmupMaxVectors:         10000,
+		WarmupDelay:              5 * time.Second,
 	}
 }
 
@@ -150,14 +142,14 @@ func autoTuneIndexSizing() (int, int) {
 		tunedBatch = 2048
 	}
 	if tunedBatch > 8192 {
-		tunedBatch = 8192 // Cap at 8k to prevent excessive memory
+		tunedBatch = 8192
 	}
 	tunedQueue := 25000 * procs
 	if tunedQueue < 50000 {
 		tunedQueue = 50000
 	}
-	if tunedQueue > 200000 {
-		tunedQueue = 200000 // Cap at 200k to prevent excessive memory in queue
+	if tunedQueue > 400000 {
+		tunedQueue = 400000
 	}
 	return tunedBatch, tunedQueue
 }

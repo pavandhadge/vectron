@@ -92,6 +92,7 @@ message SearchRequest {
 message SearchResponse {
   repeated string ids = 1;
   repeated float scores = 2;
+  repeated bytes metadata = 3;
 }
 
 message BatchSearchRequest {

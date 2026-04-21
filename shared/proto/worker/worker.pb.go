@@ -618,6 +618,7 @@ type SearchResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Ids           []string               `protobuf:"bytes,1,rep,name=ids,proto3" json:"ids,omitempty"`
 	Scores        []float32              `protobuf:"fixed32,2,rep,packed,name=scores,proto3" json:"scores,omitempty"`
+	Metadata      [][]byte               `protobuf:"bytes,3,rep,name=metadata,proto3" json:"metadata,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -662,6 +663,13 @@ func (x *SearchResponse) GetIds() []string {
 func (x *SearchResponse) GetScores() []float32 {
 	if x != nil {
 		return x.Scores
+	}
+	return nil
+}
+
+func (x *SearchResponse) GetMetadata() [][]byte {
+	if x != nil {
+		return x.Metadata
 	}
 	return nil
 }
@@ -1657,10 +1665,11 @@ const file_worker_worker_proto_rawDesc = "" +
 	"collection\x12\x1f\n" +
 	"\vshard_epoch\x18\a \x01(\x04R\n" +
 	"shardEpoch\x12/\n" +
-	"\x14lease_expiry_unix_ms\x18\b \x01(\x03R\x11leaseExpiryUnixMs\":\n" +
+	"\x14lease_expiry_unix_ms\x18\b \x01(\x03R\x11leaseExpiryUnixMs\"V\n" +
 	"\x0eSearchResponse\x12\x10\n" +
 	"\x03ids\x18\x01 \x03(\tR\x03ids\x12\x16\n" +
-	"\x06scores\x18\x02 \x03(\x02R\x06scores\"R\n" +
+	"\x06scores\x18\x02 \x03(\x02R\x06scores\x12\x1a\n" +
+	"\bmetadata\x18\x03 \x03(\fR\bmetadata\"R\n" +
 	"\x12BatchSearchRequest\x12<\n" +
 	"\brequests\x18\x01 \x03(\v2 .vectron.worker.v1.SearchRequestR\brequests\"V\n" +
 	"\x13BatchSearchResponse\x12?\n" +

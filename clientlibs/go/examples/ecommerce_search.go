@@ -6,6 +6,8 @@
 // - Metadata filtering by category and price
 // - Personalized recommendations based on user preferences
 //
+// Prices shown in GBP (£) for UK market
+//
 // Run: go run ecommerce_search.go
 
 package main
@@ -14,10 +16,8 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math"
 	"math/rand"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -28,18 +28,24 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
-// Product represents an e-commerce product
+var categoryBase = map[string][]float32{
+	"smartphones": {15.0, 2.0, 0.5, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+	"laptops":     {2.0, 15.0, 0.5, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+	"audio":      {0.5, 0.5, 15.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+	"wearables":  {0.5, 0.5, 2.0, 15.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+	"tablets":    {0.5, 0.5, 0.5, 0.5, 15.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+	"cameras":    {0.5, 0.5, 0.5, 0.5, 0.0, 15.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+}
+
 type Product struct {
 	ID          string
 	Name        string
 	Category    string
 	Price       float64
 	Description string
-	Embedding   []float32 // Pre-computed vector embedding
+	Embedding   []float32
 }
 
-// Sample product catalog with embeddings (simulated)
-// In production, these would come from an ML model (e.g., OpenAI, HuggingFace)
 var products = []Product{
 	{
 		ID:          "phone-001",
@@ -47,7 +53,7 @@ var products = []Product{
 		Category:    "smartphones",
 		Price:       999.99,
 		Description: "Latest flagship smartphone with advanced camera system",
-		Embedding:   []float32{0.9, 0.8, 0.1, 0.2}, // High-tech electronics signature
+		Embedding:   generateEmbedding("smartphones", 0),
 	},
 	{
 		ID:          "phone-002",
@@ -55,15 +61,16 @@ var products = []Product{
 		Category:    "smartphones",
 		Price:       899.99,
 		Description: "Premium Android phone with AI features",
-		Embedding:   []float32{0.85, 0.75, 0.15, 0.25},
+		Embedding:   generateEmbedding("smartphones", 1),
 	},
+
 	{
 		ID:          "laptop-001",
 		Name:        "MacBook Pro 16",
 		Category:    "laptops",
 		Price:       2499.99,
 		Description: "Professional laptop for developers and creatives",
-		Embedding:   []float32{0.8, 0.9, 0.2, 0.1},
+		Embedding:   generateEmbedding("laptops", 0),
 	},
 	{
 		ID:          "laptop-002",
@@ -71,67 +78,70 @@ var products = []Product{
 		Category:    "laptops",
 		Price:       1799.99,
 		Description: "High-performance Windows laptop",
-		Embedding:   []float32{0.75, 0.85, 0.25, 0.15},
+		Embedding:   generateEmbedding("laptops", 1),
 	},
+
 	{
 		ID:          "headphones-001",
 		Name:        "Sony WH-1000XM5",
 		Category:    "audio",
-		Price:       399.99,
+		Price:       349.99,
 		Description: "Premium noise-canceling wireless headphones",
-		Embedding:   []float32{0.7, 0.6, 0.3, 0.4},
+		Embedding:   generateEmbedding("audio", 0),
 	},
 	{
 		ID:          "headphones-002",
 		Name:        "AirPods Pro 2",
 		Category:    "audio",
-		Price:       249.99,
+		Price:       229.99,
 		Description: "Apple wireless earbuds with spatial audio",
-		Embedding:   []float32{0.75, 0.65, 0.2, 0.35},
+		Embedding:   generateEmbedding("audio", 1),
 	},
+
 	{
 		ID:          "watch-001",
 		Name:        "Apple Watch Ultra",
 		Category:    "wearables",
-		Price:       799.99,
+		Price:       749.99,
 		Description: "Rugged smartwatch for outdoor activities",
-		Embedding:   []float32{0.6, 0.5, 0.7, 0.3},
+		Embedding:   generateEmbedding("wearables", 0),
 	},
 	{
 		ID:          "watch-002",
 		Name:        "Garmin Fenix 7",
 		Category:    "wearables",
-		Price:       699.99,
+		Price:       649.99,
 		Description: "Advanced GPS multisport watch",
-		Embedding:   []float32{0.55, 0.45, 0.75, 0.25},
+		Embedding:   generateEmbedding("wearables", 1),
 	},
+
 	{
 		ID:          "tablet-001",
 		Name:        "iPad Pro 12.9",
 		Category:    "tablets",
 		Price:       1099.99,
 		Description: "Professional tablet with M2 chip",
-		Embedding:   []float32{0.65, 0.7, 0.3, 0.2},
+		Embedding:   generateEmbedding("tablets", 0),
 	},
+
 	{
 		ID:          "camera-001",
 		Name:        "Sony Alpha 7 IV",
 		Category:    "cameras",
 		Price:       2499.99,
 		Description: "Full-frame mirrorless camera",
-		Embedding:   []float32{0.5, 0.4, 0.8, 0.6},
+		Embedding:   generateEmbedding("cameras", 0),
 	},
 }
-
 func main() {
 	const (
 		apiGatewayAddr = "localhost:10010"
 		authGRPCAddr   = "localhost:10008"
 		collectionName = "ecommerce-products"
+		vectorDim      = 128
 	)
 
-	fmt.Println("🛍️  E-Commerce Semantic Search Demo")
-	fmt.Println("====================================")
+	printHeader()
 
 	rand.Seed(time.Now().UnixNano())
 	email := fmt.Sprintf("demo-%d@example.com", rand.Intn(1_000_000))
@@ -161,29 +171,25 @@ func main() {
 	}
 	log.Printf("SDK JWT created from key %s (full key=%s)", keyPrefix, fullKey)
 
-	// Initialize client
-	fmt.Println("\n1️⃣  Connecting to Vectron...")
+	fmt.Println("\n" + stepStyle("1") + " Connecting to Vectron...")
 	client, err := vectron.NewClient(apiGatewayAddr, sdkJWTToken)
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)
 	}
 	defer client.Close()
-	fmt.Println("✅ Connected!")
+	printSuccess("Connected!")
 
-	// Create collection for products
-	fmt.Println("\n2️⃣  Creating product catalog collection...")
-	dimension := int32(4)
-	if err := client.CreateCollection(collectionName, dimension, "cosine"); err != nil {
+	fmt.Println("\n" + stepStyle("2") + " Creating product catalog collection...")
+	if err := client.CreateCollection(collectionName, int32(vectorDim), "cosine"); err != nil {
 		log.Printf("Collection may already exist: %v", err)
 	} else {
-		fmt.Printf("✅ Collection created for %d products\n", len(products))
+		printSuccess(fmt.Sprintf("Collection created (dimension=%d)", vectorDim))
 	}
 	if err := waitForCollectionReady(client, collectionName, 30*time.Second); err != nil {
 		log.Fatalf("collection not ready: %v", err)
 	}
 
-	// Index products
-	fmt.Println("\n3️⃣  Indexing product catalog...")
+	fmt.Println("\n" + stepStyle("3") + " Indexing product catalog...")
 	points := make([]*vectron.Point, len(products))
 	for i, product := range products {
 		points[i] = &vectron.Point{
@@ -197,125 +203,73 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to index products: %v", err)
 	}
-	fmt.Printf("✅ Indexed %d products\n", upserted)
+	printSuccess(fmt.Sprintf("Indexed %d products", upserted))
 
-	// Demo 1: Search for high-end smartphones
-	fmt.Println("\n4️⃣  Search: Premium smartphones...")
-	// Query vector represents "premium smartphone"
-	queryVector := []float32{0.88, 0.78, 0.12, 0.22}
-	results, err := client.Search(collectionName, queryVector, 3)
+	printSection("Search Demo 1: Smartphones")
+	phoneResults, err := client.Search(collectionName, generateQueryVector(128, 0), 10)
 	if err != nil {
 		log.Fatalf("Search failed: %v", err)
 	}
+	displaySearchResults("Smartphones", phoneResults)
 
-	displayResults("Premium Smartphones", results)
-
-	// Demo 2: Search for professional laptops
-	fmt.Println("\n5️⃣  Search: Professional laptops...")
-	laptopQuery := []float32{0.78, 0.88, 0.18, 0.12}
-	laptopResults, err := client.Search(collectionName, laptopQuery, 3)
+	printSection("Search Demo 2: Laptops")
+	laptopResults, err := client.Search(collectionName, generateQueryVector(128, 1), 10)
 	if err != nil {
 		log.Fatalf("Laptop search failed: %v", err)
 	}
-	displayResults("Professional Laptops", laptopResults)
+	displaySearchResults("Laptops", laptopResults)
 
-	// Demo 3: Search for wearable devices (filter by category)
-	fmt.Println("\n6️⃣  Search: Wearable devices...")
-	wearableQuery := []float32{0.58, 0.48, 0.72, 0.28}
-	wearableResults, err := client.Search(collectionName, wearableQuery, 5)
-	if err != nil {
-		log.Fatalf("Wearable search failed: %v", err)
-	}
-
-	// Filter results by category
-	fmt.Println("🔍 Wearable Devices Results (filtered):")
-	for i, result := range wearableResults {
-		if result.Payload["category"] == "wearables" {
-			displayProduct(i+1, result)
-		}
-	}
-
-	// Demo 4: Budget-conscious search (under $500)
-	fmt.Println("\n7️⃣  Search: Audio devices under $500...")
-	audioQuery := []float32{0.72, 0.62, 0.25, 0.38}
-	allAudioResults, err := client.Search(collectionName, audioQuery, 10)
+	printSection("Search Demo 3: Audio")
+	audioResults, err := client.Search(collectionName, generateQueryVector(128, 2), 10)
 	if err != nil {
 		log.Fatalf("Audio search failed: %v", err)
 	}
+	displaySearchResults("Audio", audioResults)
 
-	// Filter by price
-	fmt.Println("🔍 Audio Devices Under $500:")
-	count := 0
-	for _, result := range allAudioResults {
-		price, _ := strconv.ParseFloat(result.Payload["price"], 64)
-		if price < 500 {
-			count++
-			displayProduct(count, result)
-		}
-	}
-
-	// Demo 5: Personalized recommendation
-	fmt.Println("\n8️⃣  Personalized recommendation based on viewing history...")
-	// User viewed iPhone 15 Pro, so recommend similar high-end electronics
-	userHistory := []float32{0.88, 0.78, 0.12, 0.22} // iPhone embedding
-	recommendations, err := client.Search(collectionName, userHistory, 5)
+	printSection("Search Demo 4: Wearables")
+	wearableResults, err := client.Search(collectionName, generateQueryVector(128, 3), 10)
 	if err != nil {
-		log.Fatalf("Recommendation failed: %v", err)
+		log.Fatalf("Wearable search failed: %v", err)
 	}
+	displaySearchResults("Wearables", wearableResults)
 
-	fmt.Println("🎯 Recommended for you (based on iPhone 15 Pro):")
-	for i, result := range recommendations {
-		if result.ID != "phone-001" { // Exclude the item the user already viewed
-			displayProduct(i, result)
-		}
-	}
+	printFooter()
+}
 
-	// Demo 6: Similar products (Item-to-item similarity)
-	fmt.Println("\n9️⃣  Similar products to AirPods Pro 2...")
-	// Get the AirPods embedding and find similar items
-	airpodsEmbedding := []float32{0.75, 0.65, 0.2, 0.35}
-	similarResults, err := client.Search(collectionName, airpodsEmbedding, 4)
-	if err != nil {
-		log.Fatalf("Similarity search failed: %v", err)
-	}
+func printHeader() {
+	fmt.Println()
+	fmt.Println("╔═══════════════════════════════════════════════════════════════════════╗")
+	fmt.Println("║          E-Commerce Semantic Search Demo                      ║")
+	fmt.Println("║          Powered by Vectron Vector Database               ║")
+	fmt.Println("╚═══════════════════════════════════════════════════════════════════════╝")
+	fmt.Println()
+}
 
-	fmt.Println("🔍 Similar to AirPods Pro 2:")
-	for i, result := range similarResults {
-		if result.ID != "headphones-002" { // Exclude the query item
-			displayProduct(i, result)
-		}
-	}
+func printSection(title string) {
+	fmt.Println()
+	fmt.Println("──────────────────────────────────────────────────────────────")
+	fmt.Println("  " + title)
+	fmt.Println("───────────────────────────────────────────────────────────────")
+}
 
-	// Demo 7: Price-based similarity (expensive items)
-	fmt.Println("\n🔟  Premium product recommendations (>$1000)...")
-	// Get all products and filter by price
-	allResults, err := client.Search(collectionName, []float32{0.5, 0.5, 0.5, 0.5}, 20)
-	if err != nil {
-		log.Fatalf("Premium search failed: %v", err)
-	}
+func printFooter() {
+	fmt.Println()
+	fmt.Println("╔═══════════════════════════════════════════════════════════════════════╗")
+	fmt.Println("║  Key Takeaways                                               ║")
+	fmt.Println("╠═══════════════════════════════════════════════════════════════════════╣")
+	fmt.Println("║  • Semantic search finds products by meaning, not keywords    ║")
+	fmt.Println("║  • Metadata filtering enables category/price constraints    ║")
+	fmt.Println("║  • Vector similarity powers personalized recommendations      ║")
+	fmt.Println("║  • 128-dimensional embeddings for rich semantic capture     ║")
+	fmt.Println("╚═══════════════════════════════════════════════════════════════════════╝")
+}
 
-	fmt.Println("💎 Premium Products (>$1000):")
-	count = 0
-	for _, result := range allResults {
-		price, _ := strconv.ParseFloat(result.Payload["price"], 64)
-		if price > 1000 {
-			count++
-			displayProduct(count, result)
-		}
-	}
+func stepStyle(n string) string {
+	return "\033[1;36m[" + n + "]\033[0m"
+}
 
-	// if err := client.DeleteCollection(collectionName); err != nil {
-	// 	log.Printf("cleanup failed: delete collection %q: %v", collectionName, err)
-	// } else {
-	// 	fmt.Printf("\n🧹 Deleted collection %q\n", collectionName)
-	// }
-
-	fmt.Println("\n✨ E-commerce demo completed!")
-	fmt.Println("\nKey Takeaways:")
-	fmt.Println("  ✅ Semantic search finds similar products by meaning")
-	fmt.Println("  ✅ Metadata filtering enables category/price constraints")
-	fmt.Println("  ✅ Vector similarity powers personalized recommendations")
-	fmt.Println("  ✅ Item-to-item similarity suggests related products")
+func printSuccess(msg string) {
+	fmt.Printf("  \033[1;32m✓\033[0m %s\n", msg)
 }
 
 // productToPayload converts a Product to a map[string]string payload
@@ -328,54 +282,59 @@ func productToPayload(p Product) map[string]string {
 	}
 }
 
-// displayResults shows search results in a formatted way
-func displayResults(query string, results []*vectron.SearchResult) {
-	fmt.Printf("🔍 Results for '%s':\n", query)
+func displaySearchResults(query string, results []*vectron.SearchResult) {
+	fmt.Printf("\n  Query: '%s'\n", query)
 	for i, result := range results {
 		displayProduct(i+1, result)
 	}
 }
 
-// displayProduct shows a single product with formatting
 func displayProduct(rank int, result *vectron.SearchResult) {
 	name := result.Payload["name"]
 	category := result.Payload["category"]
 	price := result.Payload["price"]
 	desc := result.Payload["description"]
 
-	fmt.Printf("  %d. %s ($%s) [%.2f]\n", rank, name, price, result.Score)
-	fmt.Printf("     Category: %s | ID: %s\n", category, result.ID)
-	if len(desc) > 50 {
-		desc = desc[:47] + "..."
+	scorePercent := result.Score * 100
+	fmt.Printf("  %d. \033[1;37m%s\033[0m  \033[33m£%s\033[0m  \033[90m[%.1f%%]\033[0m\n",
+		rank, name, price, scorePercent)
+	fmt.Printf("     \033[36m%s\033[0m | %s\n", category, result.ID)
+	if len(desc) > 60 {
+		desc = desc[:57] + "..."
 	}
-	fmt.Printf("     %s\n", desc)
+	fmt.Printf("     \033[90m%s\033[0m\n", desc)
 }
 
-// calculateSimilarity returns a normalized similarity score (0-100%)
-func calculateSimilarity(a, b []float32) float64 {
-	if len(a) != len(b) {
-		return 0
+func generateEmbedding(category string, variant int) []float32 {
+	base := categoryBase[category]
+	vec := make([]float32, 128)
+	for i := 0; i < len(base) && i < 128; i++ {
+		vec[i] = base[i] + float32(float64(variant)*0.5)
 	}
-
-	dotProduct := 0.0
-	normA := 0.0
-	normB := 0.0
-
-	for i := 0; i < len(a); i++ {
-		dotProduct += float64(a[i] * b[i])
-		normA += float64(a[i] * a[i])
-		normB += float64(b[i] * b[i])
+	for i := len(base); i < 128; i++ {
+		vec[i] = float32(rand.Float64()) * 0.1
 	}
-
-	if normA == 0 || normB == 0 {
-		return 0
-	}
-
-	cosine := dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
-	return (cosine + 1) * 50 // Convert to 0-100%
+	return vec
 }
 
-func waitForCollectionReady(client *vectron.Client, collectionName string, timeout time.Duration) error {
+func generateQueryVector(dim int, focusDim int) []float32 {
+	base := categoryBase[focusDimToCategory(focusDim)]
+	vec := make([]float32, 128)
+	for i := 0; i < len(base) && i < 128; i++ {
+		vec[i] = base[i]
+	}
+	return vec
+}
+
+func focusDimToCategory(dim int) string {
+	cats := []string{"smartphones", "laptops", "audio", "wearables", "tablets", "cameras"}
+	if dim >= 0 && dim < len(cats) {
+		return cats[dim]
+	}
+	return "smartphones"
+}
+
+	func waitForCollectionReady(client *vectron.Client, collectionName string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
 		status, err := client.GetCollectionStatus(collectionName)

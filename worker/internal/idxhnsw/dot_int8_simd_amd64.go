@@ -23,5 +23,10 @@ func dotProductInt8SIMD(a, b []int8) int32 {
 	return dotProductInt8(a, b)
 }
 
+// dotProductInt8SIMDFallback is used when cgo SIMD is disabled.
+func dotProductInt8SIMDFallback(a, b []int8) int32 {
+	return dotProductInt8SIMD(a, b)
+}
+
 // dotProductInt8AVX2 computes dot product of int8 vectors using AVX2.
 func dotProductInt8AVX2(a, b *int8, n int) int32

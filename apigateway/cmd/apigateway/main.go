@@ -907,9 +907,26 @@ func (c *WorkerListCache) Delete(collection string) {
 
 type searchResultHeap []*pb.SearchResult
 
+func betterSearchScore(a, b float32) bool {
+	return a < b
+}
+
+func worseSearchScore(a, b float32) bool {
+	return a > b
+}
+
+func sortSearchResults(results []*pb.SearchResult) {
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].Score == results[j].Score {
+			return results[i].Id < results[j].Id
+		}
+		return betterSearchScore(results[i].Score, results[j].Score)
+	})
+}
+
 func (h searchResultHeap) Len() int { return len(h) }
 func (h searchResultHeap) Less(i, j int) bool {
-	return h[i].Score < h[j].Score
+	return betterSearchScore(h[i].Score, h[j].Score)
 }
 func (h searchResultHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
 func (h *searchResultHeap) Push(x interface{}) {
@@ -976,7 +993,7 @@ func (a *searchAggregator) add(results []*pb.SearchResult) {
 		if result == nil || result.Id == "" {
 			continue
 		}
-		if existing, ok := a.entries[result.Id]; ok && result.Score <= existing.score {
+		if existing, ok := a.entries[result.Id]; ok && !betterSearchScore(result.Score, existing.score) {
 			continue
 		}
 		a.entries[result.Id] = searchAggEntry{
@@ -1004,12 +1021,7 @@ func (a *searchAggregator) snapshot(limit int) []*pb.SearchResult {
 			Payload: entry.payload,
 		})
 	}
-	sort.Slice(results, func(i, j int) bool {
-		if results[i].Score == results[j].Score {
-			return results[i].Id < results[j].Id
-		}
-		return results[i].Score > results[j].Score
-	})
+	sortSearchResults(results)
 	if len(results) > limit {
 		results = results[:limit]
 	}
@@ -1053,7 +1065,7 @@ func (h searchAggHeap) Less(i, j int) bool {
 	if h[i].score == h[j].score {
 		return h[i].id > h[j].id
 	}
-	return h[i].score < h[j].score
+	return worseSearchScore(h[i].score, h[j].score)
 }
 func (h searchAggHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
 func (h *searchAggHeap) Push(x interface{}) {
@@ -1098,9 +1110,7 @@ func snapshotTopResults(topResults *searchResultHeap, limit int) *pb.SearchRespo
 	}
 	results := make([]*pb.SearchResult, topResults.Len())
 	copy(results, *topResults)
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Score > results[j].Score
-	})
+	sortSearchResults(results)
 	if limit > 0 && len(results) > limit {
 		results = results[:limit]
 	}
@@ -1304,6 +1314,116 @@ func (s *gatewayServer) attachVectorsToResults(ctx context.Context, collection s
 	default:
 		return nil
 	}
+}
+
+func shouldUseReranker(req *pb.SearchRequest) bool {
+	if req == nil || req.GetQuery() == "" || !cfg.RerankEnabled {
+		return false
+	}
+	if len(cfg.RerankCollections) == 0 {
+		return true
+	}
+	return cfg.RerankCollections[req.Collection]
+}
+
+func trimBaseResults(resp *pb.SearchResponse, topK uint32) *pb.SearchResponse {
+	if resp == nil {
+		return &pb.SearchResponse{}
+	}
+	sortSearchResults(resp.Results)
+	if topK > 0 && len(resp.Results) > int(topK) {
+		resp.Results = resp.Results[:topK]
+	}
+	return resp
+}
+
+func buildRerankCandidates(results []*pb.SearchResult) ([]*reranker.Candidate, map[string]map[string]string) {
+	candidates := make([]*reranker.Candidate, len(results))
+	var metadataByID map[string]map[string]string
+	for i, result := range results {
+		metadata := result.Payload
+		if metadata != nil {
+			if metadataByID == nil {
+				metadataByID = make(map[string]map[string]string, len(results))
+			}
+			metadataByID[result.Id] = metadata
+		}
+		candidates[i] = &reranker.Candidate{
+			Id:       result.Id,
+			Score:    result.Score,
+			Metadata: metadata,
+		}
+	}
+	return candidates, metadataByID
+}
+
+func (s *gatewayServer) rerankedSearchResponse(resp *pb.SearchResponse, rerankResp *reranker.RerankResponse, metadataByID map[string]map[string]string, topK uint32) *pb.SearchResponse {
+	if rerankResp == nil {
+		return trimBaseResults(resp, topK)
+	}
+	rerankedResults := make([]*pb.SearchResult, len(rerankResp.Results))
+	for i, result := range rerankResp.Results {
+		rerankedResults[i] = &pb.SearchResult{
+			Id:      result.Id,
+			Score:   result.RerankScore,
+			Payload: metadataByID[result.Id],
+		}
+	}
+	finalResponse := &pb.SearchResponse{Results: rerankedResults}
+	if topK > 0 && len(finalResponse.Results) > int(topK) {
+		finalResponse.Results = finalResponse.Results[:topK]
+	}
+	return finalResponse
+}
+
+func (s *gatewayServer) rerankSearchResponse(ctx context.Context, req *pb.SearchRequest, searchResponse *pb.SearchResponse) (*pb.SearchResponse, error) {
+	if !shouldUseReranker(req) {
+		return trimBaseResults(searchResponse, req.TopK), nil
+	}
+
+	candidates, metadataByID := buildRerankCandidates(searchResponse.Results)
+	rerankTopN := int(req.TopK)
+	if v, ok := cfg.RerankTopNOverrides[req.Collection]; ok && v > 0 {
+		rerankTopN = v
+	}
+	if rerankTopN <= 0 || rerankTopN > len(searchResponse.Results) {
+		rerankTopN = len(searchResponse.Results)
+	}
+	rerankTimeoutMs := cfg.RerankTimeoutMs
+	if v, ok := cfg.RerankTimeoutOverrides[req.Collection]; ok && v > 0 {
+		rerankTimeoutMs = v
+	}
+
+	if cfg.RerankWarmupEnabled && s.rerankWarmupCache != nil {
+		warmupKey := computeSearchCacheKey(req)
+		s.startRerankWarmup(warmupKey, req, candidates, metadataByID, rerankTopN, rerankTimeoutMs)
+		return trimBaseResults(searchResponse, req.TopK), nil
+	}
+
+	rerankReq := &reranker.RerankRequest{
+		Query:      req.Query,
+		Candidates: candidates,
+		TopN:       int32(rerankTopN),
+		Options:    map[string]string{"mode": cfg.RerankMode},
+	}
+
+	rerankCtx := ctx
+	var cancel context.CancelFunc
+	if rerankTimeoutMs > 0 {
+		rerankCtx, cancel = context.WithTimeout(ctx, time.Duration(rerankTimeoutMs)*time.Millisecond)
+		defer cancel()
+	}
+	rerankerClient, err := s.getRerankerClient(rerankCtx)
+	if err != nil {
+		log.Println("Reranking failed, returning original results:", err)
+		return trimBaseResults(searchResponse, req.TopK), nil
+	}
+	rerankResp, err := rerankerClient.Rerank(rerankCtx, rerankReq)
+	if err != nil {
+		log.Println("Reranking failed, returning original results:", err)
+		return trimBaseResults(searchResponse, req.TopK), nil
+	}
+	return s.rerankedSearchResponse(searchResponse, rerankResp, metadataByID, req.TopK), nil
 }
 
 // Get retrieves cached results if available and not expired
@@ -3760,7 +3880,7 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 					heap.Push(localHeap, r)
 					continue
 				}
-				if localHeap.Len() > 0 && r.Score > (*localHeap)[0].Score {
+				if localHeap.Len() > 0 && betterSearchScore(r.Score, (*localHeap)[0].Score) {
 					(*localHeap)[0] = r
 					heap.Fix(localHeap, 0)
 				}
@@ -4070,9 +4190,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 
 		// Inline finalize block to avoid goto across declarations.
 		if candidateLimit > 0 && len(searchResponse.Results) > candidateLimit {
-			sort.Slice(searchResponse.Results, func(i, j int) bool {
-				return searchResponse.Results[i].Score > searchResponse.Results[j].Score
-			})
+			sortSearchResults(searchResponse.Results)
 			searchResponse.Results = searchResponse.Results[:candidateLimit]
 		}
 
@@ -4146,7 +4264,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 					heap.Push(localHeap, result)
 					continue
 				}
-				if localHeap.Len() > 0 && result.Score > (*localHeap)[0].Score {
+				if localHeap.Len() > 0 && betterSearchScore(result.Score, (*localHeap)[0].Score) {
 					(*localHeap)[0] = result
 					heap.Fix(localHeap, 0)
 				}
@@ -4202,9 +4320,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 	// Limit candidates before reranking to reduce latency and CPU usage.
 	// Keep 2x TopK (capped by workerTopK) to preserve quality while shrinking work.
 	if candidateLimit > 0 && len(searchResponse.Results) > candidateLimit {
-		sort.Slice(searchResponse.Results, func(i, j int) bool {
-			return searchResponse.Results[i].Score > searchResponse.Results[j].Score
-		})
+		sortSearchResults(searchResponse.Results)
 		searchResponse.Results = searchResponse.Results[:candidateLimit]
 	}
 

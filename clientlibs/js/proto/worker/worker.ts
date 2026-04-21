@@ -88,6 +88,7 @@ export interface SearchRequest {
 export interface SearchResponse {
   ids: string[];
   scores: number[];
+  metadata: Buffer[];
 }
 
 export interface BatchSearchRequest {
@@ -1120,7 +1121,7 @@ export const SearchRequest: MessageFns<SearchRequest> = {
 };
 
 function createBaseSearchResponse(): SearchResponse {
-  return { ids: [], scores: [] };
+  return { ids: [], scores: [], metadata: [] };
 }
 
 export const SearchResponse: MessageFns<SearchResponse> = {
@@ -1133,6 +1134,9 @@ export const SearchResponse: MessageFns<SearchResponse> = {
       writer.float(v);
     }
     writer.join();
+    for (const v of message.metadata) {
+      writer.uint32(26).bytes(v!);
+    }
     return writer;
   },
 
@@ -1169,6 +1173,14 @@ export const SearchResponse: MessageFns<SearchResponse> = {
 
           break;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.metadata.push(Buffer.from(reader.bytes()));
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1182,6 +1194,9 @@ export const SearchResponse: MessageFns<SearchResponse> = {
     return {
       ids: globalThis.Array.isArray(object?.ids) ? object.ids.map((e: any) => globalThis.String(e)) : [],
       scores: globalThis.Array.isArray(object?.scores) ? object.scores.map((e: any) => globalThis.Number(e)) : [],
+      metadata: globalThis.Array.isArray(object?.metadata)
+        ? object.metadata.map((e: any) => Buffer.from(bytesFromBase64(e)))
+        : [],
     };
   },
 
@@ -1193,6 +1208,9 @@ export const SearchResponse: MessageFns<SearchResponse> = {
     if (message.scores?.length) {
       obj.scores = message.scores;
     }
+    if (message.metadata?.length) {
+      obj.metadata = message.metadata.map((e) => base64FromBytes(e));
+    }
     return obj;
   },
 
@@ -1203,6 +1221,7 @@ export const SearchResponse: MessageFns<SearchResponse> = {
     const message = createBaseSearchResponse();
     message.ids = object.ids?.map((e) => e) || [];
     message.scores = object.scores?.map((e) => e) || [];
+    message.metadata = object.metadata?.map((e) => e) || [];
     return message;
   },
 };

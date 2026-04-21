@@ -69,6 +69,7 @@ func shouldLogHotPath() bool {
 type searchHeapItem struct {
 	id    string
 	score float32
+	meta  []byte
 }
 
 func adaptiveConcurrency(multiplier, maxCap int) int {
@@ -151,7 +152,7 @@ func (s *GrpcServer) syncProposeWithRetry(ctx context.Context, shardID uint64, c
 type searchMinHeap []searchHeapItem
 
 func (h searchMinHeap) Len() int           { return len(h) }
-func (h searchMinHeap) Less(i, j int) bool { return h[i].score < h[j].score }
+func (h searchMinHeap) Less(i, j int) bool { return h[i].score > h[j].score }
 func (h searchMinHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
 func (h *searchMinHeap) Push(x interface{}) {
 	*h = append(*h, x.(searchHeapItem))
@@ -420,7 +421,7 @@ func (s *GrpcServer) SearchShard(ctx context.Context, shardID uint64, query shar
 				}
 				searchResult, ok := res.(*shard.SearchResult)
 				if !ok {
-					return nil, status.Errorf(codes.Internal, "unexpected fast search result type: %T", res)
+					return nil, status.Errorf(codes.Internal, "unexpected search result type: %T", res)
 				}
 				return searchResult, nil
 			}
@@ -441,6 +442,17 @@ func (s *GrpcServer) SearchShard(ctx context.Context, shardID uint64, query shar
 		return nil, status.Errorf(codes.Internal, "unexpected search result type: %T", res)
 	}
 	return searchResult, nil
+}
+
+func workerSearchResponseFromResult(res *shard.SearchResult) *worker.SearchResponse {
+	if res == nil {
+		return &worker.SearchResponse{}
+	}
+	return &worker.SearchResponse{
+		Ids:      res.IDs,
+		Scores:   res.Scores,
+		Metadata: res.Metadata,
+	}
 }
 
 func (s *GrpcServer) validateVectorDim(shardID uint64, dim int) error {
@@ -767,7 +779,7 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 			var err error
 			if cacheable {
 				if cached, ok := s.searchCache.Get(computeSearchKeyWithShard(req, shardIDs[0])); ok && len(cached.Ids) > 0 {
-					return &worker.SearchResponse{Ids: cached.Ids, Scores: cached.Scores}, nil
+					return cached, nil
 				}
 			}
 			searchResult, err := s.searcher.SearchShard(ctx, shardIDs[0], query, useLinearizable)
@@ -775,12 +787,9 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 				return nil, mapSearchError(err)
 			}
 			if cacheable && len(searchResult.IDs) > 0 {
-				s.searchCache.Set(computeSearchKeyWithShard(req, shardIDs[0]), &worker.SearchResponse{
-					Ids:    searchResult.IDs,
-					Scores: searchResult.Scores,
-				})
+				s.searchCache.Set(computeSearchKeyWithShard(req, shardIDs[0]), workerSearchResponseFromResult(searchResult))
 			}
-			return &worker.SearchResponse{Ids: searchResult.IDs, Scores: searchResult.Scores}, nil
+			return workerSearchResponseFromResult(searchResult), nil
 		}
 		resultsCh := make(chan *[]searchHeapItem, len(shardIDs))
 		for _, shardID := range shardIDs {
@@ -792,7 +801,7 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 				var err error
 				if cacheable {
 					if cached, ok := s.searchCache.Get(computeSearchKeyWithShard(req, id)); ok && len(cached.Ids) > 0 {
-						searchResult := &shard.SearchResult{IDs: cached.Ids, Scores: cached.Scores}
+						searchResult := &shard.SearchResult{IDs: cached.Ids, Scores: cached.Scores, Metadata: cached.Metadata}
 						limit := int(req.GetK())
 						if limit <= 0 {
 							limit = 10
@@ -804,12 +813,16 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 								break
 							}
 							score := searchResult.Scores[i]
+							var meta []byte
+							if i < len(searchResult.Metadata) {
+								meta = searchResult.Metadata[i]
+							}
 							if localHeap.Len() < limit {
-								heap.Push(localHeap, searchHeapItem{id: resultID, score: score})
+								heap.Push(localHeap, searchHeapItem{id: resultID, score: score, meta: meta})
 								continue
 							}
-							if localHeap.Len() > 0 && score > (*localHeap)[0].score {
-								(*localHeap)[0] = searchHeapItem{id: resultID, score: score}
+							if localHeap.Len() > 0 && score < (*localHeap)[0].score {
+								(*localHeap)[0] = searchHeapItem{id: resultID, score: score, meta: meta}
 								heap.Fix(localHeap, 0)
 							}
 						}
@@ -829,10 +842,7 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 					return
 				}
 				if cacheable && len(searchResult.IDs) > 0 {
-					s.searchCache.Set(computeSearchKeyWithShard(req, id), &worker.SearchResponse{
-						Ids:    searchResult.IDs,
-						Scores: searchResult.Scores,
-					})
+					s.searchCache.Set(computeSearchKeyWithShard(req, id), workerSearchResponseFromResult(searchResult))
 				}
 
 				limit := int(req.GetK())
@@ -846,12 +856,16 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 						break
 					}
 					score := searchResult.Scores[i]
+					var meta []byte
+					if i < len(searchResult.Metadata) {
+						meta = searchResult.Metadata[i]
+					}
 					if localHeap.Len() < limit {
-						heap.Push(localHeap, searchHeapItem{id: resultID, score: score})
+						heap.Push(localHeap, searchHeapItem{id: resultID, score: score, meta: meta})
 						continue
 					}
-					if localHeap.Len() > 0 && score > (*localHeap)[0].score {
-						(*localHeap)[0] = searchHeapItem{id: resultID, score: score}
+					if localHeap.Len() > 0 && score < (*localHeap)[0].score {
+						(*localHeap)[0] = searchHeapItem{id: resultID, score: score, meta: meta}
 						heap.Fix(localHeap, 0)
 					}
 				}
@@ -875,23 +889,26 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 		topKHeap := getSearchHeap()
 		heap.Init(topKHeap)
 		var bestScores map[string]float32
+		var bestMeta map[string][]byte
 		if dedupeEnabled {
 			bestScores = make(map[string]float32, limit*2)
+			bestMeta = make(map[string][]byte, limit*2)
 		}
 		for local := range resultsCh {
 			for _, item := range *local {
 				if dedupeEnabled {
-					if best, ok := bestScores[item.id]; ok && best >= item.score {
+					if best, ok := bestScores[item.id]; ok && best <= item.score {
 						continue
 					}
 					bestScores[item.id] = item.score
+					bestMeta[item.id] = item.meta
 					continue
 				}
 				if topKHeap.Len() < limit {
 					heap.Push(topKHeap, item)
 					continue
 				}
-				if topKHeap.Len() > 0 && item.score > (*topKHeap)[0].score {
+				if topKHeap.Len() > 0 && item.score < (*topKHeap)[0].score {
 					(*topKHeap)[0] = item
 					heap.Fix(topKHeap, 0)
 				}
@@ -901,11 +918,11 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 		if dedupeEnabled {
 			for id, score := range bestScores {
 				if topKHeap.Len() < limit {
-					heap.Push(topKHeap, searchHeapItem{id: id, score: score})
+					heap.Push(topKHeap, searchHeapItem{id: id, score: score, meta: bestMeta[id]})
 					continue
 				}
-				if topKHeap.Len() > 0 && score > (*topKHeap)[0].score {
-					(*topKHeap)[0] = searchHeapItem{id: id, score: score}
+				if topKHeap.Len() > 0 && score < (*topKHeap)[0].score {
+					(*topKHeap)[0] = searchHeapItem{id: id, score: score, meta: bestMeta[id]}
 					heap.Fix(topKHeap, 0)
 				}
 			}
@@ -914,13 +931,15 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 		resultCount := topKHeap.Len()
 		ids := make([]string, resultCount)
 		scores := make([]float32, resultCount)
+		metadata := make([][]byte, resultCount)
 		for i := resultCount - 1; i >= 0; i-- {
 			item := heap.Pop(topKHeap).(searchHeapItem)
 			ids[i] = item.id
 			scores[i] = item.score
+			metadata[i] = item.meta
 		}
 		putSearchHeap(topKHeap)
-		return &worker.SearchResponse{Ids: ids, Scores: scores}, nil
+		return &worker.SearchResponse{Ids: ids, Scores: scores, Metadata: metadata}, nil
 
 	} else {
 		// Original logic for single-shard search
@@ -935,13 +954,10 @@ func (s *GrpcServer) searchCore(ctx context.Context, req *worker.SearchRequest) 
 			return nil, mapSearchError(err)
 		}
 		if cacheable && len(searchResult.IDs) > 0 {
-			s.searchCache.Set(computeSearchKeyWithShard(req, req.GetShardId()), &worker.SearchResponse{
-				Ids:    searchResult.IDs,
-				Scores: searchResult.Scores,
-			})
+			s.searchCache.Set(computeSearchKeyWithShard(req, req.GetShardId()), workerSearchResponseFromResult(searchResult))
 		}
 
-		return &worker.SearchResponse{Ids: searchResult.IDs, Scores: searchResult.Scores}, nil
+		return workerSearchResponseFromResult(searchResult), nil
 	}
 }
 
