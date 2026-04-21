@@ -101,6 +101,34 @@ type PebbleDB struct {
 	indexerCh                  chan indexOp
 	indexerStop                chan struct{}
 	indexerWg                  sync.WaitGroup
+	indexPendingSoftLimit      uint64
+	indexHeapSoftBytes         uint64
+	indexHeapSampleBytes       atomic.Uint64
+	indexHeapSampleUnixNano    atomic.Int64
+	earlyFlushScheduled        atomic.Uint32
+	namespace                  []byte
+	sharedDB                   bool
+	sharedDBPath               string
+}
+
+type RuntimeStats struct {
+	TotalNodes       int64
+	DeletedNodes     int64
+	Dimension        int
+	Quantized        bool
+	KeepFloatVectors bool
+	MmapEnabled      bool
+	MemTableSize     uint64
+	MemTableCount    int64
+	MemTableZombie   uint64
+	TableZombie      uint64
+	WALSize          uint64
+	BlockCacheSize   int64
+	BlockCacheCount  int64
+	TableCacheSize   int64
+	TableCacheCount  int64
+	SharedDB         bool
+	StoragePath      string
 }
 
 type indexOpType int
@@ -119,6 +147,25 @@ type indexOp struct {
 // NewPebbleDB creates a new, uninitialized instance of PebbleDB.
 func NewPebbleDB() *PebbleDB {
 	return &PebbleDB{}
+}
+
+func (r *PebbleDB) SetNamespace(ns []byte) {
+	if len(ns) == 0 {
+		r.namespace = nil
+		return
+	}
+	r.namespace = append([]byte(nil), ns...)
+}
+
+func (r *PebbleDB) Namespace() []byte {
+	if len(r.namespace) == 0 {
+		return nil
+	}
+	return append([]byte(nil), r.namespace...)
+}
+
+func (r *PebbleDB) RawDB() *pebble.DB {
+	return r.db
 }
 
 // Dimension returns the expected vector dimension for this shard.
@@ -407,4 +454,50 @@ func (r *PebbleDB) BruteForceSearch(query []float32, k int) ([]string, error) {
 	}
 
 	return ids, nil
+}
+
+// HNSWStats returns statistics about the HNSW index
+func (r *PebbleDB) HNSWStats() (totalNodes, deletedNodes int64) {
+	if r == nil || r.hnsw == nil {
+		return 0, 0
+	}
+	stats := r.hnsw.Stats()
+	return stats.TotalNodes, stats.DeletedNodes
+}
+
+func (r *PebbleDB) RuntimeStats() RuntimeStats {
+	var out RuntimeStats
+	if r == nil {
+		return out
+	}
+	if r.hnsw != nil {
+		stats := r.hnsw.Stats()
+		out.TotalNodes = stats.TotalNodes
+		out.DeletedNodes = stats.DeletedNodes
+	}
+	if r.opts != nil {
+		out.Dimension = r.opts.HNSWConfig.Dim
+		out.Quantized = r.opts.HNSWConfig.QuantizeVectors
+		out.KeepFloatVectors = r.opts.HNSWConfig.QuantizeKeepFloatVectors
+		out.MmapEnabled = r.opts.HNSWConfig.MmapVectorsEnabled
+	}
+	if r.db != nil {
+		m := r.db.Metrics()
+		out.MemTableSize = m.MemTable.Size
+		out.MemTableCount = m.MemTable.Count
+		out.MemTableZombie = m.MemTable.ZombieSize
+		out.TableZombie = m.Table.ZombieSize
+		out.WALSize = m.WAL.Size
+		out.BlockCacheSize = m.BlockCache.Size
+		out.BlockCacheCount = m.BlockCache.Count
+		out.TableCacheSize = m.TableCache.Size
+		out.TableCacheCount = m.TableCache.Count
+	}
+	out.SharedDB = r.sharedDB
+	if r.sharedDB {
+		out.StoragePath = r.sharedDBPath
+	} else {
+		out.StoragePath = r.path
+	}
+	return out
 }

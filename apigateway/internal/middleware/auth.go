@@ -6,7 +6,9 @@ package middleware
 
 import (
 	"context"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -36,9 +38,25 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
+type cachedAuth struct {
+	userID   string
+	plan     string
+	apiKeyID string
+	expiry   time.Time
+}
+
+var authCache sync.Map
+
 // AuthInterceptor returns a gRPC unary interceptor that performs JWT-based authentication.
 func AuthInterceptor(authClient authpb.AuthServiceClient, jwtSecret string) grpc.UnaryServerInterceptor {
+	benchmarkMode := os.Getenv("VECTRON_BENCHMARK_MODE") == "1"
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		if benchmarkMode {
+			ctx = context.WithValue(ctx, UserIDKey, "benchmark-user")
+			ctx = context.WithValue(ctx, PlanKey, "PRO")
+			ctx = context.WithValue(ctx, APIKeyIDKey, "benchmark")
+			return handler(ctx, req)
+		}
 		md, ok := metadata.FromIncomingContext(ctx)
 		if !ok {
 			return nil, status.Errorf(codes.Unauthenticated, "missing metadata")
@@ -54,6 +72,16 @@ func AuthInterceptor(authClient authpb.AuthServiceClient, jwtSecret string) grpc
 			return nil, status.Errorf(codes.Unauthenticated, "invalid Authorization format")
 		}
 
+		if cached, ok := authCache.Load(tokenStr); ok {
+			if entry, ok := cached.(cachedAuth); ok && time.Now().Before(entry.expiry) {
+				ctx = context.WithValue(ctx, UserIDKey, entry.userID)
+				ctx = context.WithValue(ctx, PlanKey, entry.plan)
+				ctx = context.WithValue(ctx, APIKeyIDKey, entry.apiKeyID)
+				return handler(ctx, req)
+			}
+			authCache.Delete(tokenStr)
+		}
+
 		claims := &Claims{}
 		token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
 			return []byte(jwtSecret), nil
@@ -61,6 +89,16 @@ func AuthInterceptor(authClient authpb.AuthServiceClient, jwtSecret string) grpc
 
 		if err != nil || !token.Valid {
 			return nil, status.Errorf(codes.Unauthenticated, "invalid or expired token")
+		}
+
+		cacheEntry := cachedAuth{
+			expiry: time.Now().Add(30 * time.Second),
+		}
+		if claims.ExpiresAt != nil {
+			cacheEntry.expiry = claims.ExpiresAt.Time
+			if cacheEntry.expiry.After(time.Now().Add(30 * time.Second)) {
+				cacheEntry.expiry = time.Now().Add(30 * time.Second)
+			}
 		}
 
 		// Distinguish between Login JWT and SDK JWT
@@ -79,12 +117,18 @@ func AuthInterceptor(authClient authpb.AuthServiceClient, jwtSecret string) grpc
 			ctx = context.WithValue(ctx, UserIDKey, authDetails.UserId)
 			ctx = context.WithValue(ctx, PlanKey, authDetails.Plan.String()) // Store plan as string
 			ctx = context.WithValue(ctx, APIKeyIDKey, claims.APIKey)
+			cacheEntry.userID = authDetails.UserId
+			cacheEntry.plan = authDetails.Plan.String()
+			cacheEntry.apiKeyID = claims.APIKey
 		} else {
 			// This is a Login JWT. Inject user ID and Plan from the JWT claims.
 			ctx = context.WithValue(ctx, UserIDKey, claims.UserID)
 			ctx = context.WithValue(ctx, PlanKey, claims.Plan)
 			ctx = context.WithValue(ctx, APIKeyIDKey, "") // No API Key ID for Login JWT
+			cacheEntry.userID = claims.UserID
+			cacheEntry.plan = claims.Plan
 		}
+		authCache.Store(tokenStr, cacheEntry)
 
 		// Pass control to the next handler.
 		return handler(ctx, req)

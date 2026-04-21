@@ -70,6 +70,8 @@ type HNSWConfig struct {
 	MaintenanceInterval      time.Duration // Interval between maintenance checks.
 	RebuildDeletedRatio      float64       // Rebuild when deleted/total ratio exceeds this.
 	RebuildMinDeleted        int64         // Minimum deleted nodes before rebuild.
+	SkipPersistNode          bool          // If true, skip per-node persistence (WAL handles recovery).
+	ExternalIndexEnabled     bool          // If true, vectors persist in Pebble but search/index lives outside PebbleDB HNSW.
 }
 
 // BatchOperations holds a set of write and delete operations to be performed atomically.

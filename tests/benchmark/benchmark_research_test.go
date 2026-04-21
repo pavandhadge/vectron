@@ -305,8 +305,13 @@ func buildBenchmarkEnv(t *testing.T) []string {
 	if err != nil {
 		return os.Environ()
 	}
-	envPath := filepath.Join(root, ".env")
-	extra := loadEnvFile(envPath)
+	// Load per-service env files (worker.env has storage tuning).
+	extra := make(map[string]string)
+	for _, name := range []string{".env", "env/worker.env", "env/apigateway.env"} {
+		for k, v := range loadEnvFile(filepath.Join(root, name)) {
+			extra[k] = v
+		}
+	}
 	if len(extra) == 0 {
 		return os.Environ()
 	}
@@ -340,6 +345,20 @@ func TestResearchBenchmark(t *testing.T) {
 	}
 	if err := os.MkdirAll(benchmarkLogTempDir, 0755); err != nil {
 		t.Fatalf("Failed to create log temp dir %s: %v", benchmarkLogTempDir, err)
+	}
+
+	// Truncate log files at start of test run (but keep the files for logging)
+	// This ensures we start fresh for each test run while still being able to write to logs
+	logFiles := []string{
+		"vectron-pd1-benchmark.log", "vectron-pd2-benchmark.log", "vectron-pd3-benchmark.log",
+		"vectron-worker1-benchmark.log", "vectron-worker2-benchmark.log",
+		"vectron-auth-benchmark.log", "vectron-reranker-benchmark.log", "vectron-apigw-benchmark.log",
+	}
+	for _, name := range logFiles {
+		logFile := filepath.Join(benchmarkLogTempDir, name)
+		if f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {
+			f.Close()
+		}
 	}
 
 	suite := &BenchmarkTest{t: t}
@@ -626,7 +645,7 @@ func (s *BenchmarkTest) startPlacementDriverCluster() {
 		cmd.Dir = "/home/pavan/Programming/vectron"
 
 		logFile := filepath.Join(benchmarkLogTempDir, fmt.Sprintf("vectron-pd%d-benchmark.log", node.id))
-		if f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {
+		if f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
 			cmd.Stdout = f
 			cmd.Stderr = f
 		}
@@ -679,7 +698,7 @@ func (s *BenchmarkTest) startWorkers() {
 		cmd.Dir = "/home/pavan/Programming/vectron"
 
 		logFile := filepath.Join(benchmarkLogTempDir, fmt.Sprintf("vectron-worker%d-benchmark.log", i))
-		if f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {
+		if f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
 			cmd.Stdout = f
 			cmd.Stderr = f
 		}
@@ -707,7 +726,7 @@ func (s *BenchmarkTest) startAuthService() {
 		"ETCD_ENDPOINTS=127.0.0.1:2379",
 	)
 
-	if f, err := os.OpenFile(filepath.Join(benchmarkLogTempDir, "vectron-auth-benchmark.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {
+	if f, err := os.OpenFile(filepath.Join(benchmarkLogTempDir, "vectron-auth-benchmark.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
 		cmd.Stdout = f
 		cmd.Stderr = f
 	}
@@ -732,7 +751,7 @@ func (s *BenchmarkTest) startReranker() {
 	cmd.Dir = "/home/pavan/Programming/vectron"
 	cmd.Env = append([]string{}, s.baseEnv...)
 
-	if f, err := os.OpenFile(filepath.Join(benchmarkLogTempDir, "vectron-reranker-benchmark.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {
+	if f, err := os.OpenFile(filepath.Join(benchmarkLogTempDir, "vectron-reranker-benchmark.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
 		cmd.Stdout = f
 		cmd.Stderr = f
 	}
@@ -788,7 +807,7 @@ func (s *BenchmarkTest) startAPIGateway() {
 		)
 	}
 
-	if f, err := os.OpenFile(filepath.Join(benchmarkLogTempDir, "vectron-apigw-benchmark.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {
+	if f, err := os.OpenFile(filepath.Join(benchmarkLogTempDir, "vectron-apigw-benchmark.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
 		cmd.Stdout = f
 		cmd.Stderr = f
 	}
@@ -968,9 +987,12 @@ func upsertWithRetry(ctx context.Context, client apigatewaypb.VectronServiceClie
 			return resp, nil
 		}
 
-		// Check if it's a retryable error (shard not ready, unavailable)
+		// Check if it's a retryable error (shard not ready, unavailable, timeout, busy)
 		errStr := err.Error()
-		if !strings.Contains(errStr, "not ready") && !strings.Contains(errStr, "Unavailable") {
+		if !strings.Contains(errStr, "not ready") &&
+			!strings.Contains(errStr, "Unavailable") &&
+			!strings.Contains(errStr, "timeout") &&
+			!strings.Contains(errStr, "SystemBusy") {
 			return nil, err // Not retryable
 		}
 
@@ -983,6 +1005,52 @@ func upsertWithRetry(ctx context.Context, client apigatewaypb.VectronServiceClie
 		time.Sleep(backoff)
 	}
 	return nil, lastErr
+}
+
+func upsertBatchesConcurrently(ctx context.Context, client apigatewaypb.VectronServiceClient, collection string, batches [][]*apigatewaypb.Point, maxRetries int) ([]time.Duration, int64, error) {
+	workers := envIntDefault("BENCH_INSERT_CONCURRENCY", 16)
+	if workers < 1 {
+		workers = 1
+	}
+	if workers > len(batches) && len(batches) > 0 {
+		workers = len(batches)
+	}
+	latencies := make([]time.Duration, len(batches))
+	var totalUpserted int64
+	var next int64
+	var firstErr atomic.Value
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				if v := firstErr.Load(); v != nil {
+					return
+				}
+				idx := int(atomic.AddInt64(&next, 1) - 1)
+				if idx >= len(batches) {
+					return
+				}
+				start := time.Now()
+				resp, err := upsertWithRetry(ctx, client, &apigatewaypb.UpsertRequest{
+					Collection: collection,
+					Points:     batches[idx],
+				}, maxRetries)
+				latencies[idx] = time.Since(start)
+				if err != nil {
+					firstErr.Store(err)
+					return
+				}
+				atomic.AddInt64(&totalUpserted, int64(resp.Upserted))
+			}
+		}()
+	}
+	wg.Wait()
+	if v := firstErr.Load(); v != nil {
+		return nil, totalUpserted, v.(error)
+	}
+	return latencies, totalUpserted, nil
 }
 
 // waitForCollectionReady polls GetCollectionStatus until all shards are ready or timeout.
@@ -1062,10 +1130,11 @@ func runScalabilityBenchmark(t *testing.T, ctx context.Context, client apigatewa
 	require.NoError(t, waitForCollectionReady(ctx, client, collectionName, 120*time.Second))
 
 	// Insert vectors in batches
-	batchSize := 1000
-	insertLatencies := make([]time.Duration, 0, datasetSize/batchSize)
-	insertCount := int64(0)
-
+	batchSize := envIntDefault("BENCH_INSERT_BATCH", 1000)
+	if batchSize < 1 {
+		batchSize = 1000
+	}
+	batches := make([][]*apigatewaypb.Point, 0, (datasetSize+batchSize-1)/batchSize)
 	for i := 0; i < datasetSize; i += batchSize {
 		batch := make([]*apigatewaypb.Point, 0, batchSize)
 		for j := 0; j < batchSize && i+j < datasetSize; j++ {
@@ -1077,23 +1146,10 @@ func runScalabilityBenchmark(t *testing.T, ctx context.Context, client apigatewa
 				},
 			})
 		}
-
-		batchStart := time.Now()
-		resp, err := upsertWithRetry(ctx, client, &apigatewaypb.UpsertRequest{
-			Collection: collectionName,
-			Points:     batch,
-		}, 5)
-		require.NoError(t, err)
-		batchDuration := time.Since(batchStart)
-
-		insertLatencies = append(insertLatencies, batchDuration)
-		insertCount += int64(resp.Upserted)
-
-		if datasetSize >= 10000 && i%(datasetSize/10) == 0 && i > 0 {
-			progress := float64(i) / float64(datasetSize) * 100
-			log.Printf("  Insert progress: %.1f%% (%d/%d vectors)", progress, i, datasetSize)
-		}
+		batches = append(batches, batch)
 	}
+	_, insertCount, err := upsertBatchesConcurrently(ctx, client, collectionName, batches, 5)
+	require.NoError(t, err)
 
 	insertDuration := time.Since(start)
 	result.InsertMetrics = &ThroughputMetrics{
@@ -1949,8 +2005,7 @@ func benchmarkWriteOnly(t *testing.T, ctx context.Context, client apigatewaypb.V
 	require.NoError(t, waitForCollectionReady(ctx, client, collectionName, 120*time.Second))
 
 	start := time.Now()
-	var insertCount int64
-
+	batches := make([][]*apigatewaypb.Point, 0, (datasetSize+999)/1000)
 	for i := 0; i < datasetSize; i += 1000 {
 		batch := make([]*apigatewaypb.Point, 0, 1000)
 		for j := 0; j < 1000 && i+j < datasetSize; j++ {
@@ -1959,13 +2014,10 @@ func benchmarkWriteOnly(t *testing.T, ctx context.Context, client apigatewaypb.V
 				Vector: generateNormalizedVector(dimension),
 			})
 		}
-		resp, err := upsertWithRetry(ctx, client, &apigatewaypb.UpsertRequest{
-			Collection: collectionName,
-			Points:     batch,
-		}, 5)
-		require.NoError(t, err)
-		insertCount += int64(resp.Upserted)
+		batches = append(batches, batch)
 	}
+	_, insertCount, err := upsertBatchesConcurrently(ctx, client, collectionName, batches, 5)
+	require.NoError(t, err)
 
 	insertDuration := time.Since(start)
 	result.InsertMetrics = &ThroughputMetrics{
@@ -2156,11 +2208,11 @@ func generateSummaryStats(t *testing.T, results []*BenchmarkResult) {
 		if r == nil || r.InsertMetrics == nil {
 			continue
 		}
-			totalInsertThroughput += r.InsertMetrics.VectorsPerSec
-			if r.SearchMetrics != nil {
-				totalSearchThroughput += r.SearchMetrics.OpsPerSecond
-			}
-			count++
+		totalInsertThroughput += r.InsertMetrics.VectorsPerSec
+		if r.SearchMetrics != nil {
+			totalSearchThroughput += r.SearchMetrics.OpsPerSecond
+		}
+		count++
 	}
 
 	if count > 0 {

@@ -29,6 +29,9 @@ const (
 	defaultPort         = "50051"
 	defaultStrategy     = "rule" // "rule", "llm", or "rl"
 	defaultCacheBackend = "memory"
+	grpcReadBufferSize  = 256 * 1024
+	grpcWriteBufferSize = 256 * 1024
+	grpcWindowSize      = 4 << 20
 )
 
 func main() {
@@ -75,9 +78,11 @@ func main() {
 			MinTime:             10 * time.Second,
 			PermitWithoutStream: true,
 		}),
-		grpc.ReadBufferSize(64*1024),
-		grpc.WriteBufferSize(64*1024),
-		grpc.MaxConcurrentStreams(1024),
+		grpc.ReadBufferSize(grpcReadBufferSize),
+		grpc.WriteBufferSize(grpcWriteBufferSize),
+		grpc.InitialWindowSize(grpcWindowSize),
+		grpc.InitialConnWindowSize(grpcWindowSize),
+		grpc.MaxConcurrentStreams(4096),
 	)
 	pb.RegisterRerankServiceServer(server, grpcServer)
 
@@ -166,7 +171,10 @@ func startPDHeartbeat(pdAddrs []string, advertiseAddr string) {
 					Timeout:             5 * time.Second,
 					PermitWithoutStream: true,
 				}),
-				grpc.WithBlock(),
+				grpc.WithInitialWindowSize(grpcWindowSize),
+				grpc.WithInitialConnWindowSize(grpcWindowSize),
+				grpc.WithReadBufferSize(grpcReadBufferSize),
+				grpc.WithWriteBufferSize(grpcWriteBufferSize),
 			)
 			if err != nil {
 				log.Printf("Failed to connect to PD at %s: %v", addr, err)

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	sm "github.com/lni/dragonboat/v3/statemachine"
+	"github.com/pavandhadge/vectron/worker/internal/segment"
 	"github.com/pavandhadge/vectron/worker/internal/storage"
 )
 
@@ -277,9 +278,14 @@ const lastAppliedSnapshotFile = "_raft_last_applied"
 // and an HNSW index.
 type StateMachine struct {
 	*storage.PebbleDB
-	ClusterID   uint64
-	NodeID      uint64
-	lastApplied uint64
+	ClusterID     uint64
+	NodeID        uint64
+	lastApplied   uint64
+	workerDataDir string
+	namespace     []byte
+	useSegments   bool
+	segmentMgr    *segment.ShardIndexManager
+	segmentCfg    segment.Config
 }
 
 func writeLastApplied(dir string, index uint64) error {
@@ -308,22 +314,147 @@ func envBool(key string, fallback bool) bool {
 	return parsed
 }
 
+func segmentIndexEnabled() bool {
+	return envBool("VECTRON_SEGMENT_INDEX_ENABLED", true)
+}
+
+func buildSegmentConfig(workerDataDir string, namespace []byte, dim int, h storage.HNSWConfig) segment.Config {
+	return segment.Config{
+		Thresholds: segment.DefaultThresholds,
+		ShardPath:  workerDataDir,
+		Dimension:  dim,
+		Namespace:  namespace,
+		HNSWConfig: segment.HNSWConfig{
+			M:                 h.M,
+			EfConstruction:    h.EfConstruction,
+			EfSearch:          h.EfSearch,
+			Distance:          h.DistanceMetric,
+			NormalizeVectors:  h.NormalizeVectors,
+			QuantizeVectors:   h.QuantizeVectors,
+			SearchParallelism: h.SearchParallelism,
+		},
+	}
+}
+
+func (s *StateMachine) initSegmentManager() error {
+	if !s.useSegments || s.PebbleDB == nil {
+		return nil
+	}
+	if s.segmentMgr != nil {
+		_ = s.segmentMgr.Close()
+		s.segmentMgr = nil
+	}
+	mgr, err := segment.NewShardIndexManager(s.ClusterID, s.PebbleDB.RawDB(), s.segmentCfg)
+	if err != nil {
+		return err
+	}
+	s.segmentMgr = mgr
+	return nil
+}
+
+func (s *StateMachine) segmentDir() string {
+	return filepath.Join(s.workerDataDir, fmt.Sprintf("shard-%d", s.ClusterID), "segments")
+}
+
+func (s *StateMachine) copySegmentFiles(dstRoot string) error {
+	if !s.useSegments {
+		return nil
+	}
+	src := s.segmentDir()
+	if _, err := os.Stat(src); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	dst := filepath.Join(dstRoot, "_segment_files")
+	return copyDirLocal(src, dst)
+}
+
+func (s *StateMachine) restoreSegmentFiles(srcRoot string) error {
+	if !s.useSegments {
+		return nil
+	}
+	src := filepath.Join(srcRoot, "_segment_files")
+	if _, err := os.Stat(src); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	dst := s.segmentDir()
+	if err := os.RemoveAll(dst); err != nil {
+		return err
+	}
+	return copyDirLocal(src, dst)
+}
+
+func copyDirLocal(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, info.Mode())
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return err
+		}
+		in, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode())
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(out, in); err != nil {
+			out.Close()
+			return err
+		}
+		return out.Close()
+	})
+}
+
 // NewStateMachine creates a new shard StateMachine.
 func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dimension int32, distance string, walHub *storage.WALHub) (*StateMachine, error) {
 	dbPath := filepath.Join(workerDataDir, fmt.Sprintf("shard-%d", clusterID))
+	namespace := []byte(fmt.Sprintf("s%020d:", clusterID))
+	if envBool("VECTRON_SHARED_PEBBLE", true) {
+		dbPath = filepath.Join(workerDataDir, "shared-pebble")
+	}
 
 	dim := int(dimension)
 	durabilityProfile := ParseDurabilityProfile()
 	writeSpeedMode := os.Getenv("VECTRON_WRITE_SPEED_MODE") == "1"
 	disablePrealloc := envBool("VECTRON_DISABLE_DISK_PREALLOC", false)
-	syncInterval := 500 * time.Millisecond
-	syncMaxInterval := 2 * time.Second
+	syncInterval := 250 * time.Millisecond
+	syncMaxInterval := 1 * time.Second
 	if durabilityProfile == "relaxed" {
-		syncInterval = 1 * time.Second
-		syncMaxInterval = 5 * time.Second
+		syncInterval = 200 * time.Millisecond
+		syncMaxInterval = 500 * time.Millisecond
+	}
+	if v := os.Getenv("VECTRON_BACKGROUND_SYNC_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			syncInterval = time.Duration(n) * time.Millisecond
+		}
+	}
+	if v := os.Getenv("VECTRON_BACKGROUND_SYNC_MAX_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			syncMaxInterval = time.Duration(n) * time.Millisecond
+		}
+	}
+	if syncMaxInterval < syncInterval {
+		syncMaxInterval = syncInterval
 	}
 	// Keep the default small to avoid large WAL preallocation on small datasets.
-	writeBufferSize := 32 * 1024 * 1024
+	writeBufferSize := 8 * 1024 * 1024
 	if v := os.Getenv("VECTRON_WRITE_BUFFER_MB"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			writeBufferSize = n * 1024 * 1024
@@ -353,8 +484,13 @@ func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dime
 		IngestMode:                ingestMode,
 		HNSWConfig:                DefaultHNSWConfig(dim, distance, durabilityProfile, writeSpeedMode),
 	}
+	useSegments := segmentIndexEnabled()
+	if useSegments {
+		opts.HNSWConfig.ExternalIndexEnabled = true
+	}
 
 	db := storage.NewPebbleDB()
+	db.SetNamespace(namespace)
 	if err := db.Init(dbPath, opts); err != nil {
 		return nil, fmt.Errorf("failed to initialize storage for shard %d: %w", clusterID, err)
 	}
@@ -362,14 +498,21 @@ func NewStateMachine(clusterID uint64, nodeID uint64, workerDataDir string, dime
 	db.SetWALHub(walHub)
 
 	return &StateMachine{
-		PebbleDB:  db,
-		ClusterID: clusterID,
-		NodeID:    nodeID,
+		PebbleDB:      db,
+		ClusterID:     clusterID,
+		NodeID:        nodeID,
+		workerDataDir: workerDataDir,
+		namespace:     append([]byte(nil), namespace...),
+		useSegments:   useSegments,
+		segmentCfg:    buildSegmentConfig(workerDataDir, namespace, dim, opts.HNSWConfig),
 	}, nil
 }
 
 // Open is a no-op.
 func (s *StateMachine) Open(stopc <-chan struct{}) (uint64, error) {
+	if err := s.initSegmentManager(); err != nil {
+		return 0, err
+	}
 	last := atomic.LoadUint64(&s.lastApplied)
 	if last > 0 {
 		setAppliedIndex(s.ClusterID, last)
@@ -387,24 +530,43 @@ func (s *StateMachine) Update(entries []sm.Entry) ([]sm.Entry, error) {
 
 		switch cmd.Type {
 		case StoreVector:
-			if err := s.StoreVector(cmd.ID, cmd.Vector, cmd.Metadata); err != nil {
+			if err := s.PebbleDB.StoreVector(cmd.ID, cmd.Vector, cmd.Metadata); err != nil {
 				return nil, fmt.Errorf("failed to store vector: %w", err)
+			}
+			if s.useSegments {
+				if err := s.segmentMgr.Add(cmd.ID, cmd.Vector); err != nil {
+					return nil, fmt.Errorf("failed to add vector to segment index: %w", err)
+				}
 			}
 		case StoreVectorBatch:
 			batch := make([]storage.VectorEntry, 0, len(cmd.Vectors))
+			ids := make([]string, 0, len(cmd.Vectors))
+			vectors := make([][]float32, 0, len(cmd.Vectors))
 			for _, v := range cmd.Vectors {
 				batch = append(batch, storage.VectorEntry{
 					ID:       v.ID,
 					Vector:   v.Vector,
 					Metadata: v.Metadata,
 				})
+				ids = append(ids, v.ID)
+				vectors = append(vectors, v.Vector)
 			}
-			if err := s.StoreVectorBatch(batch); err != nil {
+			if err := s.PebbleDB.StoreVectorBatch(batch); err != nil {
 				return nil, fmt.Errorf("failed to store vector batch: %w", err)
 			}
+			if s.useSegments {
+				if err := s.segmentMgr.AddBatch(ids, vectors); err != nil {
+					return nil, fmt.Errorf("failed to add vector batch to segment index: %w", err)
+				}
+			}
 		case DeleteVector:
-			if err := s.DeleteVector(cmd.ID); err != nil {
+			if err := s.PebbleDB.DeleteVector(cmd.ID); err != nil {
 				return nil, fmt.Errorf("failed to delete vector: %w", err)
+			}
+			if s.useSegments {
+				if err := s.segmentMgr.Delete(cmd.ID); err != nil {
+					return nil, fmt.Errorf("failed to delete vector from segment index: %w", err)
+				}
 			}
 		}
 		entries[i].Result = sm.Result{}
@@ -427,6 +589,13 @@ type SearchResult struct {
 func (s *StateMachine) Lookup(query interface{}) (interface{}, error) {
 	switch q := query.(type) {
 	case SearchQuery:
+		if s.useSegments {
+			ids, scores, err := s.segmentMgr.Search(q.Vector, q.K)
+			if err != nil {
+				return nil, err
+			}
+			return &SearchResult{IDs: ids, Scores: scores}, nil
+		}
 		ids, scores, err := s.Search(q.Vector, q.K)
 		if err != nil {
 			return nil, err
@@ -494,6 +663,9 @@ func (s *StateMachine) SaveSnapshot(ctx interface{}, w io.Writer, done <-chan st
 	defer os.RemoveAll(tmpDir)
 
 	if err := s.PebbleDB.Backup(tmpDir); err != nil {
+		return err
+	}
+	if err := s.copySegmentFiles(tmpDir); err != nil {
 		return err
 	}
 
@@ -590,6 +762,12 @@ func (s *StateMachine) RecoverFromSnapshot(r io.Reader, done <-chan struct{}) er
 	if err := s.PebbleDB.Restore(tmpDir); err != nil {
 		return err
 	}
+	if err := s.restoreSegmentFiles(tmpDir); err != nil {
+		return err
+	}
+	if err := s.initSegmentManager(); err != nil {
+		return err
+	}
 
 	if lastApplied, err := readLastApplied(tmpDir); err == nil && lastApplied > 0 {
 		atomic.StoreUint64(&s.lastApplied, lastApplied)
@@ -600,7 +778,17 @@ func (s *StateMachine) RecoverFromSnapshot(r io.Reader, done <-chan struct{}) er
 
 // Close closes the state machine.
 func (s *StateMachine) Close() error {
+	if s.segmentMgr != nil {
+		_ = s.segmentMgr.Close()
+	}
 	return s.PebbleDB.Close()
+}
+
+func (s *StateMachine) SegmentStats() (segment.IndexStats, bool) {
+	if s == nil || !s.useSegments || s.segmentMgr == nil {
+		return segment.IndexStats{}, false
+	}
+	return s.segmentMgr.GetStats(), true
 }
 
 // GetHash is a no-op.

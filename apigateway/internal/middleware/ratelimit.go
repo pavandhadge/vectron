@@ -7,7 +7,7 @@ package middleware
 
 import (
 	"context"
-	
+
 	"hash/fnv"
 	"sync"
 	"time"
@@ -72,6 +72,9 @@ func cleanupExpiredLimiters() {
 // It uses a sharded in-memory map to track request counts for each user, reducing lock contention.
 func RateLimitInterceptor(rps int) func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		if rps <= 0 {
+			return handler(ctx, req)
+		}
 		// The user ID should be injected into the context by the AuthInterceptor.
 		userID := GetUserID(ctx)
 		if userID == "" {

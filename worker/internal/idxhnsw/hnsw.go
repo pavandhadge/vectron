@@ -79,6 +79,7 @@ type HNSWConfig struct {
 	HotIndex          bool   // If true, this index is a hot in-memory tier.
 	PruneEnabled      bool   // If true, periodically prune redundant edges.
 	PruneMaxNodes     int    // Max nodes to prune per maintenance tick.
+	SkipPersistNode   bool   // If true, skip per-node persistence (redundant when WAL handles recovery).
 }
 
 // HNSW represents the HNSW index.
@@ -94,11 +95,16 @@ type HNSW struct {
 	mmapStore       *vectorMmap
 	pruneMu         sync.Mutex
 	pruneCandidates map[uint32]struct{}
+	isCosine        bool // cached: config.Distance == "cosine"
+	isNormalized    bool // cached: config.NormalizeVectors && cosine
+	useNorms        bool // cached: config.EnableNorms && cosine
+	useQuantize     bool // cached: config.QuantizeVectors
 
 	// Deletion-related fields
 	deletedCount int64
 	idToUint32   map[string]uint32 // Maps external string IDs to internal uint32 IDs.
 	uint32ToID   map[uint32]string // Maps internal uint32 IDs back to external string IDs.
+	extIDCache   []string          // Direct O(1) lookup: external ID indexed by internal ID (avoids map hashing in hot path).
 	nextID       uint32
 }
 
@@ -143,8 +149,13 @@ func NewHNSW(store NodeStore, dim int, config HNSWConfig) *HNSW {
 		deletedCount:    0,
 		idToUint32:      make(map[string]uint32),
 		uint32ToID:      make(map[uint32]string),
+		extIDCache:      make([]string, 1),
 		nextID:          1, // Start internal IDs from 1.
 		pruneCandidates: make(map[uint32]struct{}),
+		isCosine:        config.Distance == "cosine",
+		isNormalized:    config.NormalizeVectors && config.Distance == "cosine",
+		useNorms:        config.EnableNorms && config.Distance == "cosine",
+		useQuantize:     config.QuantizeVectors,
 	}
 	// Start the background cleanup process for marked-for-deletion nodes.
 	h.StartCleanup(DefaultCleanupConfig)
@@ -255,6 +266,7 @@ func (h *HNSW) Rebuild() error {
 
 	// Reset internal state.
 	h.nodes = make([]*Node, 1)
+	h.extIDCache = make([]string, 1)
 	h.nodeCount = 0
 	h.idToUint32 = make(map[string]uint32, len(liveIDs))
 	h.uint32ToID = make(map[uint32]string, len(liveIDs))
@@ -627,6 +639,13 @@ func (h *HNSW) Load(r io.Reader) error {
 		h.uint32ToID = uint32ToID
 		h.nextID = nextID
 		h.deletedCount = deletedCount
+		// Build extIDCache from uint32ToID for O(1) lookup by internal ID.
+		h.extIDCache = make([]string, len(nodes))
+		for id, extID := range uint32ToID {
+			if int(id) < len(h.extIDCache) {
+				h.extIDCache[id] = extID
+			}
+		}
 		return nil
 	}
 
@@ -664,6 +683,13 @@ func (h *HNSW) Load(r io.Reader) error {
 	h.uint32ToID = data.Uint32ToID
 	h.nextID = data.NextID
 	h.deletedCount = data.DeletedCount
+	// Build extIDCache from uint32ToID for O(1) lookup by internal ID.
+	h.extIDCache = make([]string, len(h.nodes))
+	for id, extID := range data.Uint32ToID {
+		if int(id) < len(h.extIDCache) {
+			h.extIDCache[id] = extID
+		}
+	}
 	return nil
 }
 

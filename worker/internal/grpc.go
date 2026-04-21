@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"hash/maphash"
 	"io"
 	"log"
@@ -18,6 +19,7 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -32,7 +34,8 @@ import (
 
 const (
 	// raftTimeout is the default timeout for Raft proposals.
-	raftTimeout = 5 * time.Second
+	raftTimeout       = 15 * time.Second
+	memoryLogInterval = 5 * time.Second // Log memory stats every 5 seconds for detailed tracking
 )
 
 var (
@@ -355,8 +358,11 @@ func envBool(name string, def bool) bool {
 
 // NewGrpcServer creates a new instance of the gRPC server.
 func NewGrpcServer(nh *dragonboat.NodeHost, sm shardView, searcher shardSearcher, searchOnly bool) *GrpcServer {
+	// Default to disabled (0) - can be enabled via env var VECTRON_WORKER_SEARCH_CACHE_MAX
+	// WARNING: The search cache stores full query vectors and can cause massive memory usage!
 	cacheTTL := time.Duration(envInt("VECTRON_WORKER_SEARCH_CACHE_TTL_MS", int(defaultSearchCacheTTL.Milliseconds()))) * time.Millisecond
-	cacheMax := envInt("VECTRON_WORKER_SEARCH_CACHE_MAX", defaultSearchCacheMaxSize)
+	cacheMax := envInt("VECTRON_WORKER_SEARCH_CACHE_MAX", 0) // Default 0 = disabled
+
 	s := &GrpcServer{
 		nodeHost:       nh,
 		shardManager:   sm,
@@ -371,6 +377,16 @@ func NewGrpcServer(nh *dragonboat.NodeHost, sm shardView, searcher shardSearcher
 	for i := range s.inFlightShards {
 		s.inFlightShards[i].m = make(map[uint64]*inFlightSearch)
 	}
+
+	// Start memory logging goroutine
+	go func() {
+		ticker := time.NewTicker(memoryLogInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			log.Println(s.DebugMemoryStats())
+		}
+	}()
+
 	return s
 }
 
@@ -1325,4 +1341,145 @@ func (s *GrpcServer) Status(ctx context.Context, req *worker.StatusRequest) (*wo
 
 func (s *GrpcServer) Flush(ctx context.Context, req *worker.FlushRequest) (*worker.FlushResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Flush not implemented")
+}
+
+// DebugMemoryStats prints detailed memory statistics to logs
+func (s *GrpcServer) DebugMemoryStats() string {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("MEM: Alloc=%.1fMB Heap=%.1fMB Sys=%.1fMB GC=%d",
+		float64(m.Alloc)/1024/1024, float64(m.HeapAlloc)/1024/1024, float64(m.Sys)/1024/1024, m.NumGC))
+
+	// GC stats
+	lines = append(lines, fmt.Sprintf("  GC: PauseTotal=%.2fms NextGC=%.1fMB LastGC=%s",
+		float64(m.PauseTotalNs)/1e6, float64(m.NextGC)/1024/1024, time.Unix(0, int64(m.LastGC)).Format("15:04:05")))
+
+	// Stack in use
+	lines = append(lines, fmt.Sprintf("  Stack: inuse=%.1fKB", float64(m.StackInuse)/1024))
+
+	// Get search cache stats
+	if s.searchCache != nil {
+		totalEntries := 0
+		for i := range s.searchCache.shards {
+			s.searchCache.shards[i].mu.Lock()
+			totalEntries += len(s.searchCache.shards[i].entries)
+			s.searchCache.shards[i].mu.Unlock()
+		}
+		lines = append(lines, fmt.Sprintf("  SearchCache: entries=%d", totalEntries))
+	}
+
+	// Get in-flight search count
+	inFlightCount := 0
+	for i := range s.inFlightShards {
+		s.inFlightShards[i].mu.Lock()
+		inFlightCount += len(s.inFlightShards[i].m)
+		s.inFlightShards[i].mu.Unlock()
+	}
+	lines = append(lines, fmt.Sprintf("  InFlight: %d", inFlightCount))
+
+	// Get HNSW stats
+	shards := s.shardManager.GetShards()
+	lines = append(lines, fmt.Sprintf("  Shards: %d", len(shards)))
+
+	if provider, ok := s.shardManager.(interface {
+		GetStateMachine(uint64) *shard.StateMachine
+	}); ok {
+		var totalNodes, deletedNodes int64
+		var totalVecBytes int64
+		var totalGraphOverhead int64
+		var totalSegmentMutableCount int64
+		var totalSegmentImmutableCount int64
+		var totalSegmentCount int64
+		var totalSegmentTombstones int64
+		var totalSegmentPending int64
+		var totalSegmentMutableBytes int64
+		var totalSegmentImmutableBytes int64
+		var totalSegmentPayloadBytes int64
+		var totalMemtableBytes uint64
+		var totalMemtableZombie uint64
+		var totalTableZombie uint64
+		var totalWALBytes uint64
+		var totalTableCacheBytes int64
+		var maxBlockCacheBytes int64
+		var quantizedShards, floatShards, mmapShards int
+		storageSeen := make(map[string]struct{})
+		for _, shardID := range shards {
+			if sm := provider.GetStateMachine(shardID); sm != nil && sm.PebbleDB != nil {
+				stats := sm.PebbleDB.RuntimeStats()
+				if segStats, ok := sm.SegmentStats(); ok {
+					totalSegmentMutableCount += segStats.MutableCount
+					totalSegmentImmutableCount += segStats.ImmutableCount
+					totalSegmentCount += segStats.TotalSegments
+					totalSegmentTombstones += segStats.TombstoneCount
+					totalSegmentPending += segStats.PendingIndexOps
+					totalSegmentMutableBytes += segStats.MutableBytesEstimate
+					totalSegmentImmutableBytes += segStats.ImmutableBytesEstimate
+					totalSegmentPayloadBytes += segStats.ImmutablePayloadBytes
+				}
+				totalNodes += stats.TotalNodes
+				deletedNodes += stats.DeletedNodes
+				storageKey := stats.StoragePath
+				if storageKey == "" {
+					storageKey = fmt.Sprintf("shard:%d", shardID)
+				}
+				if _, seen := storageSeen[storageKey]; !seen {
+					storageSeen[storageKey] = struct{}{}
+					totalMemtableBytes += stats.MemTableSize
+					totalMemtableZombie += stats.MemTableZombie
+					totalTableZombie += stats.TableZombie
+					totalWALBytes += stats.WALSize
+					totalTableCacheBytes += stats.TableCacheSize
+					if stats.BlockCacheSize > maxBlockCacheBytes {
+						maxBlockCacheBytes = stats.BlockCacheSize
+					}
+				}
+				if stats.MmapEnabled {
+					mmapShards++
+				}
+				perNodeVecBytes := int64(stats.Dimension) * 4
+				if stats.Quantized {
+					quantizedShards++
+					perNodeVecBytes = int64(stats.Dimension)
+					if stats.KeepFloatVectors {
+						perNodeVecBytes += int64(stats.Dimension) * 4
+					}
+				} else {
+					floatShards++
+				}
+				totalVecBytes += stats.TotalNodes * perNodeVecBytes
+				totalGraphOverhead += stats.TotalNodes * 100
+			}
+		}
+
+		lines = append(lines, fmt.Sprintf("  HNSW: nodes=%d del=%d", totalNodes, deletedNodes))
+		lines = append(lines, fmt.Sprintf("  HNSWMode: quantizedShards=%d floatShards=%d mmapShards=%d",
+			quantizedShards, floatShards, mmapShards))
+		lines = append(lines, fmt.Sprintf("  HNSWEst: vectors=%.1fMB graph=%.1fMB total=%.1fMB",
+			float64(totalVecBytes)/1024/1024,
+			float64(totalGraphOverhead)/1024/1024,
+			float64(totalVecBytes+totalGraphOverhead)/1024/1024))
+		lines = append(lines, fmt.Sprintf("  Pebble: memtables=%.1fMB zombieMem=%.1fMB zombieTables=%.1fMB wal=%.1fMB tableCache=%.1fMB sharedBlockCache=%.1fMB",
+			float64(totalMemtableBytes)/1024/1024,
+			float64(totalMemtableZombie)/1024/1024,
+			float64(totalTableZombie)/1024/1024,
+			float64(totalWALBytes)/1024/1024,
+			float64(totalTableCacheBytes)/1024/1024,
+			float64(maxBlockCacheBytes)/1024/1024))
+		if totalSegmentCount > 0 {
+			lines = append(lines, fmt.Sprintf("  Segments: total=%d mutable=%d immutable=%d tombstones=%d pending=%d",
+				totalSegmentCount,
+				totalSegmentMutableCount,
+				totalSegmentImmutableCount,
+				totalSegmentTombstones,
+				totalSegmentPending))
+			lines = append(lines, fmt.Sprintf("  SegmentBytes: mutable=%.1fMB immutable=%.1fMB payload=%.1fMB",
+				float64(totalSegmentMutableBytes)/1024/1024,
+				float64(totalSegmentImmutableBytes)/1024/1024,
+				float64(totalSegmentPayloadBytes)/1024/1024))
+		}
+	}
+
+	return strings.Join(lines, "\n")
 }

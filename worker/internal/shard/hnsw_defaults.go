@@ -13,7 +13,27 @@ import (
 // DefaultHNSWConfig returns the default HNSW configuration used by workers.
 func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, writeSpeedMode bool) storage.HNSWConfig {
 	quantizeEnabled := distance == "cosine"
-	keepFloatVectors := quantizeEnabled
+
+	// Default cosine path: keep int8 only in memory.
+	// Enable float retention only if exact local rerank is explicitly desired.
+	keepFloatVectors := os.Getenv("VECTRON_KEEP_FLOAT_VECTORS") == "1"
+
+	mmapEnabled := true
+	mmapInitialMB := 4
+	if quantizeEnabled && !keepFloatVectors {
+		// Current mmap path mainly backs float payloads.
+		// Int8-only path should not preallocate useless mmap files unless forced.
+		mmapEnabled = false
+	}
+	if v := os.Getenv("VECTRON_MMAP_VECTORS_ENABLED"); v != "" {
+		mmapEnabled = v == "1"
+	}
+	if v := os.Getenv("VECTRON_MMAP_INITIAL_MB"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			mmapInitialMB = n
+		}
+	}
+
 	compressionEnabled := os.Getenv("VECTRON_VECTOR_COMPRESSION") == "1"
 
 	adaptiveScale := 1.0
@@ -102,7 +122,8 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 		MaintenanceInterval:      30 * time.Minute,
 		PruneEnabled:             false,
 		PruneMaxNodes:            2000,
-		MmapVectorsEnabled:       false,
+		MmapVectorsEnabled:       mmapEnabled,
+		MmapInitialMB:            mmapInitialMB,
 		WALBatchEnabled:          true,
 		AsyncIndexingEnabled:     true,
 		IndexingQueueSize:        indexQueueSize,

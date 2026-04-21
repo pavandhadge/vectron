@@ -30,6 +30,12 @@ type Strategy interface {
 	Config() map[string]string
 }
 
+// VectorStrategy may be implemented by strategies that require candidate vectors.
+// Rule-based reranking does not, but future LLM/RL/vector-aware strategies can opt in.
+type VectorStrategy interface {
+	NeedsCandidateVectors() bool
+}
+
 // RerankInput represents the input to a reranking strategy.
 type RerankInput struct {
 	Query      string
