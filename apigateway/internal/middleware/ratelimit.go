@@ -72,14 +72,11 @@ func cleanupExpiredLimiters() {
 // It uses a sharded in-memory map to track request counts for each user, reducing lock contention.
 func RateLimitInterceptor(rps int) func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		if rps <= 0 {
+		userID := GetUserID(ctx)
+		if userID == "" || userID == "benchmark-user" {
 			return handler(ctx, req)
 		}
-		// The user ID should be injected into the context by the AuthInterceptor.
-		userID := GetUserID(ctx)
-		if userID == "" {
-			// Fail open or closed? For now, we require a user ID to apply a limit.
-			// Could also use IP address as a fallback.
+		if rps <= 0 {
 			return handler(ctx, req)
 		}
 

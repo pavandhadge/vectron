@@ -131,6 +131,10 @@ message SearchRequest {
 
   // If true, include the full vector for each result (more expensive).
   bool include_vectors = 6;
+
+  // If true, include metadata/payload in results. Default: true (include metadata).
+  // Set to false to exclude metadata from response.
+  bool include_metadata = 7 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {default: "true"}];
 }
 
 message SearchResponse {

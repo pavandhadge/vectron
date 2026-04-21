@@ -1,6 +1,6 @@
 // Package rule implements rule-based reranking strategies.
-// It combines multiple heuristics like keyword matching, TF-IDF scoring,
-// metadata boosting, and configurable penalties to enhance search relevance.
+// It combines BM25 scoring, field-weighted boosting, and temporal signals
+// for enhanced search relevance.
 package rule
 
 import (
@@ -16,60 +16,74 @@ import (
 	"github.com/pavandhadge/vectron/reranker/internal"
 )
 
-// Strategy implements rule-based reranking using configurable heuristics.
+// Strategy implements rule-based reranking using improved heuristics.
 type Strategy struct {
 	config        Config
 	tokenizeRegex *regexp.Regexp
-	stopWordsSet  map[string]bool
-}
-
-type analyzedCandidate struct {
-	candidate  internal.Candidate
-	text       string
-	textLower  string
-	titleLower string
-	tokenFreqs map[string]int
-	tokenCount int
+	stopWordsSet map[string]bool
+	k1          float32
+	b            float32
 }
 
 // Config holds the configuration for rule-based reranking.
 type Config struct {
-	// Keyword matching weights
-	ExactMatchBoost float32 // Boost for exact keyword matches (default: 0.3)
-	FuzzyMatchBoost float32 // Boost for fuzzy/partial matches (default: 0.1)
-	TitleBoost      float32 // Boost for matches in title field (default: 0.2)
+	FieldWeights FieldWeightConfig
 
-	// Metadata rules
-	MetadataBoosts    map[string]float32 // Boost by metadata key-value
-	MetadataPenalties map[string]float32 // Penalize by metadata key-value
+	BM25K1         float32
+	BM25B           float32
 
-	// Content quality signals
-	RecencyBoost float32 // Boost recent documents (default: 0.15)
-	RecencyField string  // Metadata field for timestamp (default: "created_at")
-	RecencyDays  int     // Days to consider "recent" (default: 30)
+	OriginalWeight float32
+	BM25Weight     float32
+	KeywordWeight float32
+	CoverageWeight float32
+	RecencyWeight float32
 
-	// Scoring parameters
-	TFIDFWeight    float32 // Weight for TF-IDF score (default: 0.4)
-	OriginalWeight float32 // Weight for original vector score (default: 0.6)
+	ExactMatchBoost float32
+	TitleBoost    float32
+	FuzzyBoost    float32
 
-	// Advanced
-	StopWords     []string // Words to ignore in keyword matching
-	CaseSensitive bool     // Whether keyword matching is case-sensitive
+	MetadataBoosts    map[string]float32
+	MetadataPenalties map[string]float32
+
+	RecencyField  string
+	RecencyDays  int
+	HalfLifeDays float64
+
+	StopWords     []string
+	CaseSensitive bool
 }
 
-// DefaultConfig returns a reasonable default configuration.
+// FieldWeightConfig defines field weights for field-weighted scoring.
+type FieldWeightConfig struct {
+	Title       float32
+	Description float32
+	Tags        float32
+	Content     float32
+}
+
 func DefaultConfig() Config {
 	return Config{
-		ExactMatchBoost:   0.3,
-		FuzzyMatchBoost:   0.1,
-		TitleBoost:        0.2,
+		FieldWeights: FieldWeightConfig{
+			Title:       3.0,
+			Description: 2.0,
+			Tags:        1.5,
+			Content:     1.0,
+		},
+		BM25K1:         1.2,
+		BM25B:          0.75,
+		OriginalWeight: 0.5,
+		BM25Weight:     0.25,
+		KeywordWeight:  0.15,
+		CoverageWeight:  0.05,
+		RecencyWeight:  0.05,
+		ExactMatchBoost: 0.3,
+		TitleBoost:     0.2,
+		FuzzyBoost:     0.05,
 		MetadataBoosts:    make(map[string]float32),
 		MetadataPenalties: make(map[string]float32),
-		RecencyBoost:      0.15,
-		RecencyField:      "created_at",
-		RecencyDays:       30,
-		TFIDFWeight:       0.4,
-		OriginalWeight:    0.6,
+		RecencyField:  "created_at",
+		RecencyDays:  30,
+		HalfLifeDays: 7,
 		StopWords: []string{
 			"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
 			"of", "with", "is", "was", "are", "were", "be", "been", "being",
@@ -78,121 +92,91 @@ func DefaultConfig() Config {
 	}
 }
 
-// NewStrategy creates a new rule-based reranking strategy.
 func NewStrategy(config Config) *Strategy {
-	// Pre-compile expensive operations
 	stopWordsSet := make(map[string]bool, len(config.StopWords))
 	for _, sw := range config.StopWords {
 		stopWordsSet[strings.ToLower(sw)] = true
 	}
-
 	return &Strategy{
 		config:        config,
 		tokenizeRegex: regexp.MustCompile(`[^\w\s]+`),
-		stopWordsSet:  stopWordsSet,
+		stopWordsSet: stopWordsSet,
+		k1:           config.BM25K1,
+		b:            config.BM25B,
 	}
 }
 
-// Name returns the strategy identifier.
-func (s *Strategy) Name() string {
-	return "rule-based"
-}
+func (s *Strategy) Name() string              { return "rule-based" }
+func (s *Strategy) Version() string         { return "2.0.0" }
+func (s *Strategy) NeedsCandidateVectors() bool { return false }
 
-// Version returns the strategy version.
-func (s *Strategy) Version() string {
-	return "1.0.0"
-}
-
-func (s *Strategy) NeedsCandidateVectors() bool {
-	return false
-}
-
-// Config returns the strategy configuration as key-value pairs.
 func (s *Strategy) Config() map[string]string {
 	return map[string]string{
-		"exact_match_boost": floatToString(s.config.ExactMatchBoost),
-		"fuzzy_match_boost": floatToString(s.config.FuzzyMatchBoost),
-		"title_boost":       floatToString(s.config.TitleBoost),
-		"tfidf_weight":      floatToString(s.config.TFIDFWeight),
-		"original_weight":   floatToString(s.config.OriginalWeight),
-		"recency_days":      intToString(s.config.RecencyDays),
+		"original_weight": fmt.Sprintf("%.2f", s.config.OriginalWeight),
+		"bm25_weight":     fmt.Sprintf("%.2f", s.config.BM25Weight),
+		"keyword_weight":  fmt.Sprintf("%.2f", s.config.KeywordWeight),
+		"coverage_weight": fmt.Sprintf("%.2f", s.config.CoverageWeight),
+		"recency_weight":  fmt.Sprintf("%.2f", s.config.RecencyWeight),
+		"half_life_days":   fmt.Sprintf("%.1f", s.config.HalfLifeDays),
 	}
 }
 
-// Rerank applies rule-based scoring to reorder candidates.
 func (s *Strategy) Rerank(ctx context.Context, req *internal.RerankInput) (*internal.RerankOutput, error) {
 	start := time.Now()
 
-	// If query is empty, apply universal rules: sort by original score and return.
 	if req.Query == "" {
-		sort.Slice(req.Candidates, func(i, j int) bool {
-			return req.Candidates[i].Score > req.Candidates[j].Score
-		})
-
-		results := make([]internal.ScoredCandidate, 0, req.TopN)
-		for i, candidate := range req.Candidates {
-			if i >= req.TopN {
-				break
-			}
-			results = append(results, internal.ScoredCandidate{
-				ID:            candidate.ID,
-				RerankScore:   candidate.Score, // Use original score as rerank score
-				OriginalScore: candidate.Score,
-				Explanation:   "no query provided, sorted by original score",
-			})
-		}
-		return &internal.RerankOutput{
-			Results: results,
-			Latency: time.Since(start),
-			Metadata: map[string]string{
-				"strategy":    s.Name(),
-				"version":     s.Version(),
-				"query_empty": "true",
-			},
-		}, nil
+		return s.rerankByOriginalScore(ctx, req)
 	}
 
-	// Tokenize query
 	queryTokens := s.tokenize(req.Query)
-	queryText := strings.Join(queryTokens, " ")
+	if len(queryTokens) == 0 {
+		return s.rerankByOriginalScore(ctx, req)
+	}
 
-	analyzed := s.analyzeCandidates(req.Candidates)
-	docFreqs := s.calculateDocumentFrequencies(analyzed, queryTokens)
+	docs := s.extractFields(req.Candidates)
+	avgDL := s.calculateAverageDocLength(docs)
+	docFreqs := s.calculateDocumentFrequencies(docs, queryTokens)
 
-	// Score each candidate
-	scored := make([]scoredCandidate, len(analyzed))
-	for i, candidate := range analyzed {
+	var candidates []candidateScore
+	for i, c := range req.Candidates {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
 		}
-		score := s.scoreCandidate(candidate, queryTokens, queryText, docFreqs, len(analyzed))
-		scored[i] = scoredCandidate{
-			candidate: candidate.candidate,
-			score:     score,
-			explain:   s.explainScore(candidate, queryText),
-		}
+
+		doc := docs[i]
+		score := s.calculateScore(c, doc, queryTokens, docFreqs, avgDL, len(req.Candidates))
+		candidates = append(candidates, candidateScore{
+			ID:         c.ID,
+			Score:      score,
+			Original:   c.Score,
+			HasExact:   s.hasExactMatch(doc, queryTokens),
+			HasTitle:   s.hasTitleMatch(doc, queryTokens),
+			MatchCount: s.countMatches(doc, queryTokens),
+		})
 	}
 
-	// Sort by score descending
-	sort.Slice(scored, func(i, j int) bool {
-		return scored[i].score > scored[j].score
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].Score == candidates[j].Score {
+			return candidates[i].ID < candidates[j].ID
+		}
+		return candidates[i].Score > candidates[j].Score
 	})
 
-	// Limit to TopN
-	if req.TopN < len(scored) {
-		scored = scored[:req.TopN]
+	topN := int(req.TopN)
+	if topN > len(candidates) {
+		topN = len(candidates)
 	}
 
-	// Convert to output format
-	results := make([]internal.ScoredCandidate, len(scored))
-	for i, sc := range scored {
+	results := make([]internal.ScoredCandidate, topN)
+	for i := 0; i < topN; i++ {
+		c := candidates[i]
 		results[i] = internal.ScoredCandidate{
-			ID:            sc.candidate.ID,
-			RerankScore:   sc.score,
-			OriginalScore: sc.candidate.Score,
-			Explanation:   sc.explain,
+			ID:            c.ID,
+			RerankScore:   c.Score,
+			OriginalScore: c.Original,
+			Explanation:  s.explainScore(c),
 		}
 	}
 
@@ -206,286 +190,333 @@ func (s *Strategy) Rerank(ctx context.Context, req *internal.RerankInput) (*inte
 	}, nil
 }
 
-// scoredCandidate is an internal struct for sorting.
-type scoredCandidate struct {
-	candidate internal.Candidate
-	score     float32
-	explain   string
+type candidateScore struct {
+	ID         string
+	Score      float32
+	Original   float32
+	HasExact   bool
+	HasTitle   bool
+	MatchCount int
 }
 
-// scoreCandidate computes the reranking score for a single candidate.
-func (s *Strategy) scoreCandidate(candidate analyzedCandidate, queryTokens []string, queryText string, docFreqs map[string]int, totalDocs int) float32 {
-	// Start with original similarity score
-	score := s.config.OriginalWeight * candidate.candidate.Score
-
-	// Add TF-IDF score
-	tfidfScore := s.calculateTFIDF(candidate, queryTokens, docFreqs, totalDocs)
-	score += s.config.TFIDFWeight * tfidfScore
-
-	// Add keyword match boosts
-	score += s.calculateKeywordBoosts(candidate, queryTokens, queryText)
-
-	// Add metadata boosts/penalties
-	score += s.calculateMetadataScore(candidate)
-
-	// Add recency boost
-	score += s.calculateRecencyBoost(candidate)
-
-	// Normalize to 0-1 range
-	return clamp(score, 0.0, 1.0)
+type documentFields struct {
+	Title      string
+	AllText    string
+	TitleLower string
+	AllLower  string
+	Tokens    []string
+	TokenSet  map[string]bool
+	Length    int
+	Metadata  map[string]string
 }
 
-// calculateTFIDF computes TF-IDF score for query terms in candidate content.
-func (s *Strategy) calculateTFIDF(candidate analyzedCandidate, queryTokens []string, docFreqs map[string]int, totalDocs int) float32 {
-	if candidate.tokenCount == 0 {
-		return 0
+func (s *Strategy) extractFields(candidates []internal.Candidate) []documentFields {
+	docs := make([]documentFields, len(candidates))
+	for i, c := range candidates {
+		m := c.Metadata
+		title := s.getField(m, "title")
+		desc := s.getField(m, "description")
+		tags := s.getField(m, "tags")
+		content := s.getField(m, "content")
+
+		text := strings.Join([]string{title, desc, tags, content}, " ")
+		textLower := strings.ToLower(text)
+
+		tokens := s.tokenize(text)
+		tokenSet := make(map[string]bool, len(tokens))
+		for _, t := range tokens {
+			tokenSet[t] = true
+		}
+
+		docs[i] = documentFields{
+			Title:      title,
+			AllText:    text,
+			TitleLower: strings.ToLower(title),
+			AllLower:   textLower,
+			Tokens:    tokens,
+			TokenSet:  tokenSet,
+			Length:    len(tokens),
+			Metadata:  m,
+		}
+	}
+	return docs
+}
+
+func (s *Strategy) getField(m map[string]string, key string) string {
+	if v, ok := m[key]; ok {
+		return v
+	}
+	return ""
+}
+
+func (s *Strategy) tokenize(text string) []string {
+	if !s.config.CaseSensitive {
+		text = strings.ToLower(text)
+	}
+	text = s.tokenizeRegex.ReplaceAllString(text, " ")
+	words := strings.Fields(text)
+
+	tokens := make([]string, 0, len(words))
+	for _, word := range words {
+		if !s.stopWordsSet[word] && len(word) > 1 {
+			tokens = append(tokens, word)
+		}
+	}
+	return tokens
+}
+
+func (s *Strategy) rerankByOriginalScore(ctx context.Context, req *internal.RerankInput) (*internal.RerankOutput, error) {
+	start := time.Now()
+
+	sort.Slice(req.Candidates, func(i, j int) bool {
+		return req.Candidates[i].Score > req.Candidates[j].Score
+	})
+
+	topN := int(req.TopN)
+	if topN > len(req.Candidates) {
+		topN = len(req.Candidates)
 	}
 
-	var tfidfSum float32
-	for _, queryToken := range queryTokens {
-		if tf, exists := candidate.tokenFreqs[queryToken]; exists && tf > 0 {
-			// TF (term frequency): normalized by document length
-			tfScore := float32(tf) / float32(candidate.tokenCount)
-
-			// IDF (inverse document frequency)
-			df := docFreqs[queryToken]
-			if df == 0 {
-				df = 1 // Avoid division by zero
-			}
-			idfScore := float32(math.Log(float64(totalDocs) / float64(df)))
-
-			tfidfSum += tfScore * idfScore
+	results := make([]internal.ScoredCandidate, topN)
+	for i := 0; i < topN; i++ {
+		c := req.Candidates[i]
+		results[i] = internal.ScoredCandidate{
+			ID:            c.ID,
+			RerankScore:   c.Score,
+			OriginalScore: c.Score,
+			Explanation:  "sorted by original score",
 		}
 	}
 
-	// Normalize by number of query terms
+	return &internal.RerankOutput{
+		Results: results,
+		Latency: time.Since(start),
+		Metadata: map[string]string{
+			"strategy":    s.Name(),
+			"query_empty": "true",
+		},
+	}, nil
+}
+
+func (s *Strategy) calculateAverageDocLength(docs []documentFields) float32 {
+	if len(docs) == 0 {
+		return 0
+	}
+	var total int
+	for _, d := range docs {
+		total += d.Length
+	}
+	return float32(total) / float32(len(docs))
+}
+
+func (s *Strategy) calculateDocumentFrequencies(docs []documentFields, queryTokens []string) map[string]int {
+	docFreqs := make(map[string]int)
+	for _, token := range queryTokens {
+		count := 0
+		for _, doc := range docs {
+			if doc.TokenSet[token] {
+				count++
+			}
+		}
+		docFreqs[token] = count
+	}
+	return docFreqs
+}
+
+func (s *Strategy) calculateScore(candidate internal.Candidate, doc documentFields, queryTokens []string, docFreqs map[string]int, avgDL float32, N int) float32 {
+	var score float32
+
+	score += s.config.OriginalWeight * candidate.Score
+
+	bm25Score := s.calculateBM25(doc, queryTokens, docFreqs, avgDL, N)
+	score += s.config.BM25Weight * bm25Score
+
+	keywordScore := s.calculateKeywordScore(doc, queryTokens)
+	score += s.config.KeywordWeight * keywordScore
+
+	coverageScore := s.calculateCoverage(doc, queryTokens)
+	score += s.config.CoverageWeight * coverageScore
+
+	recencyScore := s.calculateRecency(doc)
+	score += s.config.RecencyWeight * recencyScore
+
+	metaScore := s.calculateMetadataScore(doc)
+	score += metaScore
+
+	return clamp(score, 0.0, 1.0)
+}
+
+func (s *Strategy) calculateBM25(doc documentFields, queryTokens []string, docFreqs map[string]int, avgDL float32, N int) float32 {
+	if doc.Length == 0 || len(queryTokens) == 0 {
+		return 0
+	}
+
+	var bm25 float32
+	fw := s.config.FieldWeights
+
+	for _, token := range queryTokens {
+		tf := 1.0
+
+		if strings.Contains(doc.TitleLower, token) {
+			tf *= float64(fw.Title)
+		} else if strings.Contains(doc.AllLower, token) {
+			tf *= float64(fw.Content)
+		}
+
+		df := docFreqs[token]
+		if df == 0 {
+			df = 1
+		}
+
+		idf := math.Log(float64(N)/float64(df) + 1)
+		tfNorm := float32(tf * (float64(s.k1) * (1 - float64(s.b) + float64(s.b)*float64(doc.Length)/float64(avgDL))))
+		bm25 += float32(idf) * (tfNorm / (float32(tfNorm) + tfNorm))
+	}
+
 	if len(queryTokens) > 0 {
-		return tfidfSum / float32(len(queryTokens))
+		return bm25 / float32(len(queryTokens))
 	}
 	return 0
 }
 
-// calculateKeywordBoosts checks for exact and fuzzy matches.
-func (s *Strategy) calculateKeywordBoosts(candidate analyzedCandidate, queryTokens []string, query string) float32 {
+func (s *Strategy) calculateKeywordScore(doc documentFields, queryTokens []string) float32 {
 	if len(queryTokens) == 0 {
 		return 0
 	}
 
-	var boost float32
+	var score float32
+	query := strings.Join(queryTokens, " ")
 
-	// Exact match in content
-	if query != "" && strings.Contains(candidate.textLower, query) {
-		boost += s.config.ExactMatchBoost
+	if s.containsLower(doc.AllLower, query) {
+		score += s.config.ExactMatchBoost
 	}
 
-	// Exact match in title (higher weight)
-	if candidate.titleLower != "" && query != "" && strings.Contains(candidate.titleLower, query) {
-		boost += s.config.TitleBoost
+	if s.containsLower(doc.TitleLower, query) {
+		score += s.config.TitleBoost
 	}
 
-	// Fuzzy matching: count individual token matches
 	matchCount := 0
 	for _, token := range queryTokens {
-		if strings.Contains(candidate.textLower, token) {
+		if doc.TokenSet[token] {
 			matchCount++
 		}
 	}
 
-	if matchCount > 0 && len(queryTokens) > 0 {
-		matchRatio := float32(matchCount) / float32(len(queryTokens))
-		boost += s.config.FuzzyMatchBoost * matchRatio
+	if matchCount > 0 {
+		ratio := float32(matchCount) / float32(len(queryTokens))
+		score += s.config.FuzzyBoost * ratio
 	}
 
-	return boost
+	return score
 }
 
-// calculateMetadataScore applies configured boosts and penalties.
-func (s *Strategy) calculateMetadataScore(candidate analyzedCandidate) float32 {
-	var score float32
+func (s *Strategy) calculateCoverage(doc documentFields, queryTokens []string) float32 {
+	if len(queryTokens) == 0 || doc.Length == 0 {
+		return 0
+	}
 
-	// Apply boosts
-	for key, boostValue := range s.config.MetadataBoosts {
-		if value, exists := candidate.candidate.Metadata[key]; exists && value != "" {
-			// Check if it's a boolean "true" or just presence
-			if value == "true" || value == "1" {
-				score += boostValue
-			}
+	matched := 0
+	for _, token := range queryTokens {
+		if doc.TokenSet[token] {
+			matched++
 		}
 	}
 
-	// Apply penalties
-	for key, penaltyValue := range s.config.MetadataPenalties {
-		if value, exists := candidate.candidate.Metadata[key]; exists && value != "" {
-			if value == "true" || value == "1" {
-				score -= penaltyValue
-			}
+	return float32(matched) / float32(len(queryTokens))
+}
+
+func (s *Strategy) calculateRecency(doc documentFields) float32 {
+	if s.config.RecencyWeight == 0 || s.config.RecencyField == "" {
+		return 0
+	}
+
+	ts := doc.Metadata[s.config.RecencyField]
+	if ts == "" {
+		return 0
+	}
+
+	t, err := parseTimestamp(ts)
+	if err != nil {
+		return 0
+	}
+
+	daysSince := time.Since(t).Hours() / 24
+	if daysSince > float64(s.config.RecencyDays) {
+		return 0
+	}
+
+	halflife := s.config.HalfLifeDays
+	if halflife <= 0 {
+		halflife = 7
+	}
+	decay := math.Exp(-0.693 * daysSince / halflife)
+	return float32(decay)
+}
+
+func (s *Strategy) calculateMetadataScore(doc documentFields) float32 {
+	var score float32
+
+	for key, boost := range s.config.MetadataBoosts {
+		if v, ok := doc.Metadata[key]; ok && (v == "true" || v == "1") {
+			score += boost
+		}
+	}
+
+	for key, penalty := range s.config.MetadataPenalties {
+		if v, ok := doc.Metadata[key]; ok && (v == "true" || v == "1") {
+			score -= penalty
 		}
 	}
 
 	return score
 }
 
-// calculateRecencyBoost boosts recent documents based on timestamp.
-func (s *Strategy) calculateRecencyBoost(candidate analyzedCandidate) float32 {
-	if s.config.RecencyBoost == 0 || s.config.RecencyField == "" {
-		return 0
+func (s *Strategy) hasExactMatch(doc documentFields, tokens []string) bool {
+	if len(tokens) == 0 {
+		return false
 	}
-
-	timestampStr, exists := candidate.candidate.Metadata[s.config.RecencyField]
-	if !exists || timestampStr == "" {
-		return 0
-	}
-
-	// Try parsing as RFC3339 timestamp
-	timestamp, err := time.Parse(time.RFC3339, timestampStr)
-	if err != nil {
-		// Try Unix timestamp (seconds or milliseconds)
-		if ts, parseErr := parseUnixTimestamp(timestampStr); parseErr == nil {
-			timestamp = ts
-		} else {
-			return 0 // Skip if can't parse
-		}
-	}
-
-	daysSince := time.Since(timestamp).Hours() / 24
-	if daysSince < float64(s.config.RecencyDays) {
-		// Linear decay: full boost at day 0, zero at RecencyDays
-		decayFactor := 1.0 - (daysSince / float64(s.config.RecencyDays))
-		return s.config.RecencyBoost * float32(decayFactor)
-	}
-
-	return 0
+	return doc.TokenSet[tokens[0]]
 }
 
-// calculateDocumentFrequencies counts how many docs contain each query term.
-func (s *Strategy) calculateDocumentFrequencies(candidates []analyzedCandidate, queryTokens []string) map[string]int {
-	docFreqs := make(map[string]int)
-	if len(queryTokens) == 0 {
-		return docFreqs
+func (s *Strategy) hasTitleMatch(doc documentFields, tokens []string) bool {
+	if len(tokens) == 0 {
+		return false
 	}
-
-	for _, token := range queryTokens {
-		for _, candidate := range candidates {
-			if _, ok := candidate.tokenFreqs[token]; ok {
-				docFreqs[token]++
-			}
-		}
-	}
-
-	return docFreqs
+	query := strings.Join(tokens, " ")
+	return s.containsLower(doc.TitleLower, query)
 }
 
-// getCandidateText extracts all text content from a candidate.
-func (s *Strategy) getCandidateText(candidate internal.Candidate) string {
-	var parts []string
-
-	// Common text fields
-	if title := candidate.Metadata["title"]; title != "" {
-		parts = append(parts, title)
+func (s *Strategy) countMatches(doc documentFields, tokens []string) int {
+	count := 0
+	for _, t := range tokens {
+		if doc.TokenSet[t] {
+			count++
+		}
 	}
-	if content := candidate.Metadata["content"]; content != "" {
-		parts = append(parts, content)
-	}
-	if description := candidate.Metadata["description"]; description != "" {
-		parts = append(parts, description)
-	}
-	if tags := candidate.Metadata["tags"]; tags != "" {
-		parts = append(parts, tags)
-	}
-
-	return strings.Join(parts, " ")
+	return count
 }
 
-func (s *Strategy) analyzeCandidates(candidates []internal.Candidate) []analyzedCandidate {
-	out := make([]analyzedCandidate, len(candidates))
-	for i, candidate := range candidates {
-		text := s.getCandidateText(candidate)
-		textLower := text
-		titleLower := candidate.Metadata["title"]
-		if !s.config.CaseSensitive {
-			textLower = strings.ToLower(text)
-			titleLower = strings.ToLower(titleLower)
-		}
-		tokens := s.tokenize(text)
-		tokenFreqs := make(map[string]int, len(tokens))
-		for _, token := range tokens {
-			tokenFreqs[token]++
-		}
-		out[i] = analyzedCandidate{
-			candidate:  candidate,
-			text:       text,
-			textLower:  textLower,
-			titleLower: titleLower,
-			tokenFreqs: tokenFreqs,
-			tokenCount: len(tokens),
-		}
-	}
-	return out
-}
-
-// tokenize splits text into tokens, removing stop words.
-// Optimized to use pre-compiled regex and stop words set.
-func (s *Strategy) tokenize(text string) []string {
-	// Convert to lowercase unless case-sensitive
-	if !s.config.CaseSensitive {
-		text = strings.ToLower(text)
-	}
-
-	// Remove punctuation and split on whitespace using pre-compiled regex
-	text = s.tokenizeRegex.ReplaceAllString(text, " ")
-
-	words := strings.Fields(text)
-
-	// Filter out stop words using pre-built set (much faster than rebuilding)
-	tokens := make([]string, 0, len(words))
-	for _, word := range words {
-		if !s.stopWordsSet[strings.ToLower(word)] && len(word) > 1 {
-			tokens = append(tokens, word)
-		}
-	}
-
-	return tokens
-}
-
-// containsIgnoreCase checks if text contains substring (case-insensitive).
-func (s *Strategy) containsIgnoreCase(text, substr string) bool {
+func (s *Strategy) containsLower(text, substr string) bool {
 	return strings.Contains(strings.ToLower(text), strings.ToLower(substr))
 }
 
-// explainScore generates a human-readable explanation of the score.
-func (s *Strategy) explainScore(candidate analyzedCandidate, query string) string {
-	reasons := []string{}
-
-	// Check for exact matches
-	if query != "" && strings.Contains(candidate.textLower, query) {
-		reasons = append(reasons, "exact query match")
+func (s *Strategy) explainScore(c candidateScore) string {
+	parts := []string{}
+	if c.HasExact {
+		parts = append(parts, "exact match")
 	}
-
-	// Check title match
-	if query != "" && candidate.titleLower != "" && strings.Contains(candidate.titleLower, query) {
-		reasons = append(reasons, "query in title")
+	if c.HasTitle {
+		parts = append(parts, "title match")
 	}
-
-	// Check metadata boosts
-	for key := range s.config.MetadataBoosts {
-		if value, exists := candidate.candidate.Metadata[key]; exists && (value == "true" || value == "1") {
-			reasons = append(reasons, "boosted: "+key)
-		}
+	if c.MatchCount > 0 {
+		parts = append(parts, fmt.Sprintf("+%d tokens", c.MatchCount))
 	}
-
-	// Check recency
-	if timestampStr, exists := candidate.candidate.Metadata[s.config.RecencyField]; exists && timestampStr != "" {
-		reasons = append(reasons, "recent document")
-	}
-
-	if len(reasons) == 0 {
+	if len(parts) == 0 {
 		return "keyword relevance"
 	}
-
-	return strings.Join(reasons, ", ")
+	return strings.Join(parts, ", ")
 }
 
-// Helper functions
 func clamp(value, min, max float32) float32 {
 	if value < min {
 		return min
@@ -496,25 +527,21 @@ func clamp(value, min, max float32) float32 {
 	return value
 }
 
-func floatToString(f float32) string {
-	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.2f", f), "0"), ".")
-}
-
-func intToString(i int) string {
-	return fmt.Sprintf("%d", i)
-}
-
-func parseUnixTimestamp(value string) (time.Time, error) {
+func parseTimestamp(value string) (time.Time, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return time.Time{}, fmt.Errorf("empty timestamp")
+		return time.Time{}, fmt.Errorf("empty")
 	}
-	// Try integer parse
+
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		return t, nil
+	}
+
 	parsed, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
 		return time.Time{}, err
 	}
-	// Heuristic: >1e12 is milliseconds
+
 	if parsed > 1e12 {
 		return time.UnixMilli(parsed), nil
 	}

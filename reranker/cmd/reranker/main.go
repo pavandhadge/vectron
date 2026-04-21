@@ -309,8 +309,8 @@ func createStrategy(strategyType string, logger internal.Logger) internal.Strate
 			log.Printf("Warning: config validation failed: %v", err)
 		}
 
-		log.Printf("Rule strategy config: ExactBoost=%.2f, TitleBoost=%.2f, TFIDF=%.2f, Original=%.2f",
-			config.ExactMatchBoost, config.TitleBoost, config.TFIDFWeight, config.OriginalWeight)
+		log.Printf("Rule strategy config: Original=%.2f, BM25=%.2f, Keyword=%.2f, Coverage=%.2f, Recency=%.2f",
+			config.OriginalWeight, config.BM25Weight, config.KeywordWeight, config.CoverageWeight, config.RecencyWeight)
 
 		return rule.NewStrategy(config)
 

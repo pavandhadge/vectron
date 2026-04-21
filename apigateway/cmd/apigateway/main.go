@@ -1251,13 +1251,87 @@ func resultsNeedVectors(results []*pb.SearchResult) bool {
 }
 
 func (s *gatewayServer) maybeAttachVectors(ctx context.Context, req *pb.SearchRequest, resp *pb.SearchResponse) error {
-	if resp == nil || !req.GetIncludeVectors() {
+	if resp == nil {
 		return nil
 	}
-	if !resultsNeedVectors(resp.Results) {
+	if req.GetIncludeVectors() && resultsNeedVectors(resp.Results) {
+		if err := s.attachVectorsToResults(ctx, req.Collection, resp.Results); err != nil {
+			return err
+		}
+	}
+	if req.GetIncludeMetadata() && resultsNeedPayload(resp.Results) {
+		return s.attachPayloadToResults(ctx, req.Collection, resp.Results)
+	}
+	if !req.GetIncludeMetadata() {
+		for _, r := range resp.Results {
+			if r != nil {
+				r.Payload = nil
+			}
+		}
+	}
+	return nil
+}
+
+func resultsNeedPayload(results []*pb.SearchResult) bool {
+	for _, r := range results {
+		if r != nil && r.Id != "" && len(r.Payload) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *gatewayServer) attachPayloadToResults(ctx context.Context, collection string, results []*pb.SearchResult) error {
+	if len(results) == 0 {
 		return nil
 	}
-	return s.attachVectorsToResults(ctx, req.Collection, resp.Results)
+	concurrency := envIntDefault("VECTRON_GW_VECTOR_FETCH_CONCURRENCY", adaptiveConcurrency(2, 16))
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	errCh := make(chan error, 1)
+
+	for _, result := range results {
+		r := result
+		if r == nil || r.Id == "" || len(r.Payload) > 0 {
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			res, err := s.forwardToWorker(ctx, collection, r.Id, func(c workerpb.WorkerServiceClient, shardID uint64, shardEpoch uint64, leaseExpiryUnixMs int64) (interface{}, error) {
+				req := &workerpb.GetVectorRequest{
+					ShardId:           shardID,
+					ShardEpoch:        shardEpoch,
+					LeaseExpiryUnixMs: leaseExpiryUnixMs,
+					Id:                r.Id,
+				}
+				return c.GetVector(ctx, req)
+			})
+			if err != nil {
+				select {
+				case errCh <- err:
+				default:
+				}
+				return
+			}
+			getResp, ok := res.(*workerpb.GetVectorResponse)
+			if !ok || getResp.GetVector() == nil {
+				return
+			}
+			r.Payload = translator.DecodeMetadata(getResp.GetVector().GetMetadata())
+		}()
+	}
+
+	wg.Wait()
+	select {
+	case err := <-errCh:
+		return err
+	default:
+		return nil
+	}
 }
 
 func (s *gatewayServer) attachVectorsToResults(ctx context.Context, collection string, results []*pb.SearchResult) error {
@@ -2141,102 +2215,7 @@ func (s *gatewayServer) getRerankerClient(ctx context.Context) (reranker.RerankS
 	return client, nil
 }
 
-func shouldUseReranker(req *pb.SearchRequest) bool {
-	return cfg.RerankEnabled && req != nil && req.Query != ""
-}
 
-func rerankTopNForRequest(req *pb.SearchRequest, candidateCount int) int {
-	rerankTopN := int(req.TopK)
-	if v, ok := cfg.RerankTopNOverrides[req.Collection]; ok && v > 0 {
-		rerankTopN = v
-	}
-	if rerankTopN <= 0 || rerankTopN > candidateCount {
-		rerankTopN = candidateCount
-	}
-	return rerankTopN
-}
-
-func rerankTimeoutForRequest(req *pb.SearchRequest) int {
-	rerankTimeoutMs := cfg.RerankTimeoutMs
-	if v, ok := cfg.RerankTimeoutOverrides[req.Collection]; ok && v > 0 {
-		rerankTimeoutMs = v
-	}
-	return rerankTimeoutMs
-}
-
-func trimBaseResults(resp *pb.SearchResponse, topK uint32) *pb.SearchResponse {
-	sort.Slice(resp.Results, func(i, j int) bool {
-		return resp.Results[i].Score > resp.Results[j].Score
-	})
-	if len(resp.Results) > int(topK) {
-		resp.Results = resp.Results[:topK]
-	}
-	return resp
-}
-
-func buildRerankCandidates(results []*pb.SearchResult) ([]*reranker.Candidate, map[string]map[string]string) {
-	candidates := make([]*reranker.Candidate, len(results))
-	var metadataByID map[string]map[string]string
-	for i, result := range results {
-		metadata := result.Payload
-		if metadata != nil {
-			if metadataByID == nil {
-				metadataByID = make(map[string]map[string]string, len(results))
-			}
-			metadataByID[result.Id] = metadata
-		}
-		candidates[i] = &reranker.Candidate{
-			Id:       result.Id,
-			Score:    result.Score,
-			Metadata: metadata,
-		}
-	}
-	return candidates, metadataByID
-}
-
-func rerankedSearchResponse(rerankResp *reranker.RerankResponse, metadataByID map[string]map[string]string) *pb.SearchResponse {
-	rerankedResults := make([]*pb.SearchResult, len(rerankResp.Results))
-	for i, result := range rerankResp.Results {
-		var payload map[string]string
-		if metadataByID != nil {
-			payload = metadataByID[result.Id]
-		}
-		rerankedResults[i] = &pb.SearchResult{
-			Id:      result.Id,
-			Score:   result.RerankScore,
-			Payload: payload,
-		}
-	}
-	return &pb.SearchResponse{Results: rerankedResults}
-}
-
-func (s *gatewayServer) rerankSearchResponse(ctx context.Context, req *pb.SearchRequest, baseResp *pb.SearchResponse) (*pb.SearchResponse, error) {
-	if !shouldUseReranker(req) || baseResp == nil || len(baseResp.Results) == 0 {
-		return trimBaseResults(baseResp, req.TopK), nil
-	}
-	candidates, metadataByID := buildRerankCandidates(baseResp.Results)
-	rerankReq := &reranker.RerankRequest{
-		Query:      req.Query,
-		Candidates: candidates,
-		TopN:       int32(rerankTopNForRequest(req, len(baseResp.Results))),
-		Options:    map[string]string{"mode": cfg.RerankMode},
-	}
-	rerankCtx := ctx
-	var cancel context.CancelFunc
-	if timeoutMs := rerankTimeoutForRequest(req); timeoutMs > 0 {
-		rerankCtx, cancel = context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
-		defer cancel()
-	}
-	rerankerClient, err := s.getRerankerClient(rerankCtx)
-	if err != nil {
-		return trimBaseResults(baseResp, req.TopK), nil
-	}
-	rerankResp, err := rerankerClient.Rerank(rerankCtx, rerankReq)
-	if err != nil {
-		return trimBaseResults(baseResp, req.TopK), nil
-	}
-	return rerankedSearchResponse(rerankResp, metadataByID), nil
-}
 
 // RequestCoalescer batches similar requests to reduce fan-out overhead
 // OPTIMIZATION: Reduces network overhead for high-QPS scenarios

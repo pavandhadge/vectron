@@ -326,8 +326,11 @@ type SearchRequest struct {
 	TimeoutMs uint32 `protobuf:"varint,5,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
 	// If true, include the full vector for each result (more expensive).
 	IncludeVectors bool `protobuf:"varint,6,opt,name=include_vectors,json=includeVectors,proto3" json:"include_vectors,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// If true, include metadata/payload in results. Default: true (include metadata).
+	// Set to false to exclude metadata from response.
+	IncludeMetadata bool `protobuf:"varint,7,opt,name=include_metadata,json=includeMetadata,proto3" json:"include_metadata,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *SearchRequest) Reset() {
@@ -398,6 +401,13 @@ func (x *SearchRequest) GetTimeoutMs() uint32 {
 func (x *SearchRequest) GetIncludeVectors() bool {
 	if x != nil {
 		return x.IncludeVectors
+	}
+	return false
+}
+
+func (x *SearchRequest) GetIncludeMetadata() bool {
+	if x != nil {
+		return x.IncludeMetadata
 	}
 	return false
 }
@@ -1332,7 +1342,7 @@ const file_apigateway_apigateway_proto_rawDesc = "" +
 	"collection\x12)\n" +
 	"\x06points\x18\x02 \x03(\v2\x11.vectron.v1.PointR\x06points\",\n" +
 	"\x0eUpsertResponse\x12\x1a\n" +
-	"\bupserted\x18\x01 \x01(\x05R\bupserted\"\xcd\x01\n" +
+	"\bupserted\x18\x01 \x01(\x05R\bupserted\"\x83\x02\n" +
 	"\rSearchRequest\x12#\n" +
 	"\n" +
 	"collection\x18\x01 \x01(\tB\x03\xe0A\x02R\n" +
@@ -1342,7 +1352,8 @@ const file_apigateway_apigateway_proto_rawDesc = "" +
 	"\x05query\x18\x04 \x01(\tR\x05query\x12\x1d\n" +
 	"\n" +
 	"timeout_ms\x18\x05 \x01(\rR\ttimeoutMs\x12'\n" +
-	"\x0finclude_vectors\x18\x06 \x01(\bR\x0eincludeVectors\"D\n" +
+	"\x0finclude_vectors\x18\x06 \x01(\bR\x0eincludeVectors\x124\n" +
+	"\x10include_metadata\x18\a \x01(\bB\t\x92A\x06:\x04trueR\x0fincludeMetadata\"D\n" +
 	"\x0eSearchResponse\x122\n" +
 	"\aresults\x18\x01 \x03(\v2\x18.vectron.v1.SearchResultR\aresults\"\xc9\x01\n" +
 	"\fSearchResult\x12\x0e\n" +

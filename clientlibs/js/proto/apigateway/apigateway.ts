@@ -69,6 +69,11 @@ export interface SearchRequest {
   timeoutMs: number;
   /** If true, include the full vector for each result (more expensive). */
   includeVectors: boolean;
+  /**
+   * If true, include metadata/payload in results. Default: true (include metadata).
+   * Set to false to exclude metadata from response.
+   */
+  includeMetadata: boolean;
 }
 
 export interface SearchResponse {
@@ -585,7 +590,15 @@ export const UpsertResponse: MessageFns<UpsertResponse> = {
 };
 
 function createBaseSearchRequest(): SearchRequest {
-  return { collection: "", vector: [], topK: 0, query: "", timeoutMs: 0, includeVectors: false };
+  return {
+    collection: "",
+    vector: [],
+    topK: 0,
+    query: "",
+    timeoutMs: 0,
+    includeVectors: false,
+    includeMetadata: false,
+  };
 }
 
 export const SearchRequest: MessageFns<SearchRequest> = {
@@ -607,6 +620,9 @@ export const SearchRequest: MessageFns<SearchRequest> = {
     }
     if (message.includeVectors !== false) {
       writer.uint32(48).bool(message.includeVectors);
+    }
+    if (message.includeMetadata !== false) {
+      writer.uint32(56).bool(message.includeMetadata);
     }
     return writer;
   },
@@ -676,6 +692,14 @@ export const SearchRequest: MessageFns<SearchRequest> = {
           message.includeVectors = reader.bool();
           continue;
         }
+        case 7: {
+          if (tag !== 56) {
+            break;
+          }
+
+          message.includeMetadata = reader.bool();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -693,6 +717,7 @@ export const SearchRequest: MessageFns<SearchRequest> = {
       query: isSet(object.query) ? globalThis.String(object.query) : "",
       timeoutMs: isSet(object.timeoutMs) ? globalThis.Number(object.timeoutMs) : 0,
       includeVectors: isSet(object.includeVectors) ? globalThis.Boolean(object.includeVectors) : false,
+      includeMetadata: isSet(object.includeMetadata) ? globalThis.Boolean(object.includeMetadata) : false,
     };
   },
 
@@ -716,6 +741,9 @@ export const SearchRequest: MessageFns<SearchRequest> = {
     if (message.includeVectors !== false) {
       obj.includeVectors = message.includeVectors;
     }
+    if (message.includeMetadata !== false) {
+      obj.includeMetadata = message.includeMetadata;
+    }
     return obj;
   },
 
@@ -730,6 +758,7 @@ export const SearchRequest: MessageFns<SearchRequest> = {
     message.query = object.query ?? "";
     message.timeoutMs = object.timeoutMs ?? 0;
     message.includeVectors = object.includeVectors ?? false;
+    message.includeMetadata = object.includeMetadata ?? false;
     return message;
   },
 };

@@ -10,13 +10,6 @@ import (
 	"strings"
 )
 
-const (
-	fastRoutingCacheTTLms    = 60000
-	fastWorkerListCacheTTLms = 60000
-	fastResolveCacheTTLms    = 60000
-	fastWorkerRoleCacheTTLms = 30000
-)
-
 // Config holds all the configuration settings for the API Gateway.
 type Config struct {
 	GRPCAddr                      string          // Address for the gRPC server to listen on.
@@ -77,24 +70,23 @@ type Config struct {
 
 // LoadConfig loads the configuration from environment variables with default fallbacks.
 func LoadConfig() Config {
-	rawSpeedMode := getEnvAsBool("RAW_SPEED_MODE", false)
 	cfg := Config{
 		GRPCAddr:                      getEnv("GRPC_ADDR", ":8081"),
 		GRPCTLSEnabled:                getEnvAsBool("GRPC_TLS_ENABLED", false),
 		GRPCTLSCertFile:               getEnv("GRPC_TLS_CERT_FILE", ""),
-		GRPCTLSKeyFile:                getEnv("GRPC_TLS_KEY_FILE", ""),
+		GRPCTLSKeyFile:               getEnv("GRPC_TLS_KEY_FILE", ""),
 		GRPCTLSServerName:             getEnv("GRPC_TLS_SERVER_NAME", ""),
 		HTTPAddr:                      getEnv("HTTP_ADDR", ":8080"),
 		HTTPTLSEnabled:                getEnvAsBool("HTTP_TLS_ENABLED", false),
 		HTTPTLSCertFile:               getEnv("HTTP_TLS_CERT_FILE", ""),
-		HTTPTLSKeyFile:                getEnv("HTTP_TLS_KEY_FILE", ""),
+		HTTPTLSKeyFile:               getEnv("HTTP_TLS_KEY_FILE", ""),
 		PlacementDriver:               getEnv("PLACEMENT_DRIVER", "placement:6300"),
 		JWTSecret:                     getEnv("JWT_SECRET", "CHANGE_ME_IN_PRODUCTION"),
 		ManagementAuthEnabled:         getEnvAsBool("MANAGEMENT_AUTH_ENABLED", true),
 		ManagementAuthAllowSDK:        getEnvAsBool("MANAGEMENT_AUTH_ALLOW_SDK", false),
-		AuthServiceAddr:               getEnv("AUTH_SERVICE_ADDR", "auth:50051"),          // Default Auth service address
-		RerankerServiceAddr:           getEnv("RERANKER_SERVICE_ADDR", "localhost:50051"), // Default Reranker service address
-		FeedbackDBPath:                getEnv("FEEDBACK_DB_PATH", "./data/feedback.db"),   // Default feedback database path
+		AuthServiceAddr:               getEnv("AUTH_SERVICE_ADDR", "auth:50051"),
+		RerankerServiceAddr:           getEnv("RERANKER_SERVICE_ADDR", "localhost:50051"),
+		FeedbackDBPath:                getEnv("FEEDBACK_DB_PATH", "./data/feedback.db"),
 		RateLimitRPS:                  getEnvAsInt("RATE_LIMIT_RPS", 100),
 		SearchLinearizable:            getEnvAsBool("SEARCH_LINEARIZABLE", false),
 		RerankTimeoutMs:               getEnvAsInt("RERANK_TIMEOUT_MS", 75),
@@ -103,7 +95,7 @@ func LoadConfig() Config {
 		RerankCollections:             parseBoolSet(getEnv("RERANK_COLLECTIONS", "")),
 		RerankTopNOverrides:           parseKVIntMap(getEnv("RERANK_TOP_N_OVERRIDES", "")),
 		RerankTimeoutOverrides:        parseKVIntMap(getEnv("RERANK_TIMEOUT_OVERRIDES", "")),
-		GRPCEnableCompression:         false,
+		GRPCEnableCompression:         getEnvAsBool("GRPC_ENABLE_COMPRESSION", false),
 		GRPCMaxRecvMB:                 getEnvAsInt("GRPC_MAX_RECV_MB", 256),
 		GRPCMaxSendMB:                 getEnvAsInt("GRPC_MAX_SEND_MB", 256),
 		RerankWarmupEnabled:           getEnvAsBool("RERANK_WARMUP_ENABLED", false),
@@ -113,8 +105,8 @@ func LoadConfig() Config {
 		SearchConsistencyOverrides:    parseConsistencyOverrides(getEnv("SEARCH_CONSISTENCY_OVERRIDES", "")),
 		SearchCacheTTLms:              getEnvAsInt("SEARCH_CACHE_TTL_MS", 0),
 		SearchCacheMaxSize:            getEnvAsInt("SEARCH_CACHE_MAX_SIZE", 0),
-		SearchCacheEnabled:            false,
-		SearchFanoutEnabled:           false,
+		SearchCacheEnabled:            getEnvAsBool("SEARCH_CACHE_ENABLED", false),
+		SearchFanoutEnabled:           getEnvAsBool("SEARCH_FANOUT_ENABLED", false),
 		DistributedCacheAddr:          getEnv("DISTRIBUTED_CACHE_ADDR", ""),
 		DistributedCachePassword:      getEnv("DISTRIBUTED_CACHE_PASSWORD", ""),
 		DistributedCacheDB:            getEnvAsInt("DISTRIBUTED_CACHE_DB", 0),
@@ -123,31 +115,26 @@ func LoadConfig() Config {
 		DistributedCacheSearchEnabled: getEnvAsBool("DISTRIBUTED_CACHE_SEARCH_ENABLED", true),
 		DistributedCachePoolSize:      getEnvAsInt("DISTRIBUTED_CACHE_POOL_SIZE", 0),
 		DistributedCacheMinIdleConns:  getEnvAsInt("DISTRIBUTED_CACHE_MIN_IDLE_CONNS", 0),
-		RoutingCacheTTLms:             fastRoutingCacheTTLms,
-		WorkerListCacheTTLms:          fastWorkerListCacheTTLms,
-		ResolveCacheTTLms:             fastResolveCacheTTLms,
-		PreferSearchOnlyWorkers:       false,
-		WorkerRoleCacheTTLms:          fastWorkerRoleCacheTTLms,
+		RoutingCacheTTLms:             getEnvAsInt("ROUTING_CACHE_TTL_MS", 30000),
+		WorkerListCacheTTLms:          getEnvAsInt("WORKER_LIST_CACHE_TTL_MS", 30000),
+		ResolveCacheTTLms:             getEnvAsInt("RESOLVE_CACHE_TTL_MS", 30000),
+		PreferSearchOnlyWorkers:       getEnvAsBool("PREFER_SEARCH_ONLY_WORKERS", false),
+		WorkerRoleCacheTTLms:          getEnvAsInt("WORKER_ROLE_CACHE_TTL_MS", 5000),
 		RerankerDiscoveryEnabled:      getEnvAsBool("RERANKER_DISCOVERY_ENABLED", false),
 		RerankerDiscoveryTTLms:        getEnvAsInt("RERANKER_DISCOVERY_TTL_MS", 5000),
 		GatewayDebugLogs:              getEnvAsBool("GATEWAY_DEBUG_LOGS", false),
 		GatewayLogSampleEvery:         getEnvAsInt("GATEWAY_LOG_SAMPLE_EVERY", 100),
-		RawSpeedMode:                  rawSpeedMode,
+		RawSpeedMode:                  getEnvAsBool("RAW_SPEED_MODE", false),
 	}
 
 	if cfg.RawSpeedMode {
+		cfg.GRPCEnableCompression = false
 		cfg.SearchLinearizable = false
+		cfg.SearchCacheEnabled = false
 		cfg.SearchCacheTTLms = 0
 		cfg.SearchCacheMaxSize = 0
 		cfg.DistributedCacheSearchEnabled = false
-		cfg.RateLimitRPS = 0
-	}
-	if getEnvAsBool("VECTRON_BENCHMARK_MODE", false) {
-		cfg.RateLimitRPS = 0
-	}
-	if !cfg.RerankEnabled {
-		cfg.RerankWarmupEnabled = false
-		cfg.RerankerDiscoveryEnabled = false
+		cfg.PreferSearchOnlyWorkers = false
 	}
 
 	return cfg

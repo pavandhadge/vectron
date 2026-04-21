@@ -589,22 +589,24 @@ type SearchResult struct {
 func (s *StateMachine) Lookup(query interface{}) (interface{}, error) {
 	switch q := query.(type) {
 	case SearchQuery:
+		var ids []string
+		var scores []float32
+		var err error
+
 		if s.useSegments {
-			ids, scores, err := s.segmentMgr.Search(q.Vector, q.K)
-			if err != nil {
-				return nil, err
-			}
-			return &SearchResult{IDs: ids, Scores: scores}, nil
+			ids, scores, err = s.segmentMgr.Search(q.Vector, q.K)
+		} else {
+			ids, scores, err = s.Search(q.Vector, q.K)
 		}
-		ids, scores, err := s.Search(q.Vector, q.K)
 		if err != nil {
 			return nil, err
 		}
+
 		metadata := make([][]byte, len(ids))
 		for i, id := range ids {
 			_, meta, err := s.GetVector(id)
 			if err != nil {
-				return nil, err
+				continue
 			}
 			if len(meta) > 0 {
 				metadata[i] = append([]byte(nil), meta...)
