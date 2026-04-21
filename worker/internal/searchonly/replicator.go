@@ -120,6 +120,9 @@ func (s *localSearcher) Search(query shard.SearchQuery) (*shard.SearchResult, er
 			ef = scaled
 		}
 	}
+	if ef < k {
+		ef = k
+	}
 	if cfg.MultiStageEnabled && (!cfg.QuantizeVectors || cfg.QuantizeKeepFloatVectors) {
 		stage1Ef := cfg.Stage1Ef
 		if stage1Ef <= 0 {

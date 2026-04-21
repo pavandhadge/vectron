@@ -87,7 +87,7 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 		QuantizeVectors:          quantizeEnabled,
 		QuantizeKeepFloatVectors: keepFloatVectors,
 		VectorCompressionEnabled: false,
-		MultiStageEnabled:        quantizeEnabled,
+		MultiStageEnabled:        false, // Disable for small dims
 		HotIndexEnabled:          hotEnabled,
 		HotIndexMaxSize:          hotMaxSize,
 		HotIndexColdEfScale:      hotColdScale,

@@ -62,10 +62,11 @@ func main() {
 	}
 	log.Printf("SDK JWT created from key %s (full key=%s)", keyPrefix, fullKey)
 
-	// Configure client options for production-friendly defaults.
+	const vectorDim = 128
+
 	opts := vectron.DefaultClientOptions()
 	opts.Timeout = 8 * time.Second
-	opts.ExpectedVectorDim = 4
+	opts.ExpectedVectorDim = vectorDim
 	opts.Compression = "gzip"
 	opts.HedgedReads = true
 	opts.HedgeDelay = 50 * time.Millisecond
@@ -76,8 +77,12 @@ func main() {
 	}
 	defer client.Close()
 
-	// Create collection
-	if err := client.CreateCollection(collectionName, 4, "euclidean"); err != nil {
+	fmt.Println("╔═══════════════════════════════════════════════════════════════╗")
+	fmt.Println("║          Vectron Showcase Demo                              ║")
+	fmt.Println("║          128-Dimensional Vector Embeddings                ║")
+	fmt.Println("╚═══════════════════════════════════════════════════════════════╝")
+
+	if err := client.CreateCollection(collectionName, int32(vectorDim), "cosine"); err != nil {
 		log.Printf("collection may already exist: %v", err)
 	}
 
@@ -103,11 +108,10 @@ func main() {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	// Upsert vectors with payloads
 	points := []*vectron.Point{
 		{
 			ID:     "doc-001",
-			Vector: []float32{0.1, 0.2, 0.3, 0.4},
+			Vector: generateEmbedding("docs"),
 			Payload: map[string]string{
 				"title":    "Vector Databases 101",
 				"category": "docs",
@@ -115,7 +119,7 @@ func main() {
 		},
 		{
 			ID:     "doc-002",
-			Vector: []float32{0.11, 0.21, 0.31, 0.41},
+			Vector: generateEmbedding("docs"),
 			Payload: map[string]string{
 				"title":    "Approximate Nearest Neighbor",
 				"category": "docs",
@@ -123,7 +127,7 @@ func main() {
 		},
 		{
 			ID:     "doc-003",
-			Vector: []float32{0.8, 0.7, 0.6, 0.5},
+			Vector: generateEmbedding("ops"),
 			Payload: map[string]string{
 				"title":    "Production Indexing",
 				"category": "ops",
@@ -135,30 +139,55 @@ func main() {
 	if err != nil {
 		log.Fatalf("upsert failed: %v", err)
 	}
-	fmt.Printf("Upserted %d points\n", upserted)
+	fmt.Printf("\n  ✓ Upserted %d points (128-dim)\n", upserted)
 
-	// Search
-	results, err := client.Search(collectionName, []float32{0.12, 0.22, 0.32, 0.42}, 2)
+	results, err := client.Search(collectionName, generateQuery("docs"), 10)
 	if err != nil {
 		log.Fatalf("search failed: %v", err)
 	}
-	fmt.Println("Top results:")
+	fmt.Println("\n  All Results (docs query):")
 	for _, r := range results {
-		fmt.Printf("  id=%s score=%.4f payload=%v\n", r.ID, r.Score, r.Payload)
+		fmt.Printf("  • %s (%.1f%%) - %s\n", r.Payload["title"], r.Score*100, r.Payload["category"])
 	}
 
-	// Get a point by ID
 	point, err := client.Get(collectionName, "doc-001")
 	if err != nil {
 		log.Fatalf("get failed: %v", err)
 	}
-	fmt.Printf("Fetched point: id=%s payload=%v\n", point.ID, point.Payload)
+	fmt.Printf("\n  Fetched: %s (vector dim=%d)\n", point.Payload["title"], len(point.Vector))
 
-	// Delete a point
 	if err := client.Delete(collectionName, "doc-003"); err != nil {
 		log.Fatalf("delete failed: %v", err)
 	}
-	fmt.Println("Deleted point doc-003")
+	fmt.Println("\n  Deleted: doc-003")
+
+	fmt.Println()
+	fmt.Println("╔═══════════════════════════════════════════════════════════════════════╗")
+	fmt.Println("║  ✓ 128-dimensional vector operations complete                      ║")
+	fmt.Println("╚═══════════════════════════════════════════════════════════════════════╝")
+}
+
+var docCategoryBase = map[string][]float32{
+	"docs": {15.0, 2.0, 0.5, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+	"ops":  {2.0, 15.0, 0.5, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+}
+
+func generateEmbedding(category string) []float32 {
+	base := docCategoryBase[category]
+	vec := make([]float32, 128)
+	for i := 0; i < len(base) && i < 128; i++ {
+		vec[i] = base[i]
+	}
+	return vec
+}
+
+func generateQuery(category string) []float32 {
+	base := docCategoryBase[category]
+	vec := make([]float32, 128)
+	for i := 0; i < len(base) && i < 128; i++ {
+		vec[i] = base[i]
+	}
+	return vec
 }
 
 func registerAndLogin(authAddr, email, password string) (string, error) {

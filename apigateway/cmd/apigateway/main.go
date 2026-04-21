@@ -392,8 +392,8 @@ type routingShard struct {
 }
 
 type collectionRoutingEntry struct {
-	shards  []routingShard
-	expires time.Time
+	shards    []routingShard
+	expires   time.Time
 	dimension int32
 }
 
@@ -908,9 +908,26 @@ func (c *WorkerListCache) Delete(collection string) {
 
 type searchResultHeap []*pb.SearchResult
 
+func betterSearchScore(a, b float32) bool {
+	return a < b
+}
+
+func worseSearchScore(a, b float32) bool {
+	return a > b
+}
+
+func sortSearchResults(results []*pb.SearchResult) {
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].Score == results[j].Score {
+			return results[i].Id < results[j].Id
+		}
+		return betterSearchScore(results[i].Score, results[j].Score)
+	})
+}
+
 func (h searchResultHeap) Len() int { return len(h) }
 func (h searchResultHeap) Less(i, j int) bool {
-	return h[i].Score < h[j].Score
+	return betterSearchScore(h[i].Score, h[j].Score)
 }
 func (h searchResultHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
 func (h *searchResultHeap) Push(x interface{}) {
@@ -977,7 +994,7 @@ func (a *searchAggregator) add(results []*pb.SearchResult) {
 		if result == nil || result.Id == "" {
 			continue
 		}
-		if existing, ok := a.entries[result.Id]; ok && result.Score <= existing.score {
+		if existing, ok := a.entries[result.Id]; ok && !betterSearchScore(result.Score, existing.score) {
 			continue
 		}
 		a.entries[result.Id] = searchAggEntry{
@@ -1005,12 +1022,7 @@ func (a *searchAggregator) snapshot(limit int) []*pb.SearchResult {
 			Payload: entry.payload,
 		})
 	}
-	sort.Slice(results, func(i, j int) bool {
-		if results[i].Score == results[j].Score {
-			return results[i].Id < results[j].Id
-		}
-		return results[i].Score > results[j].Score
-	})
+	sortSearchResults(results)
 	if len(results) > limit {
 		results = results[:limit]
 	}
@@ -1054,7 +1066,7 @@ func (h searchAggHeap) Less(i, j int) bool {
 	if h[i].score == h[j].score {
 		return h[i].id > h[j].id
 	}
-	return h[i].score < h[j].score
+	return worseSearchScore(h[i].score, h[j].score)
 }
 func (h searchAggHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
 func (h *searchAggHeap) Push(x interface{}) {
@@ -1099,9 +1111,7 @@ func snapshotTopResults(topResults *searchResultHeap, limit int) *pb.SearchRespo
 	}
 	results := make([]*pb.SearchResult, topResults.Len())
 	copy(results, *topResults)
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Score > results[j].Score
-	})
+	sortSearchResults(results)
 	if limit > 0 && len(results) > limit {
 		results = results[:limit]
 	}
@@ -2341,8 +2351,8 @@ func (s *gatewayServer) getCollectionRouting(ctx context.Context, collection str
 		ttl = s.routingCache.ttl
 	}
 	entry = &collectionRoutingEntry{
-		shards:  make([]routingShard, 0, len(resp.Shards)),
-		expires: time.Now().Add(ttl),
+		shards:    make([]routingShard, 0, len(resp.Shards)),
+		expires:   time.Now().Add(ttl),
 		dimension: resp.Dimension,
 	}
 	for _, shard := range resp.Shards {
@@ -3713,7 +3723,7 @@ func (s *gatewayServer) searchStreamUncached(ctx context.Context, req *pb.Search
 					heap.Push(localHeap, r)
 					continue
 				}
-				if localHeap.Len() > 0 && r.Score > (*localHeap)[0].Score {
+				if localHeap.Len() > 0 && betterSearchScore(r.Score, (*localHeap)[0].Score) {
 					(*localHeap)[0] = r
 					heap.Fix(localHeap, 0)
 				}
@@ -4025,18 +4035,14 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 
 		// Inline finalize block to avoid goto across declarations.
 		if candidateLimit > 0 && len(searchResponse.Results) > candidateLimit {
-			sort.Slice(searchResponse.Results, func(i, j int) bool {
-				return searchResponse.Results[i].Score > searchResponse.Results[j].Score
-			})
+			sortSearchResults(searchResponse.Results)
 			searchResponse.Results = searchResponse.Results[:candidateLimit]
 		}
 
 		allowAll = len(cfg.RerankCollections) == 0
 		enabledForCollection = allowAll || cfg.RerankCollections[req.Collection]
 		if req.Query == "" || !cfg.RerankEnabled || !enabledForCollection {
-			sort.Slice(searchResponse.Results, func(i, j int) bool {
-				return searchResponse.Results[i].Score > searchResponse.Results[j].Score
-			})
+			sortSearchResults(searchResponse.Results)
 			if len(searchResponse.Results) > int(req.TopK) {
 				searchResponse.Results = searchResponse.Results[:req.TopK]
 			}
@@ -4087,9 +4093,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 			}
 			s.startRerankWarmup(warmupKey, req, candidates, metadataByID, rerankTopN, rerankTimeoutMs)
 
-			sort.Slice(searchResponse.Results, func(i, j int) bool {
-				return searchResponse.Results[i].Score > searchResponse.Results[j].Score
-			})
+			sortSearchResults(searchResponse.Results)
 			if len(searchResponse.Results) > int(req.TopK) {
 				searchResponse.Results = searchResponse.Results[:req.TopK]
 			}
@@ -4118,9 +4122,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		rerankerClient, err := s.getRerankerClient(rerankCtx)
 		if err != nil {
 			log.Println("Reranking failed, returning original results:", err)
-			sort.Slice(searchResponse.Results, func(i, j int) bool {
-				return searchResponse.Results[i].Score > searchResponse.Results[j].Score
-			})
+			sortSearchResults(searchResponse.Results)
 			if len(searchResponse.Results) > int(req.TopK) {
 				searchResponse.Results = searchResponse.Results[:req.TopK]
 			}
@@ -4135,9 +4137,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		rerankResp, err := rerankerClient.Rerank(rerankCtx, rerankReq)
 		if err != nil {
 			log.Println("Reranking failed, returning original results:", err)
-			sort.Slice(searchResponse.Results, func(i, j int) bool {
-				return searchResponse.Results[i].Score > searchResponse.Results[j].Score
-			})
+			sortSearchResults(searchResponse.Results)
 			if len(searchResponse.Results) > int(req.TopK) {
 				searchResponse.Results = searchResponse.Results[:req.TopK]
 			}
@@ -4233,7 +4233,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 					heap.Push(localHeap, result)
 					continue
 				}
-				if localHeap.Len() > 0 && result.Score > (*localHeap)[0].Score {
+				if localHeap.Len() > 0 && betterSearchScore(result.Score, (*localHeap)[0].Score) {
 					(*localHeap)[0] = result
 					heap.Fix(localHeap, 0)
 				}
@@ -4289,9 +4289,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 	// Limit candidates before reranking to reduce latency and CPU usage.
 	// Keep 2x TopK (capped by workerTopK) to preserve quality while shrinking work.
 	if candidateLimit > 0 && len(searchResponse.Results) > candidateLimit {
-		sort.Slice(searchResponse.Results, func(i, j int) bool {
-			return searchResponse.Results[i].Score > searchResponse.Results[j].Score
-		})
+		sortSearchResults(searchResponse.Results)
 		searchResponse.Results = searchResponse.Results[:candidateLimit]
 	}
 
@@ -4300,9 +4298,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 	allowAll = len(cfg.RerankCollections) == 0
 	enabledForCollection = allowAll || cfg.RerankCollections[req.Collection]
 	if req.Query == "" || !cfg.RerankEnabled || !enabledForCollection {
-		sort.Slice(searchResponse.Results, func(i, j int) bool {
-			return searchResponse.Results[i].Score > searchResponse.Results[j].Score
-		})
+		sortSearchResults(searchResponse.Results)
 		if len(searchResponse.Results) > int(req.TopK) {
 			searchResponse.Results = searchResponse.Results[:req.TopK]
 		}
@@ -4350,9 +4346,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		}
 		s.startRerankWarmup(warmupKey, req, candidates, metadataByID, rerankTopN, rerankTimeoutMs)
 
-		sort.Slice(searchResponse.Results, func(i, j int) bool {
-			return searchResponse.Results[i].Score > searchResponse.Results[j].Score
-		})
+		sortSearchResults(searchResponse.Results)
 		if len(searchResponse.Results) > int(req.TopK) {
 			searchResponse.Results = searchResponse.Results[:req.TopK]
 		}
@@ -4381,9 +4375,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 	rerankerClient, err := s.getRerankerClient(rerankCtx)
 	if err != nil {
 		log.Println("Reranking failed, returning original results:", err)
-		sort.Slice(searchResponse.Results, func(i, j int) bool {
-			return searchResponse.Results[i].Score > searchResponse.Results[j].Score
-		})
+		sortSearchResults(searchResponse.Results)
 		if len(searchResponse.Results) > int(req.TopK) {
 			searchResponse.Results = searchResponse.Results[:req.TopK]
 		}
@@ -4399,9 +4391,7 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 	if err != nil {
 		log.Println("Reranking failed, returning original results:", err)
 		// Sort original results by score in descending order before returning
-		sort.Slice(searchResponse.Results, func(i, j int) bool {
-			return searchResponse.Results[i].Score > searchResponse.Results[j].Score
-		})
+		sortSearchResults(searchResponse.Results)
 		// Then truncate to TopK
 		if len(searchResponse.Results) > int(req.TopK) {
 			searchResponse.Results = searchResponse.Results[:req.TopK]

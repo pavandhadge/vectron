@@ -418,8 +418,9 @@ func (s *StateMachine) Update(entries []sm.Entry) ([]sm.Entry, error) {
 }
 
 type SearchResult struct {
-	IDs    []string
-	Scores []float32
+	IDs      []string
+	Scores   []float32
+	Metadata [][]byte
 }
 
 // Lookup performs a read-only query on the state machine.
@@ -430,7 +431,17 @@ func (s *StateMachine) Lookup(query interface{}) (interface{}, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &SearchResult{IDs: ids, Scores: scores}, nil
+		metadata := make([][]byte, len(ids))
+		for i, id := range ids {
+			_, meta, err := s.GetVector(id)
+			if err != nil {
+				return nil, err
+			}
+			if len(meta) > 0 {
+				metadata[i] = append([]byte(nil), meta...)
+			}
+		}
+		return &SearchResult{IDs: ids, Scores: scores, Metadata: metadata}, nil
 	case GetVectorQuery:
 		vec, meta, err := s.GetVector(q.ID)
 		if err != nil {

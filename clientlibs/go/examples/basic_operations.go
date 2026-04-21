@@ -20,46 +20,35 @@ import (
 )
 
 func main() {
-	// Configuration
 	const (
 		apiGatewayAddr = "localhost:10010"
-		sdkJWTToken    = "your-sdk-jwt-token" // Replace with your actual token
+		sdkJWTToken    = "your-sdk-jwt-token"
 		collectionName = "basic-demo-collection"
+		vectorDim    = 128
 	)
 
-	fmt.Println("🚀 Vectron Basic Operations Demo")
-	fmt.Println("=================================")
+	printHeader()
 
-	// Initialize client
-	fmt.Println("\n1️⃣  Initializing Vectron client...")
 	client, err := vectron.NewClient(apiGatewayAddr, sdkJWTToken)
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)
 	}
 	defer client.Close()
-	fmt.Println("✅ Client initialized successfully")
+	printSuccess("Client initialized")
 
-	// Create collection
-	fmt.Println("\n2️⃣  Creating collection...")
-	dimension := int32(4) // Small dimension for demo (use 384, 768, or 1536 for real embeddings)
-	distance := "euclidean"
-
-	if err := client.CreateCollection(collectionName, dimension, distance); err != nil {
+	fmt.Println("\n" + stepStyle("2") + " Creating collection...")
+	if err := client.CreateCollection(collectionName, int32(vectorDim), "cosine"); err != nil {
 		log.Printf("Collection may already exist: %v", err)
 	} else {
-		fmt.Printf("✅ Collection '%s' created (dimension=%d, distance=%s)\n", collectionName, dimension, distance)
+		printSuccess(fmt.Sprintf("Collection created (dimension=%d)", vectorDim))
 	}
-
-	// Wait for collection to be ready
-	fmt.Println("⏳ Waiting for collection to be ready...")
 	time.Sleep(2 * time.Second)
 
-	// Upsert vectors
-	fmt.Println("\n3️⃣  Upserting vectors...")
+	fmt.Println("\n" + stepStyle("3") + " Upserting vectors...")
 	points := []*vectron.Point{
 		{
 			ID:     "product-001",
-			Vector: []float32{0.1, 0.2, 0.3, 0.4},
+			Vector: generateEmbedding("electronics"),
 			Payload: map[string]string{
 				"name":     "Wireless Headphones",
 				"category": "electronics",
@@ -68,7 +57,7 @@ func main() {
 		},
 		{
 			ID:     "product-002",
-			Vector: []float32{0.15, 0.25, 0.35, 0.45},
+			Vector: generateEmbedding("electronics"),
 			Payload: map[string]string{
 				"name":     "Bluetooth Speaker",
 				"category": "electronics",
@@ -77,7 +66,7 @@ func main() {
 		},
 		{
 			ID:     "product-003",
-			Vector: []float32{0.8, 0.7, 0.6, 0.5},
+			Vector: generateEmbedding("sports"),
 			Payload: map[string]string{
 				"name":     "Running Shoes",
 				"category": "sports",
@@ -86,7 +75,7 @@ func main() {
 		},
 		{
 			ID:     "product-004",
-			Vector: []float32{0.82, 0.72, 0.62, 0.52},
+			Vector: generateEmbedding("sports"),
 			Payload: map[string]string{
 				"name":     "Yoga Mat",
 				"category": "sports",
@@ -99,98 +88,96 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to upsert points: %v", err)
 	}
-	fmt.Printf("✅ Upserted %d vectors\n", upserted)
+	printSuccess(fmt.Sprintf("Upserted %d vectors (128-dim)", upserted))
 
-	// List collections
-	fmt.Println("\n4️⃣  Listing collections...")
+	fmt.Println("\n" + stepStyle("4") + " Listing collections...")
 	collections, err := client.ListCollections()
 	if err != nil {
 		log.Fatalf("Failed to list collections: %v", err)
 	}
-	fmt.Printf("📚 Collections: %v\n", collections)
+	fmt.Printf("  Collections: %v\n", collections)
 
-	// Search for similar vectors
-	fmt.Println("\n5️⃣  Searching for similar vectors...")
-	queryVector := []float32{0.12, 0.22, 0.32, 0.42} // Similar to electronics products
-	topK := uint32(3)
-
-	results, err := client.Search(collectionName, queryVector, topK)
+	fmt.Println("\n" + stepStyle("5") + " Searching for electronics...")
+	results, err := client.Search(collectionName, generateQuery("electronics"), 10)
 	if err != nil {
 		log.Fatalf("Search failed: %v", err)
 	}
 
-	fmt.Printf("🔍 Search results (top %d):\n", topK)
-	for i, result := range results {
-		fmt.Printf("  %d. ID: %s, Score: %.4f\n", i+1, result.ID, result.Score)
-		if name, ok := result.Payload["name"]; ok {
-			fmt.Printf("     Name: %s\n", name)
-		}
-		if category, ok := result.Payload["category"]; ok {
-			fmt.Printf("     Category: %s\n", category)
-		}
+	fmt.Printf("\n  \033[1mAll Results (electronics query):\033[0m\n")
+	for i, r := range results {
+		fmt.Printf("  %d. \033[1;37m%s\033[0m  \033[90m%.1f%%\033[0m  %s\n",
+			i+1, r.Payload["name"], r.Score*100, r.Payload["category"])
 	}
 
-	// Get specific vector by ID
-	fmt.Println("\n6️⃣  Retrieving specific vector...")
-	pointID := "product-001"
-	point, err := client.Get(collectionName, pointID)
+	fmt.Println("\n" + stepStyle("6") + " Retrieving vector by ID...")
+	pt, err := client.Get(collectionName, "product-001")
 	if err != nil {
 		log.Fatalf("Failed to get point: %v", err)
 	}
-	fmt.Printf("📄 Point '%s':\n", pointID)
-	fmt.Printf("   Vector: %v\n", point.Vector)
-	fmt.Printf("   Payload: %v\n", point.Payload)
+	fmt.Printf("  ID: %s  dim=%d\n", pt.ID, len(pt.Vector))
 
-	// Another search - sports products
-	fmt.Println("\n7️⃣  Searching for sports products...")
-	sportsQuery := []float32{0.81, 0.71, 0.61, 0.51} // Similar to sports products
-	sportsResults, err := client.Search(collectionName, sportsQuery, uint32(2))
-	if err != nil {
-		log.Fatalf("Sports search failed: %v", err)
-	}
-
-	fmt.Printf("🔍 Sports search results:\n")
-	for i, result := range sportsResults {
-		fmt.Printf("  %d. ID: %s, Score: %.4f, Name: %s\n",
-			i+1, result.ID, result.Score, result.Payload["name"])
-	}
-
-	// Delete a vector
-	fmt.Println("\n8️⃣  Deleting a vector...")
-	deleteID := "product-004"
-	if err := client.Delete(collectionName, deleteID); err != nil {
+	fmt.Println("\n" + stepStyle("7") + " Deleting vector...")
+	if err := client.Delete(collectionName, "product-004"); err != nil {
 		log.Fatalf("Failed to delete point: %v", err)
 	}
-	fmt.Printf("✅ Deleted point '%s'\n", deleteID)
+	printSuccess("Deleted product-004")
 
-	// Verify deletion
-	fmt.Println("\n9️⃣  Verifying deletion...")
-	_, err = client.Get(collectionName, deleteID)
-	if err != nil {
-		fmt.Printf("✅ Point '%s' successfully deleted (not found as expected)\n", deleteID)
-	} else {
-		fmt.Printf("⚠️  Point '%s' still exists\n", deleteID)
-	}
-
-	// Get collection status
-	fmt.Println("\n🔟  Getting collection status...")
+	fmt.Println("\n" + stepStyle("8") + " Collection status...")
 	status, err := client.GetCollectionStatus(collectionName)
 	if err != nil {
 		log.Fatalf("Failed to get collection status: %v", err)
 	}
-	fmt.Printf("📊 Collection Status:\n")
-	fmt.Printf("   Name: %s\n", status.Name)
-	fmt.Printf("   Dimension: %d\n", status.Dimension)
-	fmt.Printf("   Distance: %s\n", status.Distance)
-	fmt.Printf("   Shards: %d\n", len(status.Shards))
-	for _, shard := range status.Shards {
-		fmt.Printf("     Shard %d: Ready=%v, Replicas=%d\n",
-			shard.ShardId, shard.Ready, len(shard.Replicas))
-	}
+	fmt.Printf("  Name: %s  Dimension: %d  Shards: %d\n",
+		status.Name, status.Dimension, len(status.Shards))
 
-	fmt.Println("\n✨ Demo completed successfully!")
-	fmt.Println("\nNext steps:")
-	fmt.Println("  - Try batch_operations.go for high-throughput scenarios")
-	fmt.Println("  - Try ecommerce_search.go for a real-world use case")
-	fmt.Println("  - Explore the web console at http://localhost:10011")
+	printFooter()
+}
+
+var categoryBase = map[string][]float32{
+	"electronics": {15.0, 2.0, 0.5, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+	"sports":     {2.0, 15.0, 0.5, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+}
+
+func generateEmbedding(category string) []float32 {
+	base := categoryBase[category]
+	vec := make([]float32, 128)
+	for i := 0; i < len(base) && i < 128; i++ {
+		vec[i] = base[i]
+	}
+	return vec
+}
+
+func generateQuery(category string) []float32 {
+	base := categoryBase[category]
+	vec := make([]float32, 128)
+	for i := 0; i < len(base) && i < 128; i++ {
+		vec[i] = base[i]
+	}
+	return vec
+}
+
+func printHeader() {
+	fmt.Println()
+	fmt.Println("╔═══════════════════════════════════════════════════════════════╗")
+	fmt.Println("║          Vectron Basic Operations Demo                      ║")
+	fmt.Println("║          128-Dimensional Vector Search                      ║")
+	fmt.Println("╚═══════════════════════════════════════════════════════════════╝")
+	fmt.Println()
+}
+
+func stepStyle(n string) string {
+	return "\033[1;36m[" + n + "]\033[0m"
+}
+
+func printSuccess(msg string) {
+	fmt.Printf("  \033[1;32m✓\033[0m %s\n", msg)
+}
+
+func printFooter() {
+	fmt.Println()
+	fmt.Println("╔═══════════════════════════════════════════════════════════════════════╗")
+	fmt.Println("║  ✓ Collection created with 128-dim embeddings                     ║")
+	fmt.Println("║  ✓ Semantic search across product categories                       ║")
+	fmt.Println("║  ✓ Full CRUD operations demonstrated                                 ║")
+	fmt.Println("╚═══════════════════════════════════════════════════════════════════════╝")
 }

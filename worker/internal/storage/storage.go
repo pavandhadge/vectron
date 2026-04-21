@@ -221,6 +221,9 @@ func (r *PebbleDB) Search(query []float32, k int) (ids []string, scores []float3
 			ef = scaled
 		}
 	}
+	if ef < k {
+		ef = k
+	}
 	efUsed = ef
 	runSearch := func() ([]string, []float32) {
 		if r.hnswHot != nil && r.opts != nil && r.opts.HNSWConfig.HotIndexEnabled {

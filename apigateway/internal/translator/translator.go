@@ -96,12 +96,14 @@ func ToWorkerSearchRequest(req *apigatewaypb.SearchRequest, shardID uint64, shar
 func FromWorkerSearchResponse(res *workerpb.SearchResponse) *apigatewaypb.SearchResponse {
 	results := make([]*apigatewaypb.SearchResult, len(res.Ids))
 	for i, id := range res.Ids {
+		var payload map[string]string
+		if i < len(res.Metadata) {
+			payload = DecodeMetadata(res.Metadata[i])
+		}
 		results[i] = &apigatewaypb.SearchResult{
-			Id: id,
-			// Note: The worker's SearchResponse in the current proto definition does not include
-			// scores or payloads. This is a potential area for enhancement in the worker service.
+			Id:      id,
 			Score:   res.Scores[i],
-			Payload: nil,
+			Payload: payload,
 		}
 	}
 	return &apigatewaypb.SearchResponse{
