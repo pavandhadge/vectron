@@ -14,6 +14,7 @@ import (
 func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, writeSpeedMode bool) storage.HNSWConfig {
 	quantizeEnabled := distance == "cosine"
 	keepFloatVectors := quantizeEnabled
+	compressionEnabled := os.Getenv("VECTRON_VECTOR_COMPRESSION") == "1"
 
 	adaptiveScale := 1.0
 	if dim >= 1024 {
@@ -86,8 +87,9 @@ func DefaultHNSWConfig(dim int, distance string, durabilityProfile string, write
 		NormalizeVectors:         distance == "cosine",
 		QuantizeVectors:          quantizeEnabled,
 		QuantizeKeepFloatVectors: keepFloatVectors,
-		VectorCompressionEnabled: false,
-		MultiStageEnabled:        false, // Disable for small dims
+		VectorCompressionEnabled: compressionEnabled,
+		MultiStageEnabled:        quantizeEnabled,
+		EnableNorms:              quantizeEnabled,
 		HotIndexEnabled:          hotEnabled,
 		HotIndexMaxSize:          hotMaxSize,
 		HotIndexColdEfScale:      hotColdScale,

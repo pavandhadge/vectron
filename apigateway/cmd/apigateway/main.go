@@ -1317,6 +1317,116 @@ func (s *gatewayServer) attachVectorsToResults(ctx context.Context, collection s
 	}
 }
 
+func shouldUseReranker(req *pb.SearchRequest) bool {
+	if req == nil || req.GetQuery() == "" || !cfg.RerankEnabled {
+		return false
+	}
+	if len(cfg.RerankCollections) == 0 {
+		return true
+	}
+	return cfg.RerankCollections[req.Collection]
+}
+
+func trimBaseResults(resp *pb.SearchResponse, topK uint32) *pb.SearchResponse {
+	if resp == nil {
+		return &pb.SearchResponse{}
+	}
+	sortSearchResults(resp.Results)
+	if topK > 0 && len(resp.Results) > int(topK) {
+		resp.Results = resp.Results[:topK]
+	}
+	return resp
+}
+
+func buildRerankCandidates(results []*pb.SearchResult) ([]*reranker.Candidate, map[string]map[string]string) {
+	candidates := make([]*reranker.Candidate, len(results))
+	var metadataByID map[string]map[string]string
+	for i, result := range results {
+		metadata := result.Payload
+		if metadata != nil {
+			if metadataByID == nil {
+				metadataByID = make(map[string]map[string]string, len(results))
+			}
+			metadataByID[result.Id] = metadata
+		}
+		candidates[i] = &reranker.Candidate{
+			Id:       result.Id,
+			Score:    result.Score,
+			Metadata: metadata,
+		}
+	}
+	return candidates, metadataByID
+}
+
+func (s *gatewayServer) rerankedSearchResponse(resp *pb.SearchResponse, rerankResp *reranker.RerankResponse, metadataByID map[string]map[string]string, topK uint32) *pb.SearchResponse {
+	if rerankResp == nil {
+		return trimBaseResults(resp, topK)
+	}
+	rerankedResults := make([]*pb.SearchResult, len(rerankResp.Results))
+	for i, result := range rerankResp.Results {
+		rerankedResults[i] = &pb.SearchResult{
+			Id:      result.Id,
+			Score:   result.RerankScore,
+			Payload: metadataByID[result.Id],
+		}
+	}
+	finalResponse := &pb.SearchResponse{Results: rerankedResults}
+	if topK > 0 && len(finalResponse.Results) > int(topK) {
+		finalResponse.Results = finalResponse.Results[:topK]
+	}
+	return finalResponse
+}
+
+func (s *gatewayServer) rerankSearchResponse(ctx context.Context, req *pb.SearchRequest, searchResponse *pb.SearchResponse) (*pb.SearchResponse, error) {
+	if !shouldUseReranker(req) {
+		return trimBaseResults(searchResponse, req.TopK), nil
+	}
+
+	candidates, metadataByID := buildRerankCandidates(searchResponse.Results)
+	rerankTopN := int(req.TopK)
+	if v, ok := cfg.RerankTopNOverrides[req.Collection]; ok && v > 0 {
+		rerankTopN = v
+	}
+	if rerankTopN <= 0 || rerankTopN > len(searchResponse.Results) {
+		rerankTopN = len(searchResponse.Results)
+	}
+	rerankTimeoutMs := cfg.RerankTimeoutMs
+	if v, ok := cfg.RerankTimeoutOverrides[req.Collection]; ok && v > 0 {
+		rerankTimeoutMs = v
+	}
+
+	if cfg.RerankWarmupEnabled && s.rerankWarmupCache != nil {
+		warmupKey := computeSearchCacheKey(req)
+		s.startRerankWarmup(warmupKey, req, candidates, metadataByID, rerankTopN, rerankTimeoutMs)
+		return trimBaseResults(searchResponse, req.TopK), nil
+	}
+
+	rerankReq := &reranker.RerankRequest{
+		Query:      req.Query,
+		Candidates: candidates,
+		TopN:       int32(rerankTopN),
+		Options:    map[string]string{"mode": cfg.RerankMode},
+	}
+
+	rerankCtx := ctx
+	var cancel context.CancelFunc
+	if rerankTimeoutMs > 0 {
+		rerankCtx, cancel = context.WithTimeout(ctx, time.Duration(rerankTimeoutMs)*time.Millisecond)
+		defer cancel()
+	}
+	rerankerClient, err := s.getRerankerClient(rerankCtx)
+	if err != nil {
+		log.Println("Reranking failed, returning original results:", err)
+		return trimBaseResults(searchResponse, req.TopK), nil
+	}
+	rerankResp, err := rerankerClient.Rerank(rerankCtx, rerankReq)
+	if err != nil {
+		log.Println("Reranking failed, returning original results:", err)
+		return trimBaseResults(searchResponse, req.TopK), nil
+	}
+	return s.rerankedSearchResponse(searchResponse, rerankResp, metadataByID, req.TopK), nil
+}
+
 // Get retrieves cached results if available and not expired
 func (c *SearchCache) Get(req *pb.SearchRequest) (*pb.SearchResponse, bool) {
 	key := computeSearchCacheKey(req)
@@ -4039,133 +4149,9 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 			searchResponse.Results = searchResponse.Results[:candidateLimit]
 		}
 
-		allowAll = len(cfg.RerankCollections) == 0
-		enabledForCollection = allowAll || cfg.RerankCollections[req.Collection]
-		if req.Query == "" || !cfg.RerankEnabled || !enabledForCollection {
-			sortSearchResults(searchResponse.Results)
-			if len(searchResponse.Results) > int(req.TopK) {
-				searchResponse.Results = searchResponse.Results[:req.TopK]
-			}
-			if err := s.maybeAttachVectors(ctx, req, searchResponse); err != nil {
-				return nil, err
-			}
-			if !req.GetIncludeVectors() {
-				s.setSearchCache(ctx, req, searchResponse, nil)
-			}
-			return searchResponse, nil
-		}
-
-		candidates := make([]*reranker.Candidate, len(searchResponse.Results))
-		var metadataByID map[string]map[string]string
-		for i, result := range searchResponse.Results {
-			metadata := result.Payload
-			if metadata != nil {
-				if metadataByID == nil {
-					metadataByID = make(map[string]map[string]string, len(searchResponse.Results))
-				}
-				metadataByID[result.Id] = metadata
-			}
-
-			candidates[i] = &reranker.Candidate{
-				Id:       result.Id,
-				Score:    result.Score,
-				Metadata: metadata,
-			}
-		}
-
-		rerankTopN := int(req.TopK)
-		if v, ok := cfg.RerankTopNOverrides[req.Collection]; ok && v > 0 {
-			rerankTopN = v
-		}
-		if rerankTopN <= 0 || rerankTopN > len(searchResponse.Results) {
-			rerankTopN = len(searchResponse.Results)
-		}
-
-		rerankTimeoutMs := cfg.RerankTimeoutMs
-		if v, ok := cfg.RerankTimeoutOverrides[req.Collection]; ok && v > 0 {
-			rerankTimeoutMs = v
-		}
-
-		if cfg.RerankWarmupEnabled && s.rerankWarmupCache != nil {
-			if !warmupKeySet {
-				warmupKey = computeSearchCacheKey(req)
-				warmupKeySet = true
-			}
-			s.startRerankWarmup(warmupKey, req, candidates, metadataByID, rerankTopN, rerankTimeoutMs)
-
-			sortSearchResults(searchResponse.Results)
-			if len(searchResponse.Results) > int(req.TopK) {
-				searchResponse.Results = searchResponse.Results[:req.TopK]
-			}
-			if err := s.maybeAttachVectors(ctx, req, searchResponse); err != nil {
-				return nil, err
-			}
-			if !req.GetIncludeVectors() {
-				s.setSearchCache(ctx, req, searchResponse, nil)
-			}
-			return searchResponse, nil
-		}
-
-		rerankReq := &reranker.RerankRequest{
-			Query:      req.Query,
-			Candidates: candidates,
-			TopN:       int32(rerankTopN),
-			Options:    map[string]string{"mode": cfg.RerankMode},
-		}
-
-		rerankCtx := ctx
-		var cancel context.CancelFunc
-		if rerankTimeoutMs > 0 {
-			rerankCtx, cancel = context.WithTimeout(ctx, time.Duration(rerankTimeoutMs)*time.Millisecond)
-			defer cancel()
-		}
-		rerankerClient, err := s.getRerankerClient(rerankCtx)
+		finalResponse, err := s.rerankSearchResponse(ctx, req, searchResponse)
 		if err != nil {
-			log.Println("Reranking failed, returning original results:", err)
-			sortSearchResults(searchResponse.Results)
-			if len(searchResponse.Results) > int(req.TopK) {
-				searchResponse.Results = searchResponse.Results[:req.TopK]
-			}
-			if err := s.maybeAttachVectors(ctx, req, searchResponse); err != nil {
-				return nil, err
-			}
-			if !req.GetIncludeVectors() {
-				s.setSearchCache(ctx, req, searchResponse, nil)
-			}
-			return searchResponse, nil
-		}
-		rerankResp, err := rerankerClient.Rerank(rerankCtx, rerankReq)
-		if err != nil {
-			log.Println("Reranking failed, returning original results:", err)
-			sortSearchResults(searchResponse.Results)
-			if len(searchResponse.Results) > int(req.TopK) {
-				searchResponse.Results = searchResponse.Results[:req.TopK]
-			}
-			if err := s.maybeAttachVectors(ctx, req, searchResponse); err != nil {
-				return nil, err
-			}
-			if !req.GetIncludeVectors() {
-				s.setSearchCache(ctx, req, searchResponse, nil)
-			}
-			return searchResponse, nil
-		}
-
-		rerankedResults := make([]*pb.SearchResult, len(rerankResp.Results))
-		for i, result := range rerankResp.Results {
-			var payload map[string]string
-			if metadataByID != nil {
-				payload = metadataByID[result.Id]
-			}
-
-			rerankedResults[i] = &pb.SearchResult{
-				Id:      result.Id,
-				Score:   result.RerankScore,
-				Payload: payload,
-			}
-		}
-
-		finalResponse := &pb.SearchResponse{
-			Results: rerankedResults,
+			return nil, err
 		}
 		if err := s.maybeAttachVectors(ctx, req, finalResponse); err != nil {
 			return nil, err
@@ -4293,134 +4279,9 @@ func (s *gatewayServer) searchUncached(ctx context.Context, req *pb.SearchReques
 		searchResponse.Results = searchResponse.Results[:candidateLimit]
 	}
 
-	// Standard practice: skip reranking when no query text is provided.
-	// Also skip unless reranking is explicitly enabled.
-	allowAll = len(cfg.RerankCollections) == 0
-	enabledForCollection = allowAll || cfg.RerankCollections[req.Collection]
-	if req.Query == "" || !cfg.RerankEnabled || !enabledForCollection {
-		sortSearchResults(searchResponse.Results)
-		if len(searchResponse.Results) > int(req.TopK) {
-			searchResponse.Results = searchResponse.Results[:req.TopK]
-		}
-		if err := s.maybeAttachVectors(ctx, req, searchResponse); err != nil {
-			return nil, err
-		}
-		if !req.GetIncludeVectors() {
-			s.setSearchCache(ctx, req, searchResponse, nil)
-		}
-		return searchResponse, nil
-	}
-
-	candidates := make([]*reranker.Candidate, len(searchResponse.Results))
-	var metadataByID map[string]map[string]string
-	for i, result := range searchResponse.Results {
-		metadata := result.Payload
-		if metadata != nil {
-			if metadataByID == nil {
-				metadataByID = make(map[string]map[string]string, len(searchResponse.Results))
-			}
-			metadataByID[result.Id] = metadata
-		}
-
-		candidates[i] = &reranker.Candidate{
-			Id:       result.Id,
-			Score:    result.Score,
-			Metadata: metadata,
-		}
-	}
-
-	rerankTopN := int(req.TopK)
-	if v, ok := cfg.RerankTopNOverrides[req.Collection]; ok && v > 0 {
-		rerankTopN = v
-	}
-
-	rerankTimeoutMs := cfg.RerankTimeoutMs
-	if v, ok := cfg.RerankTimeoutOverrides[req.Collection]; ok && v > 0 {
-		rerankTimeoutMs = v
-	}
-
-	if cfg.RerankWarmupEnabled && s.rerankWarmupCache != nil {
-		if !warmupKeySet {
-			warmupKey = computeSearchCacheKey(req)
-			warmupKeySet = true
-		}
-		s.startRerankWarmup(warmupKey, req, candidates, metadataByID, rerankTopN, rerankTimeoutMs)
-
-		sortSearchResults(searchResponse.Results)
-		if len(searchResponse.Results) > int(req.TopK) {
-			searchResponse.Results = searchResponse.Results[:req.TopK]
-		}
-		if err := s.maybeAttachVectors(ctx, req, searchResponse); err != nil {
-			return nil, err
-		}
-		if !req.GetIncludeVectors() {
-			s.setSearchCache(ctx, req, searchResponse, nil)
-		}
-		return searchResponse, nil
-	}
-
-	rerankReq := &reranker.RerankRequest{
-		Query:      req.Query, // Pass the query from the API Gateway's SearchRequest
-		Candidates: candidates,
-		TopN:       int32(rerankTopN),
-		Options:    map[string]string{"mode": cfg.RerankMode},
-	}
-
-	rerankCtx := ctx
-	var cancel context.CancelFunc
-	if rerankTimeoutMs > 0 {
-		rerankCtx, cancel = context.WithTimeout(ctx, time.Duration(rerankTimeoutMs)*time.Millisecond)
-		defer cancel()
-	}
-	rerankerClient, err := s.getRerankerClient(rerankCtx)
+	finalResponse, err := s.rerankSearchResponse(ctx, req, searchResponse)
 	if err != nil {
-		log.Println("Reranking failed, returning original results:", err)
-		sortSearchResults(searchResponse.Results)
-		if len(searchResponse.Results) > int(req.TopK) {
-			searchResponse.Results = searchResponse.Results[:req.TopK]
-		}
-		if err := s.maybeAttachVectors(ctx, req, searchResponse); err != nil {
-			return nil, err
-		}
-		if !req.GetIncludeVectors() {
-			s.setSearchCache(ctx, req, searchResponse, nil)
-		}
-		return searchResponse, nil
-	}
-	rerankResp, err := rerankerClient.Rerank(rerankCtx, rerankReq)
-	if err != nil {
-		log.Println("Reranking failed, returning original results:", err)
-		// Sort original results by score in descending order before returning
-		sortSearchResults(searchResponse.Results)
-		// Then truncate to TopK
-		if len(searchResponse.Results) > int(req.TopK) {
-			searchResponse.Results = searchResponse.Results[:req.TopK]
-		}
-		if err := s.maybeAttachVectors(ctx, req, searchResponse); err != nil {
-			return nil, err
-		}
-		if !req.GetIncludeVectors() {
-			s.setSearchCache(ctx, req, searchResponse, nil)
-		}
-		return searchResponse, nil
-	}
-
-	rerankedResults := make([]*pb.SearchResult, len(rerankResp.Results))
-	for i, result := range rerankResp.Results {
-		var payload map[string]string
-		if metadataByID != nil {
-			payload = metadataByID[result.Id]
-		}
-
-		rerankedResults[i] = &pb.SearchResult{
-			Id:      result.Id,
-			Score:   result.RerankScore,
-			Payload: payload,
-		}
-	}
-
-	finalResponse := &pb.SearchResponse{
-		Results: rerankedResults,
+		return nil, err
 	}
 	if err := s.maybeAttachVectors(ctx, req, finalResponse); err != nil {
 		return nil, err
