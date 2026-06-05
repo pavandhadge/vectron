@@ -1,0 +1,116 @@
+\chapter{Literature Survey}
+
+\section{Overview of Vector databases and where Vectron fits}
+Vector databases have emerged as a dedicated storage and retrieval tier for high-dimensional embeddings produced by modern neural models. These systems provide approximate nearest-neighbor (ANN) search capabilities, index structures for accelerated similarity queries, and operational features including sharding, replication, and persistence required for production deployments. Well-established open-source and commercial projects including Milvus, FAISS (originating from Meta), Weaviate, Pinecone, Qdrant, and ScaNN have each influenced the design space by trading off accuracy, latency, memory utilization, and scalability in varying configurations. 
+
+Milvus is positioned as a scalable, distributed vector database suitable for billion-scale vector collections with mixed workloads, albeit requiring substantial infrastructure investments. FAISS serves as a widely adopted similarity-search library providing numerous index types but lacking distributed coordination features. Weaviate emphasizes modularity and integrated machine learning tooling, while managed services such as Pinecone focus on thin-API, turnkey vector search experiences. Qdrant delivers excellent single-node performance with filtering and payload-based retrieval capabilities but exhibits limited distributed replication compared to Raft-based approaches.
+
+What distinguishes Vectron from existing solutions is its explicit focus on commodity hardware optimization. While current systems mandate server-grade infrastructure with substantial memory and compute resources, Vectron is engineered for efficient execution on modest hardware configurations, from legacy commodity machines to modern enterprise servers. This democratization of vector search is achieved through intelligent optimizations including int8 quantization, SIMD-accelerated distance computations, and multi-tier caching strategies.
+
+\section{Algorithmic building blocks (ANN methods)}
+A substantial portion of vector database research and engineering focuses on ANN algorithms and their implementation trade-offs:
+
+\begin{itemize}
+    \item \textbf{HNSW (Hierarchical Navigable Small World)} --- A graph-based ANN algorithm constructing multi-layer proximity graphs to achieve logarithmic-like search scaling with high recall at low latency. HNSW is widely adopted for its robust recall-latency trade-off and straightforward incremental update capabilities. However, it necessitates substantial memory overhead (typically 2-4 times raw vector size) for maintaining graph connectivity structures, limiting dataset sizes on commodity hardware.
+    
+    \item \textbf{IVF + PQ (Inverted File with Product Quantization)} --- A two-stage approach first assigning vectors to coarse clusters (IVF) then compressing residuals using product quantization (PQ) for memory and throughput optimization. IVF-PQ is commonly employed when disk/memory compression is essential for serving very large corpora.
+    
+    \item \textbf{ScaNN and related libraries} --- Google's ScaNN family explores multiple engineering optimizations including asymmetric hashing, SIMD-friendly distance approximations, and hybrid quantization to push the speed-accuracy frontier for large-scale datasets. Empirical comparisons demonstrate ScaNN's strong performance across speed-accuracy trade-off curves.
+    
+    \item \textbf{int8 Quantization} --- A technique converting float32 vectors to int8 representations, reducing memory requirements by 75 percent for cosine-normalized vectors. This technique proves particularly critical for enabling vector search on commodity hardware with constrained memory resources.
+\end{itemize}
+
+These algorithmic primitives are commonly composed within systems (e.g., HNSW indexes within FAISS or Weaviate; IVF-PQ within Milvus) to balance cost and quality for target workloads. Vectron implements a custom HNSW library with SIMD acceleration and int8 quantization specifically optimized for commodity hardware deployment scenarios.
+
+\section{System architectures and distributed design choices}
+When extending beyond single-node index implementations, practical vector databases must address partitioning, replication, coordination, and efficient query routing:
+
+\begin{itemize}
+    \item \textbf{Sharding / partitioning.} Popular systems partition vectors for horizontal scaling. Naive sharding (hash-based or round-robin) approaches are simple but may fragment semantic neighborhoods; semantic or topic-aware sharding (cluster-driven) yields improved locality of reference and reduces cross-shard query fan-out. Milvus and other databases provide built-in partitioning and sharding primitives for large-scale deployments.
+    
+    \item \textbf{Replication and durability.} Production deployments require persistence and replication layers for fault tolerance and rapid recovery. Approaches range from append-only segment files with checkpoints to integrated consensus layers or external metadata stores. Vectron utilizes Raft consensus (via Dragonboat) for both metadata and data replication, ensuring strong consistency guarantees.
+    
+    \item \textbf{Consensus and Consistency Guarantees.} Numerous existing vector databases adopt eventually consistent designs capable of returning stale results during replica synchronization periods. Vectron prioritizes strong consistency through Raft-based consensus, mitigating risks of stale results in freshness-sensitive applications requiring linearizable semantics.
+    
+    \item \textbf{Hybrid on-disk / in-memory tiering.} To accommodate billion-scale vector collections, systems combine compressed on-disk storage (utilizing PQ) with in-memory hot partitions (HNSW) and selective caching to achieve latency targets. Vectron implements a two-stage search pipeline with hot index for recent writes and mmap-backed cold index for historical data.
+\end{itemize}
+
+These architectural decisions determine real-world performance more significantly than raw index algorithm selection; they represent the control mechanisms a distributed vector database must provide to balance throughput, latency, cost, and recall metrics.
+
+\section{Feedback, adaptivity and learning from usage}
+A critical and relatively immature axis in the literature encompasses \textbf{feedback-driven or adaptive indexing and ranking} mechanisms:
+
+\begin{itemize}
+    \item \textbf{Relevance feedback and active learning.} The information retrieval community has studied relevance feedback and active learning for decades (e.g., SVM-based relevance feedback, query reweighting). These methodologies demonstrate how user signals can refine ranking and query intent models, particularly in low-supervision regimes.
+    
+    \item \textbf{Online index adaptation.} Some research explores adjusting index parameters (e.g., graph connectivity, per-shard thresholds, metric reweighting) based on observed query distributions. However, mainstream vector databases still treat the index as largely static at runtime, relying on offline reindexing for major parameter updates.
+    
+    \item \textbf{Reinforcement and learning-to-rank approaches.} A growing body of work frames index tuning and query routing as sequential decision problems benefiting from reinforcement learning or bandit algorithms to maximize long-term user satisfaction or throughput metrics. These directions prove promising for systems requiring continuous adaptation to evolving user behavior but remain uncommon in production vector database implementations.
+\end{itemize}
+
+In summary, while algorithmic ANN progress is mature and well-implemented across numerous projects, the integration of \textit{closed-loop learning} within the database (continuous feedback to real-time index/ranking parameter updates) remains an active research and engineering frontier.
+
+\section{Commodity Hardware Optimization}
+A critical and frequently overlooked aspect of vector database design involves hardware optimization strategies. The HNSW algorithm, having emerged as the dominant indexing approach for approximate nearest neighbor search in high-dimensional spaces, requires substantial memory overhead typically amounting to 2-4 times the raw vector data size for maintaining graph connectivity structures. This overhead constrains dataset sizes on commodity hardware and significantly increases operational costs.
+
+Key optimization techniques for commodity hardware execution include:
+
+\begin{itemize}
+    \item \textbf{Vector Quantization.} Converting float32 vectors to int8 representations reduces memory requirements by 75 percent for cosine-normalized vectors. Without compression, one billion vectors of 768 dimensions each requires approximately 3 terabytes of memory, which remains prohibitively expensive for most organizations. int8 quantization reduces this requirement to 768 gigabytes, fitting comfortably on high-memory servers or distributed across multiple commodity nodes.
+    
+    \item \textbf{SIMD Acceleration.} AVX2 and AVX-512 SIMD instructions enable parallel processing of distance computations, substantially improving throughput on compatible hardware. Runtime CPU feature detection ensures the system automatically selects the optimal code path based on available instruction set extensions.
+    
+    \item \textbf{Multi-Tier Caching Architecture.} Implementing multiple cache layers (gateway TinyLFU, distributed Redis/Valkey, worker-local) reduces redundant computation and network round-trips while maintaining configurable cache behavior through TTL and size parameters.
+    
+    \item \textbf{Hot/Cold Index Tiering.} Separating recently ingested vectors (hot index maintained in memory) from older data (cold index with memory-mapped storage) optimizes memory utilization while maintaining low latency for recent query patterns.
+\end{itemize}
+
+Vectron implements all these optimization techniques to achieve the objective of democratizing vector search by enabling execution on commodity hardware configurations.
+
+\section{Strengths and limits of existing solutions - research gaps}
+From the surveyed literature and system descriptions, we identify the following gaps motivating Vectron's development:
+
+\begin{enumerate}
+    \item \textbf{Enterprise-only hardware requirements.} Most existing vector databases mandate expensive server-grade infrastructure with substantial memory and compute resources. This constraint makes vector search inaccessible for organizations with limited budgets or those deploying on edge computing devices.
+    
+    \item \textbf{Static indices vs. dynamic semantics.} Most systems assume the metric space remains stationary between reindexing cycles. In practical scenarios, query distributions and label signals evolve; static indices necessitate frequent manual reindexing or expensive offline retraining for adaptation.
+    
+    \item \textbf{Limited strong consistency guarantees.} Many vector databases prioritize availability over consistency, adopting AP-mode designs (per CAP theorem) capable of returning stale results during replica synchronization. This proves problematic for freshness-sensitive applications requiring linearizable semantics.
+    
+    \item \textbf{Limited closed-loop feedback mechanisms.} While information retrieval research has extensively studied relevance feedback, vector databases rarely expose native mechanisms for ingesting implicit/explicit labels and utilizing them to adapt search/ranking policies during online operation.
+    
+    \item \textbf{Operational complexity challenges.} Building cost-efficient, fault-tolerant systems combining high recall, low latency, and reasonable storage requirements (via PQ/hybrid indexes) remains challenging and frequently necessitates bespoke engineering efforts.
+\end{enumerate}
+
+These gaps indicate significant research and product opportunities: a distributed vector database natively supporting commodity hardware optimization, strong consistency guarantees, topic-aware sharding, and ingestible feedback loops would substantially simplify and improve retrieval quality in production AI systems while making vector search accessible to broader audiences.
+
+\section{Problem definition for Vectron}
+Given the above survey, the concrete problem Vectron addresses is:
+
+\begin{itemize}
+    \item How can we design a distributed vector database that (a) preserves high recall and low latency at scale, (b) executes efficiently on commodity hardware from legacy machines to enterprise servers, (c) provides strong consistency guarantees through Raft consensus, and (d) continuously improves ranking and routing policies from real user feedback --- all while remaining operationally simple and accessible to diverse deployment scenarios?
+\end{itemize}
+
+This problem necessitates combining algorithmic ANN primitives (HNSW with SIMD acceleration and quantization) with system techniques (Raft consensus, multi-tier caching, hot/cold index tiering), and adding a feedback/control plane capable of safely adapting index and ranking parameters during online operation.
+
+\section{Objectives}
+To address the stated problem, Vectron's literature-informed objectives include:
+
+\begin{enumerate}[label=\textbf{\arabic*.}]
+    \item Implement HNSW indexing with SIMD acceleration (AVX2/AVX-512) and int8 quantization for memory efficiency on commodity hardware configurations.
+    
+    \item Design a Raft-based distributed architecture (via Dragonboat) for strong consistency in both metadata and vector data operations.
+    
+    \item Implement multi-tier caching (gateway TinyLFU, optional distributed Redis/Valkey, worker-local) for latency reduction.
+    
+    \item Implement a two-stage search pipeline with hot index for recent writes and mmap-backed cold index for historical data.
+    
+    \item Provide production-grade distributed primitives for persistence, replication, and fault tolerance alongside an evaluation framework measuring latency, throughput, and scalability on commodity hardware.
+    
+    \item Demonstrate that enterprise-grade vector search performance is achievable on modest hardware configurations without performance degradation.
+\end{enumerate}
+
+\section{Summary}
+The literature reveals two well-established trajectories: (1) mature ANN algorithms and libraries providing excellent single-node search primitives (HNSW, IVF-PQ, ScaNN, FAISS), and (2) distributed systems scaling those primitives (Milvus, Weaviate, Pinecone). The less mature but highly promising area involves commodity hardware optimization for vector search operations.
+
+Vectron positions itself at this intersection: building upon battle-tested ANN algorithmic foundations and distributed design patterns while incorporating SIMD acceleration, int8 quantization, and multi-tier caching specifically optimized for execution on modest hardware configurations. By democratizing vector search, Vectron enables organizations of varying scales to deploy high-performance semantic retrieval capabilities without infrastructure budget constraints.

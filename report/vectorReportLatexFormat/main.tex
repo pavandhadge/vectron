@@ -1,0 +1,86 @@
+\documentclass[12pt, a4paper]{report}
+\usepackage{float}
+\usepackage[utf8]{inputenc}
+\usepackage[]{times}
+\usepackage[]{geometry}
+\usepackage[]{graphicx}
+\usepackage[]{fancyhdr}
+\usepackage[]{setspace}
+\usepackage{amsmath}
+\usepackage[T1]{fontenc}
+\usepackage[]{acronym}
+\usepackage{titlesec}
+\usepackage{float}
+\usepackage{microtype}
+\usepackage{wrapfig}
+\usepackage{tocloft} % Required for customizing the list of figures
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{tocbibind}
+
+
+
+% Redefine the chapter format
+\titleformat{\chapter}[display]
+  {\normalfont\huge\bfseries}{\chaptertitlename\ \thechapter}{5pt}{\huge}
+
+\graphicspath{{figures/}}
+\spacing{1.5}
+
+\setlength{\headheight}{14.5pt}
+\addtolength{\topmargin}{-2.5pt}
+
+\geometry{margin=2.5cm, papersize={21cm,29.7cm}}
+\fontfamily{Times}
+
+
+\begin{document}
+
+\pagenumbering{roman}
+% Front matter of the report
+\include{pages/titlepage}
+\include{pages/certificate}
+\include{pages/project_report_approval}
+\include{pages/declaration}
+\include{pages/acknowledgement}
+\include{pages/abstract}
+\tableofcontents
+\clearpage
+% \newcommand{\listoftabfigures}{%
+%     \cleardoublepage%
+%     \phantomsection%
+%     \addcontentsline{toc}{section}{List of Figures}%
+%     \listoffigures%
+%     \begingroup%
+%     \let\oldnumberline\numberline%
+%     \renewcommand{\numberline}[1]{\figurename~##1:~}%
+%     \setlength{\cftfignumwidth}{3em}% Adjust the width of the number column as needed
+%     \setlength{\cftfigindent}{0em}% Adjust the indentation of the figure captions as needed
+%     \renewcommand{\cftfigaftersnum}{}%
+%     \renewcommand{\cftfigpresnum}{}%
+%     \tableofcontents%
+%     \endgroup%
+% }
+
+%\addcontentsline{toc}{chapter}{List of Figures}
+\listoftables
+
+
+
+\pagenumbering{arabic}
+% Main Matter of the Report
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\textbf{\nouppercase{\leftmark}}}
+\cfoot{\textit{Department of Artificial Intelligence and Machine Learning}}
+\rfoot{\textit{\thepage}}
+
+\include{chapters/Introduction}
+\include{chapters/Literature_survey}
+\include{chapters/Proposed_System}
+\include{chapters/Design_and_methodology}
+\include{chapters/result_and_discussion}
+\include{chapters/Conclusion}
+\include{chapters/Bib.tex}
+
+\end{document}

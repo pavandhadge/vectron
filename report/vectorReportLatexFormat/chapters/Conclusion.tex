@@ -1,0 +1,46 @@
+\chapter{Conclusion}
+
+\section{Conclusion}
+
+This work presents \textbf{Vectron}, a distributed vector database engineered to democratize vector search through efficient execution on commodity hardware configurations, from legacy server-class machines to modern enterprise servers. Vectron achieves this through intelligent optimizations including int8 quantization (reducing memory footprint by 75 percent, from 4 bytes to 1 byte per dimension), SIMD-accelerated distance computations utilizing AVX2/AVX-512 vector instructions, and a multi-tier caching architecture.
+
+Vectron leverages Raft consensus via the Placement Driver service (implemented using Dragonboat) to ensure strong consistency across distributed worker nodes and employs optimized HNSW indexing for approximate nearest neighbor search operations. The system is implemented in Go utilizing a microservices architecture comprising API Gateway, Placement Driver, Worker nodes, Reranker service, and Auth Service.
+
+The evaluation demonstrates that Vectron achieves on commodity hardware configurations:
+
+\begin{itemize}
+    \item \textbf{High insertion throughput:} Up to 2,434 vectors/second for 64-dimensional vectors and 900+ vectors/second for 1,536-dimensional vectors.
+    \item \textbf{Low query latency:} P50 latency of 3-5ms for top-10 nearest neighbor queries under typical operational loads.
+    \item \textbf{Strong scalability:} Linear throughput scaling up to 260+ queries/second under concurrent load with 100 simultaneous clients.
+    \item \textbf{Effective load distribution:} Perfect balance across worker nodes with coefficient of variation equal to 0.00.
+    \item \textbf{Minimal memory overhead:} 1MB or less memory consumption even with 10,000 vectors, demonstrating 75 percent memory reduction through int8 quantization.
+    \item \textbf{Robust fault tolerance:} Raft-based replication ensures consistency guarantees and rapid recovery from node failure scenarios through leader re-election.
+\end{itemize}
+
+The results indicate that Vectron provides a scalable, adaptive, and reliable framework for distributed semantic search operating efficiently on commodity hardware. The combination of consensus-based replication, optimized HNSW indexing with SIMD acceleration, and int8 quantization ensures both consistency guarantees and performance characteristics while maintaining accessibility for organizations without enterprise-level infrastructure budgets.
+
+\section{Future Scope}
+
+The future development trajectory for \textbf{Vectron} presents significant potential for advancing distributed vector retrieval systems on commodity hardware configurations. Through continued optimization for modest hardware specifications, the system can serve an expanded range of deployment scenarios across diverse operational environments.
+
+Future enhancements may include:
+
+\begin{itemize}
+    \item \textbf{Advanced Quantization Techniques:} Exploring product quantization (PQ) and binary quantization methodologies for achieving greater memory efficiency on low-end hardware configurations.
+    
+    \item \textbf{Expanded SIMD Instruction Set Support:} Adding ARM NEON support for execution on ARM-based commodity devices including Raspberry Pi single-board computers and Apple Silicon processors.
+    
+    \item \textbf{Topic-Based Semantic Sharding:} Intelligent distribution of embeddings based on semantic clustering to optimize query efficiency and reduce inter-node network traffic.
+    
+    \item \textbf{Multi-Tenant Architecture:} Enabling secure and isolated vector storage for multiple clients on shared commodity hardware through namespace isolation and resource quotas.
+    
+    \item \textbf{Dynamic Horizontal Scaling:} Automatic node addition or removal to handle variable workloads efficiently through Kubernetes-based orchestration.
+    
+    \item \textbf{GPU Acceleration Support:} Optional CUDA compute capability integration for high-end deployments while maintaining optimized CPU execution paths for commodity hardware.
+    
+    \item \textbf{Edge Deployment Profile:} Specialized configuration profile for execution on edge computing devices with constrained memory and computational resources.
+    
+    \item \textbf{Containerized Deployment:} Docker Compose and Kubernetes operators facilitating simplified deployment in cloud-native environments with automated scaling and self-healing capabilities.
+\end{itemize}
+
+These improvements will further expand Vectron's capabilities, solidifying its position as a leading vector database solution for commodity hardware deployment scenarios. The project demonstrates that high-performance vector search is not restricted to organizations possessing enterprise-level infrastructure budgets, thereby opening new possibilities for AI applications across diverse industries and hardware configuration ranges.

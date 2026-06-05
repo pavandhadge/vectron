@@ -117,3 +117,5 @@ temp_vectron_benchmark
 .gomodcache
 *.test
 profiles
+
+Microsoft/

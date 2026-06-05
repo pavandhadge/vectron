@@ -1,0 +1,93 @@
+\chapter{Introduction}
+
+\section{Introduction}
+
+In the contemporary landscape of artificial intelligence and machine learning, the capacity to store, process, and retrieve high-dimensional vector representations has emerged as a fundamental requirement across diverse domains including semantic search, recommender systems, natural language understanding, and generative AI applications. As large-scale neural models generate billions of dense embeddings to represent text, images, audio, and multimodal data, the necessity for efficient, intelligent, and adaptive retrieval systems has grown exponentially.
+
+Conventional relational and document-oriented databases, while effective for structured and transactional data processing, exhibit significant limitations when confronting continuous, high-dimensional embedding spaces. Their indexing mechanisms are not optimized for similarity metrics such as cosine distance or Euclidean distance, rendering them unsuitable for real-time semantic retrieval operations. This constraint has catalyzed the emergence of vector databases, specialized systems designed to manage and query embeddings utilizing Approximate Nearest Neighbor (ANN) algorithms for accelerated similarity search.
+
+However, existing vector database solutions such as Milvus, Pinecone, FAISS, and Weaviate predominantly operate as static retrieval systems necessitating expensive server-grade infrastructure with substantial memory and compute resources. These systems lack adaptivity, context-awareness, and the capability to execute on commodity hardware configurations. The memory overhead associated with HNSW indexing, combined with computational requirements for distance calculations on high-dimensional vectors, typically mandates specialized hardware, thereby constraining vector search accessibility for organizations with limited infrastructure budgets.
+
+This project introduces Vectron, a next-generation distributed vector database engineered to democratize vector search through efficient execution on commodity hardware, from legacy server-class machines to modern enterprise servers. Diverging from conventional systems, Vectron achieves this through intelligent optimizations including int8 quantization (reducing memory footprint by 75 percent), SIMD-accelerated distance computations (utilizing AVX2/AVX-512 vector instructions), and a multi-tier caching architecture.
+
+The system incorporates several key innovations distinguishing it from existing architectural approaches:
+
+\begin{enumerate}
+    \item \textbf{Commodity Hardware Optimization:} Vectron is specifically engineered for execution on modest hardware through int8 quantization (converting float32 to int8 representations, reducing per-vector storage from 4 bytes to 1 byte) and AVX2/AVX-512 SIMD acceleration for distance metric computations.
+    
+    \item \textbf{Raft-Based Distributed Architecture:} Vectron utilizes a Placement Driver cluster with Raft consensus (implemented via Dragonboat) for metadata management and per-shard Raft replication for vector data, ensuring strong consistency guarantees across distributed nodes.
+    
+    \item \textbf{HNSW with Performance Optimizations:} Worker nodes employ Hierarchical Navigable Small World graphs with SIMD-accelerated distance computation, int8 quantization for cosine-normalized vectors, and a two-stage search pipeline with hot and cold index tiering for memory efficiency.
+    
+    \item \textbf{Multi-Tier Caching Strategy:} Vectron implements gateway-level TinyLFU caching (sharded for concurrent access), optional distributed Redis/Valkey caching for cross-instance sharing, and worker-local search caches to minimize redundant computation and network round-trips.
+    
+    \item \textbf{Feedback-Driven Reranking:} An optional Reranker service processes user feedback signals to dynamically reorder search results, iteratively improving relevance metrics over time.
+\end{enumerate}
+
+By integrating advanced ANN algorithmic techniques with a commodity-hardware-first architectural approach, Vectron bridges the gap between enterprise-grade vector database solutions and accessible infrastructure, enabling organizations of varying scales to deploy vector search capabilities without infrastructure budget constraints.
+
+Through this project, we aim to contribute to the broader objective of democratizing AI infrastructure making intelligent retrieval capabilities accessible to all stakeholders, not exclusively those possessing enterprise-level budgets. This research holds implications across multiple domains, encompassing conversational agents, search engines, recommendation systems, and memory-augmented large language models executing on modest hardware configurations.
+
+
+\section{Need of Project}
+
+The exponential proliferation of embedding-based AI applications has generated an urgent demand for scalable vector database solutions; however, existing implementations necessitate expensive server-grade infrastructure with substantial memory and computational resources. A collection of one billion vectors with 768 dimensions requires approximately 3 terabytes of memory for raw storage alone, plus additional overhead for HNSW graph connectivity structures, rendering this configuration prohibitively expensive for most operational environments.
+
+Current vector database implementations function predominantly as passive repositories, retrieving information based on static similarity metrics without providing the optimizations required for execution on commodity hardware. The computational overhead associated with distance calculations on high-dimensional vectors, combined with memory requirements for graph-based indexing structures, typically necessitates specialized hardware specifications that exceed the capabilities of commodity systems.
+
+Moreover, distributed vector databases frequently prioritize availability over consistency, adopting eventually consistent designs capable of returning stale results during replica synchronization periods. This design trade-off proves problematic for freshness-sensitive applications including recommendation systems, inventory management, and transaction monitoring. Organizations require a system providing strong consistency guarantees while maintaining deployability on modest hardware configurations.
+
+Vectron addresses these critical challenges by introducing an optimized distributed vector database engineered specifically for commodity hardware execution. Its architectural design enables:
+
+\begin{enumerate}
+    \item Efficient operation on older commodity hardware through intelligent quantization and SIMD optimization techniques.
+    \item Strong consistency through Raft-based consensus applied to both metadata and vector data operations.
+    \item Low-latency query execution (P50 of 3-5ms for typical workloads) through multi-tier caching and optimized HNSW indexing with logarithmic search complexity.
+    \item Horizontal scalability while maintaining balanced load distribution across worker nodes through failure-domain-aware replica placement.
+\end{enumerate}
+
+ 
+\noindent Consequently, the need for this project emerges from the intersection of three contemporary requirements: democratization, scalability, and accessibility all of which Vectron fulfills through an optimized, commodity-hardware-first architectural approach.
+
+\section{Scope}
+
+The scope of Vectron encompasses the research, design, and implementation of a distributed vector database capable of executing efficiently on commodity hardware while delivering robust performance characteristics. The project includes:
+
+\begin{enumerate}
+
+    \item \textbf{HNSW Implementation with SIMD Optimization:} Development of a custom HNSW implementation utilizing AVX2/AVX-512 accelerated distance computations and int8 quantization for memory efficiency.
+    
+    \item \textbf{Raft-Based Distributed Coordination:} Implementation of a Placement Driver cluster utilizing Raft consensus (via Dragonboat) for metadata management, shard assignment, and worker health monitoring.
+    
+    \item \textbf{Worker Nodes with Per-Shard Raft Replication:} Each worker node hosts multiple shard replicas under Raft consensus for vector data replication and strong consistency guarantees.
+    
+    \item \textbf{Multi-Tier Caching System:} Integration of gateway-level TinyLFU caching, optional distributed Redis/Valkey caching, and worker-local caches for latency reduction.
+    
+    \item \textbf{Authentication and Security:} Implementation of Auth Service with JWT-based authentication and API key management for secure multi-tenant access control.
+    
+    \item \textbf{API Gateway:} Development of a unified entry point providing REST/gRPC APIs for vector operations, collection management, and system monitoring.
+    
+    \item \textbf{Evaluation Framework:} Comprehensive benchmarks measuring throughput, latency, scalability, and performance under concurrent load conditions on commodity hardware.
+     
+\end{enumerate}
+
+The project explores the engineering challenges associated with making vector search accessible on modest hardware without sacrificing performance characteristics. Through intelligent optimizations including int8 quantization and SIMD acceleration, Vectron demonstrates that high-performance vector search is not restricted to organizations possessing enterprise-level infrastructure budgets.
+
+By the conclusion of this project, Vectron delivers a fully functional prototype demonstrating efficient operation on commodity hardware, robust horizontal scalability, and practical usability across diverse real-world AI application scenarios.
+
+
+\section{Organization of the report}
+
+The report is systematically structured into six chapters to ensure clarity and progression from conceptual foundation to implementation details:
+
+\noindent Chapter 1 establishes the conceptual foundation of the project, introducing the motivation, need, scope, and overarching objectives of Vectron, with specific emphasis on commodity hardware optimization.
+
+\noindent Chapter 2 presents a comprehensive literature survey, analyzing existing research on vector databases, distributed storage systems, approximate nearest neighbor algorithms, and adaptive retrieval frameworks. It highlights the research gaps motivating Vectron's development, particularly the lack of commodity hardware optimization in existing solutions.
+
+\noindent Chapter 3 details the proposed architecture, explaining the functioning of each module including the API Gateway, Placement Driver, Worker nodes, Reranker service, and Auth Service, demonstrating how they integrate to form the Vectron system with emphasis on technical implementation details.
+
+\noindent Chapter 4 (Design of Test and Result of Test) discusses the testing procedure, experimental setup, and key observations obtained from the implementation, including analysis of system performance with respect to latency (P50 of 3-5ms), throughput, recall, and scalability on commodity hardware configurations.
+
+\noindent Chapter 5 (Conclusion and Future Scope) summarizes the work completed, highlights the principal findings, and outlines future improvements including advanced quantization techniques, expanded SIMD instruction set support, and deployment as a scalable cloud service.
+
+\noindent Chapter 6 (Bibliography) provides a comprehensive list of research papers, documentation, and online resources consulted during the design and development of the project.
