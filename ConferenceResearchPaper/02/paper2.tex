@@ -1,6 +1,7 @@
 \documentclass[conference]{IEEEtran}
 \usepackage{amsmath,amssymb,amsthm}
 \usepackage{cite}
+\usepackage{tabularx}
 
 \newtheorem{theorem}{Theorem}[section]
 \newtheorem{lemma}[theorem]{Lemma}
@@ -114,24 +115,68 @@ Table~\ref{tab:novelty} summarizes how the proposed framework differs from prior
 \centering
 \small
 \renewcommand{\arraystretch}{1.15}
-\begin{tabular}{@{}p{2.2cm} p{2.5cm} p{2.5cm} p{2.5cm}@{}}
-\toprule
-\textbf{Approach} & \textbf{Focus} & \textbf{Limitation} & \textbf{Our Contribution} \\
-\midrule
-CAP Theorem~\cite{brewer2000cap} & Consistency vs Availability during partitions & Single tradeoff class, binary model & Multi-plane continuous tradeoff model \\
-PACELC~\cite{pacelc} & Latency vs Consistency & Two dimensions only, no operational governance & Five policy planes with interaction model \\
-Dynamo~\cite{dynamo} & Tunable consistency via quorums & Database-specific, single-plane view & System-agnostic cross-plane governance \\
-Spanner~\cite{spanner} & External consistency via TrueTime & Hardware-dependent, not generalizable & System-agnostic design rules \\
-Raft~\cite{raft} & Understandable consensus & Single protocol, no tradeoff framework & Configure \textit{how} consensus decisions are governed \\
-SRE~\cite{sre} & Error budgets, SLOs, operations & Runtime only, no design-time connection & Design + runtime tradeoff framework \\
-Chaos Engineering~\cite{chaos} & Resilience testing via failure injection & Tests existing configs, does not guide design & Proactive design to reduce need for probing \\
-Policy Architecture~\cite{policyarch} & Declarative configuration & No theory of which policies or how they interact & Minimal policy set with derived interaction model \\
-Kubernetes OPA/Gatekeeper & Runtime admission control & No tradeoff optimization or decision calculus & Decision calculus for multi-objective policy selection \\
-Jepsen~\cite{jepsen} & Empirical consistency verification & Retrospective, tests deployed systems & Proactive design framework for tradeoff visibility \\
-\bottomrule
-\end{tabular}
-\end{table}
 
+\begin{tabularx}{\columnwidth}{@{}p{1.8cm}X X X@{}}
+\toprule
+\textbf{Approach} &
+\textbf{Focus} &
+\textbf{Limitation} &
+\textbf{Our Contribution} \\
+\midrule
+
+CAP Theorem~\cite{brewer2000cap}
+& Consistency vs Availability during partitions
+& Single tradeoff class, binary model
+& Multi-plane continuous tradeoff model \\
+
+PACELC~\cite{pacelc}
+& Latency vs Consistency
+& Two dimensions only, no operational governance
+& Five policy planes with interaction model \\
+
+Dynamo~\cite{dynamo}
+& Tunable consistency via quorums
+& Database-specific, single-plane view
+& System-agnostic cross-plane governance \\
+
+Spanner~\cite{spanner}
+& External consistency via TrueTime
+& Hardware-dependent, not generalizable
+& System-agnostic design rules \\
+
+Raft~\cite{raft}
+& Understandable consensus
+& Single protocol, no tradeoff framework
+& Configure how consensus decisions are governed \\
+
+SRE~\cite{sre}
+& Error budgets, SLOs, operations
+& Runtime only, no design-time connection
+& Design + runtime tradeoff framework \\
+
+Chaos Engineering~\cite{chaos}
+& Resilience testing via failure injection
+& Tests existing configs, does not guide design
+& Proactive design to reduce need for probing \\
+
+Policy Architecture~\cite{policyarch}
+& Declarative configuration
+& No theory of which policies or how they interact
+& Minimal policy set with derived interaction model \\
+
+Kubernetes OPA/Gatekeeper
+& Runtime admission control
+& No tradeoff optimization or decision calculus
+& Decision calculus for multi-objective policy selection \\
+
+Jepsen~\cite{jepsen}
+& Empirical consistency verification
+& Retrospective, tests deployed systems
+& Proactive design framework for tradeoff visibility \\
+
+\bottomrule
+\end{tabularx}
+\end{table}
 \section{Problem Formulation}
 \label{sec:problem}
 
@@ -287,6 +332,7 @@ A distributed system must preserve declared semantics under stress or fail expli
 
 \begin{figure}[t]
 \centering
+\resizebox{\columnwidth}{!}{%
 \begin{tikzpicture}[
     node distance=0.4cm,
     rule/.style={rectangle, draw, fill=rulecolor!10, rounded corners, minimum width=2.2cm, minimum height=0.55cm, align=center, font=\scriptsize},
@@ -318,6 +364,7 @@ A distributed system must preserve declared semantics under stress or fail expli
 
     \node[font=\scriptsize, below=0.35cm of p1] {Distributed System};
 \end{tikzpicture}
+}
 \caption{The six rules and five policy planes. Rules 1--6 form a dependency chain: explicitness enables boundaries, which enable reversibility, which enables observability, which enables governance, which enables robustness. The five policy planes operationalize the rules within the distributed system.}
 \label{fig:rules-planes}
 \end{figure}
@@ -422,8 +469,12 @@ Tradeoff-explicit practice benefits from a lightweight formalism for policy sele
 Let each policy profile $p$ produce outcome scores for consistency ($C_p$), latency ($L_p$), durability ($D_p$), quality ($Q_p$), and cost efficiency ($E_p$). Each score is measured according to production telemetry and normalized to $[0, 1]$ using min-max scaling over the feasible range for the workload:
 
 \begin{equation}
-j_p = \frac{j_{\text{max}} - \hat{j}_p}{j_{\text{max}} - j_{\text{min}}} \quad \text{for latency and cost} \qquad
-j_p = \frac{\hat{j}_p - j_{\text{min}}}{j_{\text{max}} - j_{\text{min}}} \quad \text{for consistency, durability, quality}
+\begin{aligned}
+j_p &= \frac{j_{\max}-\hat{j}_p}{j_{\max}-j_{\min}},
+&& \text{for latency and cost,} \\
+j_p &= \frac{\hat{j}_p-j_{\min}}{j_{\max}-j_{\min}},
+&& \text{for consistency, durability, and quality.}
+\end{aligned}
 \end{equation}
 
 These follow from requiring best and worst feasible values to map to 1 and 0. For latency and cost (lower is better), require $N(j_{\min}) = 1$ and $N(j_{\max}) = 0$. Assume linear $N(j) = a + bj$. Applying constraints: $1 = a + b j_{\min}$, $0 = a + b j_{\max}$. Subtracting gives $b = -1/(j_{\max} - j_{\min})$, then $a = j_{\max}/(j_{\max} - j_{\min})$, yielding $N(j) = (j_{\max} - j)/(j_{\max} - j_{\min})$, matching the left formula. For consistency, durability, quality (higher is better), require $N(j_{\min}) = 0$ and $N(j_{\max}) = 1$, which gives $N(j) = (j - j_{\min})/(j_{\max} - j_{\min})$, matching the right formula.
@@ -478,16 +529,30 @@ To illustrate the decision calculus with a concrete example, we describe a hypot
 For the hypothetical benchmark scenario, the following representative values are used:
 
 \begin{table}[h]
+\caption{Raw benchmark measurements}
 \centering
 \small
-\begin{tabular}{@{}l c c c c c@{}}
+\renewcommand{\arraystretch}{1.1}
+
+\begin{tabularx}{\columnwidth}{@{}lXXXXX@{}}
 \toprule
-Raw Metric & $C_p$ (stale, s) & $L_p$ (p99, ms) & $D_p$ (window, s) & $Q_p$ (recall) & $E_p$ (req/CPU-s)\\
+\textbf{Raw Metric} &
+\textbf{$C_p$} &
+\textbf{$L_p$} &
+\textbf{$D_p$} &
+\textbf{$Q_p$} &
+\textbf{$E_p$} \\
+&
+(stale, s) &
+(p99, ms) &
+(window, s) &
+(recall) &
+(req/CPU-s) \\
 \midrule
-$p_1$ (Strict) & 0.02 & 42 & 0.01 & 0.95 & 850 \\
+$p_1$ (Strict)  & 0.02 & 42 & 0.01 & 0.95 & 850 \\
 $p_2$ (Bounded) & 2.10 & 18 & 15.00 & 0.85 & 2400 \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{table}
 
 \vspace{-2mm}\noindent\small Values represent mean measurements across 10 benchmark runs; coefficient of variation was below 6\% for all metrics.
@@ -513,15 +578,22 @@ For a financial transaction workload, stakeholder pairwise comparisons (via AHP 
 $w_C = 0.35, w_L = 0.20, w_D = 0.25, w_Q = 0.10, w_E = 0.10$ (CR = 0.03, well below the 0.10 threshold).
 
 \subsubsection{Computation}
-The weighted scores are:
-\[
-\begin{aligned}
-p_1 &= 0.35(0.996) + 0.20(0.644) + 0.25(0.999) + 0.10(0.900) + 0.10(0.140) \\
-    &= 0.3486 + 0.1288 + 0.2498 + 0.0900 + 0.0140 = 0.831 \\
-p_2 &= 0.35(0.580) + 0.20(0.911) + 0.25(0.500) + 0.10(0.700) + 0.10(0.760) \\
-    &= 0.2030 + 0.1822 + 0.1250 + 0.0700 + 0.0760 = 0.656
-\end{aligned}
-\]
+
+The weighted scores are
+
+\begin{align}
+p_1 &= 0.35(0.996)+0.20(0.644)+0.25(0.999) \nonumber\\
+    &\quad +0.10(0.900)+0.10(0.140) \nonumber\\
+    &=0.3486+0.1288+0.2498 \nonumber\\
+    &\quad +0.0900+0.0140=0.831
+\end{align}
+
+\begin{align}
+p_2 &=0.35(0.580)+0.20(0.911)+0.25(0.500) \nonumber\\
+    &\quad +0.10(0.700)+0.10(0.760) \nonumber\\
+    &=0.2030+0.1822+0.1250 \nonumber\\
+    &\quad +0.0700+0.0760=0.656
+\end{align}
 
 The strict consistency profile $p_1$ is preferred (score 0.831 vs 0.656). For a content delivery workload with different weights ($w_C = 0.10, w_L = 0.35, w_D = 0.15, w_Q = 0.15, w_E = 0.25$, guardrail: minimum $Q \geq 0.50$), $p_2$ scores 0.747 vs $p_1$'s 0.645, and the bounded staleness profile is preferred.
 
